@@ -47,6 +47,35 @@ const FORBIDDEN_KEYS = [
 
 export type ForbiddenTelemetryKey = (typeof FORBIDDEN_KEYS)[number];
 
+export function classifyAuthProviderOutcome(
+  pathname: string,
+  status: number,
+  location: string | null,
+): ProviderOutcome {
+  const isAuthOperation =
+    pathname === "/api/sign-in" ||
+    pathname.startsWith("/api/auth/callback/");
+  if (!isAuthOperation) return "none";
+  if (status >= 400) return "error";
+
+  if (location) {
+    try {
+      const destination = new URL(location, "https://telemetry.invalid");
+      if (
+        destination.pathname === "/sign-in" &&
+        (destination.searchParams.get("outcome") === "denied" ||
+          destination.searchParams.has("error"))
+      ) {
+        return "error";
+      }
+    } catch {
+      return "error";
+    }
+  }
+
+  return "ok";
+}
+
 export function isForbiddenTelemetryKey(
   key: string,
 ): key is ForbiddenTelemetryKey {

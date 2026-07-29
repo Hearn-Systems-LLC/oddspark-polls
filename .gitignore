@@ -19,7 +19,7 @@ dist/
 
 # Cloudflare / local secrets
 .wrangler/
-.dev.vars
+.dev.vars*
 .env
 .env.*
 !.dev.vars.example

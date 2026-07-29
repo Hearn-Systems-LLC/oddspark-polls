@@ -1,0 +1,123 @@
+---
+import ButtonSecondary from "../components/button-secondary.astro";
+import BaseLayout from "../layouts/base-layout.astro";
+import {
+  resolveSignInPageOutcome,
+  validateReturnAddress,
+} from "../modules/identity/index";
+
+const returnAddress = validateReturnAddress(
+  Astro.url.searchParams.get("return"),
+);
+const outcome = resolveSignInPageOutcome(
+  Astro.url.searchParams.get("outcome"),
+  Astro.url.searchParams.get("reason"),
+);
+const outcomeKind =
+  Astro.url.searchParams.get("outcome") === "denied" ? "denied" : "expired";
+---
+
+<BaseLayout title={outcome?.title ?? "Sign in — Oddspark Polls"}>
+  <main class="sign-in-shell">
+    {
+      outcome && (
+        <p
+          class="outcome-line"
+          data-outcome={outcomeKind}
+          tabindex="-1"
+          autofocus
+        >
+          {outcome.message}
+        </p>
+      )
+    }
+
+    <section class="sign-in-entry" aria-labelledby="sign-in-heading">
+      <h1 id="sign-in-heading">Sign in to create a Poll</h1>
+
+      <div class="provider-actions">
+        <form method="post" action="/api/sign-in">
+          <input type="hidden" name="provider" value="google" />
+          <input type="hidden" name="return" value={returnAddress} />
+          <ButtonSecondary type="submit" class="provider-button">
+            CONTINUE WITH GOOGLE
+          </ButtonSecondary>
+        </form>
+
+        <form method="post" action="/api/sign-in">
+          <input type="hidden" name="provider" value="github" />
+          <input type="hidden" name="return" value={returnAddress} />
+          <ButtonSecondary type="submit" class="provider-button">
+            CONTINUE WITH GITHUB
+          </ButtonSecondary>
+        </form>
+      </div>
+
+      <p class="account-note">Voting never needs an account.</p>
+    </section>
+  </main>
+
+  {
+    outcome && (
+      <script is:inline>
+        document.querySelector("[data-outcome]")?.focus({ preventScroll: true });
+      </script>
+    )
+  }
+</BaseLayout>
+
+<style>
+  .sign-in-shell {
+    display: grid;
+    align-content: center;
+    width: min(100%, var(--space-measure));
+    min-height: 100dvh;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-margin-mobile);
+  }
+
+  .sign-in-entry {
+    width: min(100%, 36rem);
+    margin-inline: auto;
+  }
+
+  h1 {
+    margin: 0 0 var(--space-6);
+    font-family: var(--font-human);
+    font-size: var(--type-heading-lg-size);
+    font-weight: 400;
+    line-height: var(--type-heading-lg-lh);
+  }
+
+  .provider-actions {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  form {
+    display: grid;
+    width: 100%;
+  }
+
+  .account-note,
+  .outcome-line {
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  .account-note {
+    margin: var(--space-4) 0 0;
+    color: var(--color-dim);
+  }
+
+  .outcome-line {
+    width: min(100%, 36rem);
+    margin: 0 auto var(--space-6);
+  }
+
+  @media (min-width: 640px) {
+    .sign-in-shell {
+      padding-inline: var(--space-margin-desktop);
+    }
+  }
+</style>

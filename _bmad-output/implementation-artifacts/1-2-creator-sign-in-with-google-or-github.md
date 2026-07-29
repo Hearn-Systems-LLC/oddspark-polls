@@ -1,6 +1,10 @@
+---
+baseline_commit: 13fa2f57809c210978d6872ce7f241410f913ddb
+---
+
 # Story 1.2: Creator Sign-In with Google or GitHub
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -21,38 +25,38 @@ so that I can create and manage my own Polls without a new account or password.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Better Auth adapter — per-request factory on D1 (AC: #2)
-  - [ ] Install `better-auth@1.6.25` (exact pin). Implement `src/adapters/auth/` as a `createAuth(env)` factory — env bindings are NOT available at Workers module top level; get env via `context.locals.runtime.env` (Astro Cloudflare adapter). Memoize per-isolate if desired
-  - [ ] Config: `database: env.DB` (direct D1 binding — Better Auth ≥1.5 auto-detects D1 via its built-in Kysely dialect; no extra packages, no ORM), `secret: env.BETTER_AUTH_SECRET`, `baseURL` per environment (missing baseURL ⇒ redirect_uri_mismatch), `trustedOrigins` for the env's origin, `socialProviders: { google: {clientId, clientSecret}, github: {clientId, clientSecret} }`; email/password stays absent (disabled by default)
-  - [ ] Map every Better Auth model/field to snake_case via explicit `fields` mapping per model (`user`, `session`, `account`, `verification` — e.g. `emailVerified: "email_verified"`, `createdAt: "created_at"`); do NOT rely on a `casing` option (unverified in 1.6.25) or Kysely CamelCasePlugin (unsupported)
-  - [ ] Mount the handler at the existing pass-through path: `src/pages/api/auth/[...all].ts` with `export const ALL: APIRoute = (ctx) => createAuth(...).handler(ctx.request)` — `BETTER_AUTH_MOUNT_PATH` is already `/api/auth` in `src/lib/csrf.ts`
-- [ ] Task 2: Auth schema migration (AC: #2)
-  - [ ] Add `db/migrations/0002_identity_auth.sql`: snake_case `user`, `session`, `account`, `verification` tables matching the field mapping (user: id/name/email unique/email_verified/image/created_at/updated_at; session: id/expires_at/token unique/ip_address/user_agent/user_id FK cascade/created_at/updated_at; account: id/account_id/provider_id/user_id FK/token+expiry columns/scope/password unused/created_at/updated_at; verification: id/identifier/value/expires_at/created_at/updated_at); UTC Unix ms INTEGER for all timestamps per Consistency Conventions; internal user id = UUID string
-  - [ ] Generate the reference SQL with `npx @better-auth/cli generate` against the real config (so mappings apply), then hand-shape to project conventions; CLI runs in Node without bindings — config must tolerate absent env at CLI time (stub DB)
-  - [ ] Regenerate `db/migrations.manifest.json` via `scripts/migrations-checksum.mjs` (the guard from 1.1 rejects unlisted migrations); apply local → staging → production
-- [ ] Task 3: Session extraction in middleware + CSRF token wiring (AC: #2, #4, #5)
-  - [ ] Extend `src/middleware.ts` (single chain, AD-22): after request context, resolve `createAuth(env).api.getSession({ headers: context.request.headers })`; populate `context.locals` session principal (internal user id, session) — `src/lib/request-context.ts` grows a nullable principal; spine: middleware does "session extraction and request context only"
-  - [ ] Wire the 1.1 stub into reality: session-bound CSRF token (derive/store per session; `X-CSRF-Token` header / `csrf_token` form field names already fixed by `createSessionCsrfTokenStub`), required on authenticated creator/admin form POSTs — `checkCsrf`'s `requireSessionToken` branch already exists; replace the stub issuance with real issuance
-  - [ ] Creator-surface guard: unauthenticated or expired-session requests to `/creator*` routes → 303 redirect to `/sign-in?return={path}` with the Voice line context (expired ⇒ "You've been signed out.")
-  - [ ] Return-address validation (AC #4 exact rule): accept only same-origin relative paths — must start with single `/`, reject `//`, `\`, absolute URLs, schemes; violations fall back to `/creator`. Pure function in `src/modules/identity/` or `src/lib/`, unit-tested against open-redirect payloads
-- [ ] Task 4: `/sign-in` page + no-JS server-posted sign-in (AC: #1, #3)
-  - [ ] `src/pages/sign-in.astro`: centered single column; `heading-lg` line; two full-width `button-secondary` submit buttons `CONTINUE WITH GOOGLE` / `CONTINUE WITH GITHUB` stacked `spacing.3` (12px) apart; `caption`/`dim` note that voting never needs an account; no vendor logos or brand colors; reuse the existing `button-secondary.astro` primitive — never restyle
-  - [ ] Each button is a plain HTML `<form method="post">` to our own endpoint (guaranteed no-JS path — form-urlencoded direct to Better Auth's `/sign-in/social` is NOT verified for 1.6.25): endpoint calls `auth.api.signInSocial({ body: { provider, callbackURL, errorCallbackURL, disableRedirect: true }, headers })` and issues the redirect itself (303 to the provider URL)
-  - [ ] `callbackURL` = validated return address (default `/creator`); `errorCallbackURL` = `/sign-in` variant that renders the denial Voice line
-  - [ ] Carry `return` through the round-trip (hidden form field → callbackURL); re-validate server-side at every hop
-- [ ] Task 5: Outcome renders per the post-submit contract (AC: #2, #3, #5)
-  - [ ] Signed-in return, denial, and expiry renders: outcome line is `tabindex="-1"`, first content in the main landmark, focused on load; document `<title>` leads with outcome — exact strings `Signed in — Oddspark Polls`, `That didn't sign you in — Oddspark Polls`
-  - [ ] Voice catalog verbatim: denial "That didn't sign you in. Nothing was created, and nothing was lost — the create form is right where you left it."; expiry "You've been signed out. Sign back in to pick up where you left off."; copy is layout-neutral, no exclamation marks
-  - [ ] Minimal guarded `/creator` landing target (placeholder page proving the guard + post-sign-in return; the real dashboard is Story 1.11 — do not build lists/counts)
-- [ ] Task 6: Per-environment OAuth apps + secrets + README (AC: #6)
-  - [ ] Document in README: six OAuth apps (Google + GitHub × local/staging/production), authorized redirect URIs exactly `{baseURL}/api/auth/callback/google` and `{baseURL}/api/auth/callback/github` per environment (staging/production Worker URLs from 1.1; local `http://localhost:4321`)
-  - [ ] Secrets per environment via `wrangler secret put` (staging/production) and `.dev.vars` (local): `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` — names already reserved in `.dev.vars.example`; add `BETTER_AUTH_URL` (or set baseURL from env config); never in `wrangler.jsonc` vars
-  - [ ] Provision the real apps and store secrets for local + staging at minimum (de-risk rule #3 demands a real round-trip on staging); production before story-done
-- [ ] Task 7: Tests — the de-risk gate (AC: #2, #3, #4, #5)
-  - [ ] Unit: return-address validator (payloads: `https://evil.example`, `//evil.example`, `/\evil`, `javascript:`, empty, valid `/creator/new`); CSRF session-token branch with real issuance
-  - [ ] Integration (workerd pool): guard redirects signed-out `/creator` request to `/sign-in?return=/creator`; session extraction populates principal; auth tables accept Better Auth writes (adapter contract against local D1)
-  - [ ] E2E (Playwright): sign-in page renders both buttons and caption without JS errors; guard redirect round-trip. Full OAuth e2e against real providers is manual — record the staging validation (both providers) in Dev Agent Record instead of automating consent screens
-  - [ ] Manual validation (blocking, de-risk rule #3): complete Google and GitHub round-trips on local workerd AND staging; verify D1 rows (internal UUID user id; account row maps provider pair; session row) and cookie `__Secure-better-auth.session_token` on staging
+- [x] Task 1: Better Auth adapter — per-request factory on D1 (AC: #2)
+  - [x] Install `better-auth@1.6.25` (exact pin). Implement `src/adapters/auth/` as a `createAuth(env)` factory — env bindings are NOT available at Workers module top level; get env via `context.locals.runtime.env` (Astro Cloudflare adapter). Memoize per-isolate if desired
+  - [x] Config: `database: env.DB` (direct D1 binding — Better Auth ≥1.5 auto-detects D1 via its built-in Kysely dialect; no extra packages, no ORM), `secret: env.BETTER_AUTH_SECRET`, `baseURL` per environment (missing baseURL ⇒ redirect_uri_mismatch), `trustedOrigins` for the env's origin, `socialProviders: { google: {clientId, clientSecret}, github: {clientId, clientSecret} }`; email/password stays absent (disabled by default)
+  - [x] Map every Better Auth model/field to snake_case via explicit `fields` mapping per model (`user`, `session`, `account`, `verification` — e.g. `emailVerified: "email_verified"`, `createdAt: "created_at"`); do NOT rely on a `casing` option (unverified in 1.6.25) or Kysely CamelCasePlugin (unsupported)
+  - [x] Mount the handler at the existing pass-through path: `src/pages/api/auth/[...all].ts` with `export const ALL: APIRoute = (ctx) => createAuth(...).handler(ctx.request)` — `BETTER_AUTH_MOUNT_PATH` is already `/api/auth` in `src/lib/csrf.ts`
+- [x] Task 2: Auth schema migration (AC: #2)
+  - [x] Add `db/migrations/0002_identity_auth.sql`: snake_case `user`, `session`, `account`, `verification` tables matching the field mapping (user: id/name/email unique/email_verified/image/created_at/updated_at; session: id/expires_at/token unique/ip_address/user_agent/user_id FK cascade/created_at/updated_at; account: id/account_id/provider_id/user_id FK/token+expiry columns/scope/password unused/created_at/updated_at; verification: id/identifier/value/expires_at/created_at/updated_at); UTC Unix ms INTEGER for all timestamps per Consistency Conventions; internal user id = UUID string
+  - [x] Generate the reference SQL with `npx @better-auth/cli generate` against the real config (so mappings apply), then hand-shape to project conventions; CLI runs in Node without bindings — config must tolerate absent env at CLI time (stub DB)
+  - [x] Regenerate `db/migrations.manifest.json` via `scripts/migrations-checksum.mjs` (the guard from 1.1 rejects unlisted migrations); apply local → staging → production
+- [x] Task 3: Session extraction in middleware + CSRF token wiring (AC: #2, #4, #5)
+  - [x] Extend `src/middleware.ts` (single chain, AD-22): after request context, resolve `createAuth(env).api.getSession({ headers: context.request.headers })`; populate `context.locals` session principal (internal user id, session) — `src/lib/request-context.ts` grows a nullable principal; spine: middleware does "session extraction and request context only"
+  - [x] Wire the 1.1 stub into reality: session-bound CSRF token (derive/store per session; `X-CSRF-Token` header / `csrf_token` form field names already fixed by `createSessionCsrfTokenStub`), required on authenticated creator/admin form POSTs — `checkCsrf`'s `requireSessionToken` branch already exists; replace the stub issuance with real issuance
+  - [x] Creator-surface guard: unauthenticated or expired-session requests to `/creator*` routes → 303 redirect to `/sign-in?return={path}` with the Voice line context (expired ⇒ "You've been signed out.")
+  - [x] Return-address validation (AC #4 exact rule): accept only same-origin relative paths — must start with single `/`, reject `//`, `\`, absolute URLs, schemes; violations fall back to `/creator`. Pure function in `src/modules/identity/` or `src/lib/`, unit-tested against open-redirect payloads
+- [x] Task 4: `/sign-in` page + no-JS server-posted sign-in (AC: #1, #3)
+  - [x] `src/pages/sign-in.astro`: centered single column; `heading-lg` line; two full-width `button-secondary` submit buttons `CONTINUE WITH GOOGLE` / `CONTINUE WITH GITHUB` stacked `spacing.3` (12px) apart; `caption`/`dim` note that voting never needs an account; no vendor logos or brand colors; reuse the existing `button-secondary.astro` primitive — never restyle
+  - [x] Each button is a plain HTML `<form method="post">` to our own endpoint (guaranteed no-JS path — form-urlencoded direct to Better Auth's `/sign-in/social` is NOT verified for 1.6.25): endpoint calls `auth.api.signInSocial({ body: { provider, callbackURL, errorCallbackURL, disableRedirect: true }, headers })` and issues the redirect itself (303 to the provider URL)
+  - [x] `callbackURL` = validated return address (default `/creator`); `errorCallbackURL` = `/sign-in` variant that renders the denial Voice line
+  - [x] Carry `return` through the round-trip (hidden form field → callbackURL); re-validate server-side at every hop
+- [x] Task 5: Outcome renders per the post-submit contract (AC: #2, #3, #5)
+  - [x] Signed-in return, denial, and expiry renders: outcome line is `tabindex="-1"`, first content in the main landmark, focused on load; document `<title>` leads with outcome — exact strings `Signed in — Oddspark Polls`, `That didn't sign you in — Oddspark Polls`
+  - [x] Voice catalog verbatim: denial "That didn't sign you in. Nothing was created, and nothing was lost — the create form is right where you left it."; expiry "You've been signed out. Sign back in to pick up where you left off."; copy is layout-neutral, no exclamation marks
+  - [x] Minimal guarded `/creator` landing target (placeholder page proving the guard + post-sign-in return; the real dashboard is Story 1.11 — do not build lists/counts)
+- [x] Task 6: Per-environment OAuth apps + secrets + README (AC: #6)
+  - [x] Document in README: six OAuth apps (Google + GitHub × local/staging/production), authorized redirect URIs exactly `{baseURL}/api/auth/callback/google` and `{baseURL}/api/auth/callback/github` per environment (staging/production Worker URLs from 1.1; local `http://localhost:4321`)
+  - [x] Secrets per environment via `wrangler secret put` (staging/production) and `.dev.vars` (local): `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` — names already reserved in `.dev.vars.example`; add `BETTER_AUTH_URL` (or set baseURL from env config); never in `wrangler.jsonc` vars
+  - [x] Provision the real apps and store secrets for local + staging at minimum (de-risk rule #3 demands a real round-trip on staging); production before story-done
+- [x] Task 7: Tests — the de-risk gate (AC: #2, #3, #4, #5)
+  - [x] Unit: return-address validator (payloads: `https://evil.example`, `//evil.example`, `/\evil`, `javascript:`, empty, valid `/creator/new`); CSRF session-token branch with real issuance
+  - [x] Integration (workerd pool): guard redirects signed-out `/creator` request to `/sign-in?return=/creator`; session extraction populates principal; auth tables accept Better Auth writes (adapter contract against local D1)
+  - [x] E2E (Playwright): sign-in page renders both buttons and caption without JS errors; guard redirect round-trip. Full OAuth e2e against real providers is manual — record the staging validation (both providers) in Dev Agent Record instead of automating consent screens
+  - [x] Manual validation (blocking, de-risk rule #3): complete Google and GitHub round-trips on local workerd AND staging; verify D1 rows (internal UUID user id; account row maps provider pair; session row) and cookie `__Secure-better-auth.session_token` on staging
 
 ## Dev Notes
 
@@ -139,8 +143,92 @@ Epic 1 rule #3: "Better Auth on workerd (full OAuth round-trip, local + staging)
 
 ### Agent Model Used
 
+OpenAI GPT-5
+
 ### Debug Log References
+
+- Astro 7.1.5 / `@astrojs/cloudflare` 14.1.6 has removed `context.locals.runtime.env`; the supported binding source is `env` from `cloudflare:workers`. Task 1 uses that source while preserving a per-request `createAuth(env)` factory.
+- Better Auth 1.6.25 does not default to UUID IDs. `advanced.database.generateId: "uuid"` enforces the story's internal provider-independent UUID contract.
+- Better Auth 1.6.25's built-in direct-D1 adapter serializes dates as ISO-8601 strings and only hydrates string values as `Date`; declaring these fields `INTEGER` would store ISO strings under INTEGER affinity and fail to hydrate actual integers. Justin approved the explicit auth-table compatibility exception on 2026-07-29: migration 0002 uses `TEXT` for auth-only date fields; domain timestamps remain UTC Unix-ms INTEGER.
+- The v1.6.25 CLI package is `auth` (the documented replacement for deprecated `@better-auth/cli`). Reference schema generated successfully with `pnpm dlx auth@1.6.25 generate --config scripts/better-auth-schema.ts`.
+- Migration 0002 applied successfully to local, staging, and production D1 after Justin's explicit approval on 2026-07-29.
+- Better Auth 1.6.25 names its signed OAuth state cookie `better-auth.state` (`__Secure-better-auth.state` on HTTPS). The no-JavaScript wrapper forwards that `Set-Cookie` header into its own 303 response.
+- Task 6 provider inventory found no existing Hearn Systems GitHub OAuth Apps, no Google OAuth clients in Google Cloud project `hearn-systems`, and no staging or production Worker secrets. The Google Auth Platform brand currently reads `Hearn Systems | Cloudflare`, is External/Testing, and has no test users; provider creation remains an explicit external-action checkpoint.
+- The adversarial security pass enabled Better Auth OAuth-token encryption, revalidated return paths after URL normalization, routed state failures to the product denial outcome, added nested creator return coverage, wrapped session lookup in operation telemetry, and changed CSRF comparison to a timing-resistant byte comparison.
+- A non-sensitive, HttpOnly creator-session marker now survives the seven-day Better Auth cookie long enough to distinguish natural browser expiry. It is cleared after reporting expiry and on sign-out; empty auth cookies no longer trigger D1 session resolution, and sign-out never appends session-refresh cookies after Better Auth's deletion response.
+- Justin approved all provider registrations and secret provisioning on 2026-07-29. The Google consent brand is now `Oddspark Polls`, remains External/Testing, includes `j.d.hearn@gmail.com` as a test user, and has local/staging/production Web clients. Three organization-owned GitHub OAuth Apps also exist; GitHub's passkey/mobile confirmation and direct credential entry remain the human-only security checkpoint.
+- Local, staging, and production credential provisioning completed through masked human-only prompts. Local `.dev.vars` is ignored and mode `600`; remote verification returned exactly the six expected secret names and types without values. No credential value entered conversation, command arguments, tool output, repository history, or Wrangler disk logs.
+- Better Auth 1.6.25 encrypts stored OAuth access/refresh tokens but not provider ID tokens. Account create/update database hooks now force `id_token` to `NULL`; a real workerd D1 adapter test covers both operations. The provisioning helper initializes local auth only, refuses non-create-only remote master-secret writes, atomically replaces local `.dev.vars` on the destination filesystem, and rotates only provider bindings after validating existing master material.
+- Cloudflare Workers SDK issue #14922 caused WAF 403 responses for the original monolithic upload. The deploy helper now emits a minified split ESM graph with `no_bundle`; staging version `679f0385-d520-47ca-a141-7daf727e37b0` deployed successfully as 37 modules. Public smoke, the nested creator guard, and unsafe-return fallback all passed. Production application code was not deployed.
+- Manual OAuth validation completed on 2026-07-29 for Google and GitHub on both local workerd and staging. Each environment ended with two UUID-shaped internal users, one account mapping per provider, two mapped sessions, zero orphaned rows, and zero stored ID tokens. Justin visually confirmed the staging `__Secure-better-auth.session_token` cookie was both Secure and HttpOnly without exposing its value. The local daemon was then stopped and its generated `.astro/dev.log` deleted.
 
 ### Completion Notes List
 
+- Task 1: pinned Better Auth 1.6.25, added the direct-D1 provider-only factory with exhaustive snake_case mappings, validated required environment config, and mounted the catch-all handler at `/api/auth/*`.
+- Task 1 validation: 3 focused auth unit tests, full 18-test Vitest suite, TypeScript, and Astro/Cloudflare production build all pass on Node 24.18.0.
+- Task 2: generated and hand-shaped the four-table D1 schema, added provider/account uniqueness and cascade constraints, refreshed the checksum manifest, applied migration 0002 to local/staging/production, and added 3 workerd D1 schema tests.
+- Task 2 validation: full 21-test Vitest suite, TypeScript, migration checksum guard, and all three D1 migration targets pass on Node 24.18.0.
+- Task 3: added provider-neutral Better Auth session extraction, nullable request principals, deterministic session-bound CSRF issuance and enforcement, exact creator-route guarding, expired-session context, and strict same-origin return-address validation.
+- Task 3 validation: 24 focused unit tests, 5 focused workerd integration tests, and the full 46-test Vitest suite pass on Node 24.18.0.
+- Task 4: added the centered token-bound `/sign-in` surface and a Zod-validated server POST wrapper that creates Better Auth OAuth state, forwards the state cookie, preserves only validated return paths, and redirects to Google or GitHub without JavaScript.
+- Task 4 validation: 13 focused identity unit tests, 3 focused workerd endpoint tests, the full 51-test Vitest suite, TypeScript, and the Astro/Cloudflare production build pass on Node 24.18.0.
+- Task 5: added safe signed-in outcome markers, exact denial/expiry outcome policy, first-in-main focus management, outcome-leading titles, and a minimal guarded `/creator` landing page.
+- Task 5 validation: 17 focused identity unit tests, 4 sign-in Playwright scenarios (7 total E2E tests), the full 55-test Vitest suite, TypeScript, and the Astro/Cloudflare production build pass on Node 24.18.0.
+- Task 6 documentation: added the exact six-registration callback matrix, environment-separated naming guidance, masked Wrangler provisioning commands, secret-list verification, and a complete local `.dev.vars` template.
+- Task 7 automated validation: 74 Vitest unit/workerd integration tests, 8 Playwright scenarios, TypeScript, migration checksum guard, script syntax checks, and the Astro/Cloudflare staging build pass. Coverage includes real Better Auth provider-account adapter writes with `id_token` forced to `NULL`, provider denial with zero auth rows, missing-state fallback, both CSRF token transports, nested creator returns, no-JavaScript POST initiation, JavaScript runtime errors, natural session expiry, sign-out cookie handling, and provisioning safety edges.
+- Credential handling: added a masked helper that initializes local auth only, writes `.dev.vars` atomically as ignored mode `600`, refuses remote master-secret initialization, and sends provider-only remote rotations to Wrangler as one stdin bulk update while preserving existing master and URL bindings. Wrangler disk logging and metrics remain disabled for these operations.
+- Task 6: registered all six provider applications, configured exact per-environment callbacks, and securely provisioned all six bindings in local, staging, and production.
+- Task 7 manual validation: completed real Google and GitHub OAuth round-trips on local workerd and staging; verified UUID-shaped provider-independent users, provider mappings, mapped sessions, zero persisted ID tokens, correct post-sign-in outcomes, and staging Secure/HttpOnly session-cookie flags using aggregate-only D1 queries.
+- Deployment validation: deployed the corrected split-module application to staging as version `679f0385-d520-47ca-a141-7daf727e37b0`; public smoke, exact nested creator redirect, unsafe-return fallback, and both live provider callbacks passed. No production application deployment was performed.
+- Final adversarial security review: GO after closing plaintext ID-token persistence, master-secret rotation, same-filesystem atomic replacement, effective dotenv binding validation, return-address scope, CSRF, cookie, telemetry, and deployment-graph findings.
+
+### Implementation Plan
+
+1. Implement each story task in order with focused RED/GREEN tests, preserving the single middleware chain and provider-independent identity boundary.
+2. Use Better Auth's exact 1.6.25 D1/API behavior; record any version-specific deviation from the story research in Debug Log References.
+3. Run the full unit + workerd integration suite after each task, then finish with Playwright, build, migration guard, and manual OAuth/deployment gates.
+
 ### File List
+
+- `_bmad-output/implementation-artifacts/1-2-creator-sign-in-with-google-or-github.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `.dev.vars.example`
+- `.gitignore`
+- `README.md`
+- `package.json`
+- `pnpm-lock.yaml`
+- `db/migrations/0002_identity_auth.sql`
+- `db/migrations.manifest.json`
+- `scripts/better-auth-schema.ts`
+- `scripts/deploy.mjs`
+- `scripts/provision-auth-secrets.zsh`
+- `src/adapters/auth/index.ts`
+- `src/adapters/telemetry/index.ts`
+- `src/components/creator-placeholder.astro`
+- `src/env.d.ts`
+- `src/lib/csrf.ts`
+- `src/lib/request-context.ts`
+- `src/middleware.ts`
+- `src/modules/identity/index.ts`
+- `src/pages/api/auth/[...all].ts`
+- `src/pages/api/sign-in.ts`
+- `src/pages/creator/[...path].astro`
+- `src/pages/creator/index.astro`
+- `src/pages/sign-in.astro`
+- `tests/e2e/sign-in.spec.ts`
+- `tests/integration/auth-middleware.integration.test.ts`
+- `tests/integration/auth-schema.integration.test.ts`
+- `tests/integration/csrf.integration.test.ts`
+- `tests/integration/sign-in-endpoint.integration.test.ts`
+- `tests/unit/auth.test.ts`
+- `tests/unit/csrf.test.ts`
+- `tests/unit/identity.test.ts`
+- `tests/unit/provision-auth-secrets.test.mjs`
+- `tests/unit/telemetry.test.ts`
+- `tsconfig.json`
+- `vitest.integration.config.ts`
+- `vitest.unit.config.ts`
+
+### Change Log
+
+- 2026-07-29: Implemented Story 1.2 creator OAuth sign-in, completed all six provider registrations and environment bindings, deployed and validated staging, closed adversarial security findings, and passed the full automated plus local/staging manual de-risk gate.

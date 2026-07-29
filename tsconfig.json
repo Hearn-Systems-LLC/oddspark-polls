@@ -1,7 +1,10 @@
 {
   "extends": "astro/tsconfigs/strict",
   "compilerOptions": {
-    "types": ["vitest/globals"],
+    "types": [
+      "vitest/globals",
+      "@cloudflare/vitest-pool-workers/types"
+    ],
     "paths": {
       "@/*": ["./src/*"]
     },

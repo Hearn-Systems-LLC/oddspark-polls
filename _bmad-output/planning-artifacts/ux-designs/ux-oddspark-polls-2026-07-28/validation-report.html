@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UX Design Validation: Oddspark Polls</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>Oddspark Polls — UX Design Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/</div>
+      </div>
+    </header>
+
+    <div class="synthesis">
+      <p>This is a well-shaped, decision-dense spine pair: canonical section order in both files, all five upstream journeys reproduced verbatim with climax beats and failure paths, every <code>{path.to.token}</code> reference in both documents resolving mechanically (zero dangling refs across 28 colors, 13 type roles, 15 components), and three invented sections that genuinely earn their place. A downstream consumer can build the dark-mode voter surface from this pair with very few questions.</p>
+      <p>The contract breaks on the half of the product that was added late. Light mode is fully specified in prose and entirely absent from the machine-readable layer: all 15 component definitions bind <code>-dark</code> colors exclusively, no resolution rule is stated, and the obvious suffix-swap produces exactly the gold-as-text the spine forbids. Compounding it, the stated contrast floor is asserted rather than measured and is wrong — <code>dim</code> fails 4.5:1 in dark mode at 4.02:1 while carrying the system's most identity-critical type, and the light-mode focus ring lands at 2.25:1 against a promise that focus is "always visible."</p>
+      <p>The second systemic issue is joinability: DESIGN.md and EXPERIENCE.md name nearly every shared component differently, so the visual contract and the behavioral contract can't be zipped together without a human translating. Fix the light-mode token bindings, the contrast claims, and the component naming, and this pair is genuinely strong.</p>
+      <p>A second reviewer working the accessibility lens independently recomputed the same three contrast failures — the light-mode focus ring at 2.25:1, the dark-mode <code>dim</code> shortfall, and the dark-only component bindings — arriving at the same measured ratios from the same hexes, which raises confidence that these are arithmetic facts rather than reviewer judgment. That review then added defects the rubric walk did not reach: leadership in the Tally is carried by hue alone at a 1.12:1 luminance separation with no glyph, violating the spine's own "glyph plus color" rule; the locked Security Toggle's 55%-opacity treatment renders the on-state as an empty rectangle at 1.21:1, inverting the state the Creator is meant to read; and there is no focus or announcement contract for post-submit outcomes, so a screen-reader user lands at the top of a reloaded document and must hunt for the result of the one irreversible action in the product.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card">
+        <div class="dim-name">Flow coverage</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Token completeness</div>
+        <div class="dim-verdict" style="color: var(--verdict-thin)">thin</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Component coverage</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">State coverage</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Visual reference coverage</div>
+        <div class="dim-verdict" style="color: var(--verdict-thin)">thin</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Bloat &amp; overspecification</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Inheritance discipline</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Shape fit</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>1. Flow coverage</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Extracted all five UJs from the sources (<code>.working/source-extract.md</code> §"Journeys / Flows Defined Upstream", PRD §2.3). All five have a Key Flow in <code>EXPERIENCE.md § Key Flows</code> with the ID and title verbatim, numbered steps, an explicitly marked <strong>Climax:</strong> beat (UJ-2 carries two, correctly — the duplicate-rejection moment is the one that earns "trustworthy"), and a <em>Failure:</em> path. Phase tags on UJ-3 and UJ-4 match the PRD's phasing. No misses.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Three of five flow protagonists are unnamed archetypes</h3>
+              <span class="finding-location">EXPERIENCE.md § Key Flows (UJ-2, UJ-4, UJ-5)</span>
+            </header>
+            <div class="finding-note">UJ-2, UJ-4, and UJ-5 protagonists are unnamed archetypes ("a stranger", "a code holder", "someone") where UJ-1 and UJ-3 get named actors (Justin, the friend in Berlin). The shape references name every protagonist (Mira, Sarah, Devon/Mara) because a named person is what makes a flow reviewable as a story.</div>
+            <div class="finding-fix"><strong>Fix:</strong> name the three anonymous protagonists; nothing else in the flow changes.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Image Polls have no flow touching them</h3>
+              <span class="finding-location">EXPERIENCE.md § Information Architecture — "Image upload" row</span>
+            </header>
+            <div class="finding-note">Image Polls (FR-11, Phase 2) are the only feature area with no flow touching them — the IA table's "Image upload" row is the one surface with a <code>—</code> in the Journey column. The sources define no UJ for it, so this isn't a miss against upstream, but a Phase 2 story-dev consumer has no narrative for image upload, alt-text entry, or image-option voting end to end.</div>
+            <div class="finding-fix"><strong>Fix:</strong> either an explicit note that Image Polls ride UJ-2's flow with an image ballot, or a short sixth flow.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>2. Token completeness</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Extracted every frontmatter token (28 colors, 13 typography roles, 6 radii, 18 spacing values, 15 component objects) and every <code>{path.to.token}</code> reference in the prose of both spines. <strong>Every reference resolves</strong> — zero unresolved paths in DESIGN.md's body, DESIGN.md's frontmatter, or EXPERIENCE.md. Every color token carries a hex or an explicit rgba. Light/dark pairs exist for all 14 semantic colors. Spacing correctly stays on the 8pt-derived scale with named tokens for gutters and margins.</p>
+            <p>Then I computed the contrast ratios the spine asserts, because downstream code mirrors that claim.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Component frontmatter binds dark-mode colors exclusively; no light-mode resolution rule</h3>
+              <span class="finding-location">DESIGN.md frontmatter <code>components</code>; § Brand &amp; Style</span>
+            </header>
+            <div class="finding-note">The <code>components</code> frontmatter binds <code>-dark</code> colors exclusively — all 15 components, 12 distinct color references, zero <code>-light</code> bindings — while the product ships both modes as a committed decision (<code>DESIGN.md § Brand &amp; Style</code>, "Both modes ship"). No resolution rule is stated anywhere, so a consumer source-extracting the frontmatter (the entire point of the frontmatter) gets a dark-only component contract. The naive suffix-swap is also wrong: <code>poll-option.markerColorSelected</code>, <code>availability-cell.yesGlyphColor</code>, and <code>round-table.winnerColor</code> all resolve to <code>{colors.solar-dark}</code>, and swapping to <code>solar-light</code> yields #C9A227 gold glyphs on #F5F7F9 paper at <strong>1.92:1</strong> — precisely what <code>DESIGN.md § Colors</code> forbids when it says "gold as <em>text</em> is not readable on paper." That the spine handles both modes explicitly in exactly one place (<code>overlay.scrimDark</code> / <code>scrimLight</code>) proves the suffix-swap convention isn't uniform. <em>Corroborated independently by the accessibility review, which measured the full set of swapped bindings at 2.25:1–2.42:1 and rated it high; carried here at the higher severity.</em></div>
+            <div class="finding-fix"><strong>Fix:</strong> state the resolution rule explicitly, and where the rule doesn't hold, bind the pair — the three glyph tokens above need <code>solar-ink-*</code>, not <code>solar-*</code>.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Stated contrast floor is false for <code>dim</code> in dark mode</h3>
+              <span class="finding-location">DESIGN.md § Colors — "Contrast floor"; § Typography</span>
+            </header>
+            <div class="finding-note">The contrast floor at <code>DESIGN.md § Colors</code> ("<code>text</code>, <code>dim</code>, <code>entropy</code>, <code>solar-ink</code>, and <code>on-solar</code>-over-<code>solar</code> all clear 4.5:1 against their intended backgrounds in both modes") is false for <code>dim</code> in dark mode: <code>dim-dark</code> #67737F is <strong>4.02:1 on <code>void-dark</code></strong> and <strong>3.82:1 on <code>panel-dark</code></strong>. <code>dim</code> is not decorative here — <code>DESIGN.md § Typography</code> assigns it to <code>label-caps</code>, called "the single most identity-carrying type detail," at 11px, plus all metadata, timestamps, helper text, and the results-bar raw count. <code>dim-light</code> passes at 5.40:1, so the failure is confined to the mode marked "inherited verbatim, do not tune." <em>Corroborated independently by the accessibility review at the same measured ratios (rated high there); carried here at the higher severity.</em></div>
+            <div class="finding-fix"><strong>Fix:</strong> either lighten <code>dim-dark</code> (roughly #7A8794 clears 4.5:1 on both void and panel) or narrow the floor statement to the combinations that actually hold and say plainly which token carries sub-AA text and why.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Light-mode focus ring is effectively invisible at 2.25:1</h3>
+              <span class="finding-location">EXPERIENCE.md § Interaction Primitives; <code>poll-option.focusOutline</code></span>
+            </header>
+            <div class="finding-note">The light-mode focus ring is effectively invisible. <code>EXPERIENCE.md § Interaction Primitives</code> guarantees "a 2px <code>{colors.solar-dark}</code> outline offset 2px, never removed," and <code>poll-option.focusOutline</code> encodes the same. Under the "gold as a fill is unchanged in both modes" rule, that ring in light mode is #C9A227 on #F5F7F9 — <strong>2.25:1</strong>, below the 3:1 non-text minimum. Focus visibility is the one accessibility guarantee both spines make emphatically, and the contrast floor section doesn't cover focus rings at all. <em>Corroborated independently by the accessibility review, which also rated it critical and measured 2.42:1 against <code>panel-light</code>.</em></div>
+            <div class="finding-fix"><strong>Fix:</strong> define a <code>focus-ring-light</code> token (a darkened gold near <code>solar-ink-light</code>, or entropy-light at 5.70:1) and add focus rings to the load-bearing combinations the floor covers.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Glyph-on-wash contrast is unspecified and one combination fails the stated floor</h3>
+              <span class="finding-location">DESIGN.md § Colors; <code>availability-cell</code></span>
+            </header>
+            <div class="finding-note">Glyph-on-wash contrast is unspecified and one combination fails the stated floor. <code>DESIGN.md § Colors</code> claims "a wash never carries text-contrast responsibility," but <code>availability-cell</code> puts glyphs directly on washes: <code>ifNeedBeGlyphColor</code> (<code>entropy-dark</code>) on <code>entropy-wash-dark</code> over <code>panel-dark</code> computes to <strong>4.05:1</strong>, and the light-mode equivalent with <code>solar-ink-light</code> on <code>solar-wash-light</code> is <strong>3.91:1</strong>. Both clear the 3:1 non-text bar but sit under the spine's own 4.5:1 claim, and these glyphs are the entire state signal for Meeting Poll availability (FR-13, FR-14).</div>
+            <div class="finding-fix"><strong>Fix:</strong> state the glyph-on-wash pairs as load-bearing combinations with their measured ratios, or deepen the glyph colors.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">No motion token group exists, and motion is the product's signature</h3>
+              <span class="finding-location">DESIGN.md frontmatter; § Components → Results bar; EXPERIENCE.md § Live Results &amp; Motion</span>
+            </header>
+            <div class="finding-note">No motion token group exists, and motion is the product's signature. The four durations (480ms, 400ms, 180ms, 2400ms) and the easing curve are restated in three places — <code>results-bar</code> / <code>live-indicator</code> frontmatter, <code>DESIGN.md § Components → Results bar</code> prose, and <code>EXPERIENCE.md § Interaction Primitives</code> and <code>§ Live Results &amp; Motion</code>. Worse, the <strong>240ms leader cross-fade exists only in EXPERIENCE.md prose</strong> (<code>§ Live Results &amp; Motion</code>, "Leader changes") with no DESIGN.md token at all, which means EXPERIENCE.md is defining a visual value DESIGN.md should own. Any future timing change has to be made in four places and will drift.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a <code>motion</code> group to the frontmatter (<code>bar-transition</code>, <code>spark</code>, <code>count-up</code>, <code>leader-crossfade</code>, <code>pulse</code>, <code>ease</code>) and reference it from both files.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">"Three, and only three" motion primitives contradicted twenty lines later</h3>
+              <span class="finding-location">EXPERIENCE.md § Interaction Primitives vs § Live Results &amp; Motion</span>
+            </header>
+            <div class="finding-note"><code>EXPERIENCE.md § Interaction Primitives</code> states "<strong>Motion primitives.</strong> Three, and only three… Nothing else in the product animates," then <code>§ Live Results &amp; Motion</code> twenty lines later specifies a fourth — the 240ms blue↔gold leader cross-fade. A developer reading the primitives list as the rule (which is how it's written) will not build the leader transition, and the leader treatment is central to the signature component.</div>
+            <div class="finding-fix"><strong>Fix:</strong> make it four, or fold the cross-fade into the bar-transition primitive.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Breakpoint <code>md</code> referenced by name but never defined</h3>
+              <span class="finding-location">DESIGN.md § Typography; EXPERIENCE.md § Responsive &amp; Platform</span>
+            </header>
+            <div class="finding-note"><code>DESIGN.md § Typography</code> references a breakpoint by name — "dropping to <code>display-mobile</code> 30px below <code>md</code>" — but no <code>breakpoints</code> token group exists and <code>md</code> is never defined. EXPERIENCE.md expresses the same breakpoints as raw pixels (<code>&lt; 640px</code>, <code>640–1023px</code>, <code>≥ 1024px</code>), so a consumer has to guess whether <code>md</code> is 640 or 768.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a <code>breakpoints</code> token group and use the names in both files.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Five defined color tokens are bound to nothing in the machine layer</h3>
+              <span class="finding-location">DESIGN.md frontmatter <code>colors</code></span>
+            </header>
+            <div class="finding-note">Four defined color tokens are bound to nothing in the machine layer: <code>solar-ink-dark</code>, <code>solar-ink-light</code>, <code>solar-hover-light</code>, <code>solar-wash-light</code>, <code>entropy-wash-light</code>. <code>solar-ink</code> is the load-bearing one — it's the rule that makes gold work as text in light mode, and it has no machine representation at all.</div>
+            <div class="finding-fix"><strong>Fix:</strong> resolves with the light-mode binding fix above.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Hairlines carry the whole grouping model at 1.25:1 with no stated minimum</h3>
+              <span class="finding-location">DESIGN.md § Shapes / § Colors — <code>rule-dark</code>, <code>rule-light</code></span>
+            </header>
+            <div class="finding-note">Hairlines are "the single structural device in the system" and carry the entire grouping and separation model, but <code>rule-dark</code> on <code>void-dark</code> is <strong>1.24:1</strong> and <code>rule-light</code> on <code>void-light</code> is <strong>1.26:1</strong>, with no stated minimum. Decorative separators are exempt from WCAG, so this isn't a violation — but a 1px line at 1.25:1 is at the perceptual floor on a phone in daylight, which is the product's primary voting context. <em>The accessibility review reached the same measurements and explicitly declined to flag it, arguing that raising <code>rule-dark</code> to 3:1 would destroy the system's identity — while agreeing it should be written down as a decision.</em></div>
+            <div class="finding-fix"><strong>Fix:</strong> state a deliberate minimum for structural rules, or note explicitly that hairline visibility is accepted as low because whitespace, not the rule, does the grouping.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>3. Component coverage</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Extracted every component named in either spine. DESIGN.md frontmatter defines 15; <code>DESIGN.md § Components</code> gives prose visual specs covering 14 of them across 11 headings (Buttons covers three tokens, Inputs covers two). <code>EXPERIENCE.md § Component Patterns</code> gives 14 behavioral rows, and they are real rules — selection semantics, bounds enforcement, rank compaction, tighten-only locking, atomic code redemption — not one-word descriptions. Cross-referencing between the two files is disciplined: Component Patterns points to <code>§ Live Results &amp; Motion</code>, and <code>DESIGN.md</code>'s results-bar and trust-badge entries point back to the EXPERIENCE.md sections that own their behavior.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Overlay has a token object but no Components heading and no behavioral row</h3>
+              <span class="finding-location">DESIGN.md § Elevation &amp; Depth; EXPERIENCE.md § Component Patterns</span>
+            </header>
+            <div class="finding-note"><code>overlay</code> has a full frontmatter token object but no <code>§ Components</code> heading in DESIGN.md (it's specified only in passing under <code>§ Elevation &amp; Depth</code>) and no row in <code>§ Component Patterns</code>. The IA commits to three of them — two confirmations plus the Voter Code panel — and their behavior (focus trap, <code>Esc</code>, dismissal, whether the scrim is clickable, what happens to the page behind) is scattered across Interaction Primitives and Accessibility Floor rather than specified as a component.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a <code>§ Components → Overlay</code> heading in DESIGN.md and an overlay/confirmation row in Component Patterns.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Turnstile widget has six EXPERIENCE.md mentions and zero in DESIGN.md</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns — "Turnstile widget"; DESIGN.md § Components (absent)</span>
+            </header>
+            <div class="finding-note">The Turnstile widget has six mentions in EXPERIENCE.md and <strong>zero in DESIGN.md</strong>. It's a third-party embed in a system whose hardest visual rule is "zero radius, everywhere… a single rounded corner reads as a different product" — and Turnstile renders with rounded corners. There's also no theme or size decision for a product shipping both color modes. <em>The accessibility review independently raised the same gap, adding that the widget's focus ring, contrast, and announcements are Cloudflare's rather than the spine's, and recommending <code>appearance: "interaction-only"</code> so the widget is absent until a challenge is required.</em></div>
+            <div class="finding-fix"><strong>Fix:</strong> add a Turnstile entry to <code>§ Components</code> stating theme binding (follow the resolved mode, including on manual override), size, and how the radius conflict resolves — naming the widget's chrome as the one sanctioned exception to the shape rules.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The pie chart is a half-made decision</h3>
+              <span class="finding-location">DESIGN.md § Do's and Don'ts; EXPERIENCE.md (absent)</span>
+            </header>
+            <div class="finding-note">The pie chart is a half-made decision. <code>DESIGN.md § Do's and Don'ts</code> says "FR-21 permits pie; it is a secondary toggle at most, never the default" — which commits to a toggle existing — but EXPERIENCE.md never mentions pie, has no chart-form control in Component Patterns, no toggle in the IA, and no state for the pie view.</div>
+            <div class="finding-fix"><strong>Fix:</strong> either specify the toggle in EXPERIENCE.md or change the DESIGN.md line to say bar is the only form shipped.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Visibility Setting has a behavioral row but no visual spec</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns; DESIGN.md § Components (absent)</span>
+            </header>
+            <div class="finding-note">The Visibility Setting has a Component Patterns row describing three exclusive choices with consequence text beneath each, but no visual spec — there is no radio group, segmented control, or choice-card component anywhere in DESIGN.md. It's the only three-way exclusive control in the product.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a <code>§ Components</code> entry, or state that it reuses <code>poll-option</code> markers on the creator surface.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title"><code>poll-card</code> has a visual spec but no behavioral row</h3>
+              <span class="finding-location">DESIGN.md § Components → Poll card; EXPERIENCE.md § Component Patterns (absent)</span>
+            </header>
+            <div class="finding-note"><code>poll-card</code> has a visual spec but no behavioral row in Component Patterns — the IA says the creator Poll list row is what you click to reach Poll detail, and nothing states what the whole-row tap target does, whether the live indicator is interactive, or how closed Polls sort.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a Poll card row.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Rank builder's visual spec is one clause inside Poll option</h3>
+              <span class="finding-location">DESIGN.md § Components → Poll option</span>
+            </header>
+            <div class="finding-note">The rank builder gets a thorough behavioral row but its visual spec is one clause inside <code>§ Components → Poll option</code> ("Rank rows replace the marker with the rank number"). The <code>RANKED {n} OF {total}</code> line, the unranked <code>–</code> treatment, and the group affordance have no dedicated spec and no frontmatter tokens.</div>
+            <div class="finding-fix"><strong>Fix:</strong> promote to its own <code>§ Components</code> entry for Phase 2.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title"><code>results-bar</code> has no Component Patterns row (defensible)</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns / § Live Results &amp; Motion</span>
+            </header>
+            <div class="finding-note"><code>results-bar</code> — the signature component — has no <code>§ Component Patterns</code> row. This is defensible: <code>§ Live Results &amp; Motion</code> covers its behavior far better than a table cell could and Component Patterns cross-links to it. Noting only so the omission reads as deliberate.</div>
+            <div class="finding-fix"><strong>Fix:</strong> none required; confirm the omission is intentional.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Slot builder has a behavioral row but no visual spec for date/time inputs</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns — Slot builder (Phase 3)</span>
+            </header>
+            <div class="finding-note">The Slot builder (Phase 3) has a behavioral row but no visual spec for date and time inputs, which are the only input types in the product not covered by <code>{components.input}</code>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> defer with the phase, but note it.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>4. State coverage</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Walked all 15 IA surfaces against <code>§ State Patterns</code> (22 rows). The voting page and Tally view are covered genuinely well — poll live, poll closed, poll deleted, all three visibility settings, both duplicate-vote causes as distinct states with distinct messages, code required, VPN blocked, CAPTCHA failed, rate-limited, out-of-bounds, cold load, empty, IRV unresolved, and connection lost. The cold-load rule ("resolves by painting final widths <strong>without animation</strong>") and the CAPTCHA-failure rule ("selection and Comment text are preserved… never clears the ballot") are exactly the decisions that get lost otherwise. The gaps are all at the edges of the core voter path.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">No submit-in-flight, submission-failed, or offline state anywhere</h3>
+              <span class="finding-location">EXPERIENCE.md § State Patterns; DESIGN.md § Components → Buttons</span>
+            </header>
+            <div class="finding-note">No submit-in-flight, submission-failed, or offline state exists anywhere. The voting page's entire purpose is one irreversible POST, often from a phone on a poor connection (the stated primary context), and the spines never say what the vote button does between tap and confirmation, whether it disables, or what a Voter sees when the request fails or times out. Double-submission on a slow connection is a trust-critical path in a product whose core value is trustworthiness. <code>§ State Patterns</code> covers a lost <em>live-results</em> connection but not a failed <em>vote</em>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add in-flight, submission-failed, and offline rows to State Patterns and a button-pending treatment to DESIGN.md.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Direct navigation to <code>/{link}/results</code> is undefined when the Tally isn't public</h3>
+              <span class="finding-location">EXPERIENCE.md § Information Architecture; § State Patterns</span>
+            </header>
+            <div class="finding-note">Direct navigation to <code>/{link}/results</code> has no defined response when the Tally isn't public. The IA lists Tally view as its own route reachable by "direct link," and Visibility Setting supports After Close (Poll still open) and Creator-Only — but <code>§ State Patterns</code> only covers what a Voter sees on the <em>vote confirmation</em> surface in those modes. A reader who has never voted and pastes the results URL hits an undefined case, and the choice between 404, redirect to the Poll, and a "results aren't public yet" page is a real product decision with leak implications (a 404 vs. a "not yet" page tells the reader different things about whether the Poll exists).</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a permission-denied / not-yet-visible row per Visibility Setting.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">The landing page has zero Component Patterns and zero State Patterns rows</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns; § State Patterns</span>
+            </header>
+            <div class="finding-note">The landing page has <strong>zero rows</strong> in Component Patterns and <strong>zero rows</strong> in State Patterns. It's a Phase 1 surface, the whole of UJ-5, and the first thing a portfolio visitor sees. Nothing specifies the pinned Demo Poll's embedded state (already voted from this browser, Demo Poll closed, Demo Poll mid-reset), and nothing specifies the landing page's own composition beyond the flow's prose.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add landing-page rows covering the embedded Demo Poll's states; the visual composition can lean on the pending key-screen mocks.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The Poll creation form has no validation states</h3>
+              <span class="finding-location">EXPERIENCE.md § State Patterns; § Voice and Tone</span>
+            </header>
+            <div class="finding-note">The Poll creation form has no validation states. <code>§ Voice and Tone</code> supplies copy for Custom Link taken and reserved, but there is nothing for submitting with no options, one option, a Deadline in the past, an image upload failing to R2 (Phase 2), or a slot whose end precedes its start (Phase 3).</div>
+            <div class="finding-fix"><strong>Fix:</strong> add a creation-form validation block; several of these are one line each.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Ballot Manifest and Voter Codes surfaces have no states</h3>
+              <span class="finding-location">EXPERIENCE.md § State Patterns</span>
+            </header>
+            <div class="finding-note">The Ballot Manifest and the Voter Codes surfaces have no states. The Manifest publishes only on close, so direct navigation before close is undefined; the Codes panel has no state for generation in progress, copy confirmation, or codes already partly redeemed (which the Creator needs to see to know how many invitations are still live).</div>
+            <div class="finding-fix"><strong>Fix:</strong> add rows for both; the Codes surface is deferred but UJ-4 depends on it.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>5. Visual reference coverage</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Inventoried every directory. <code>mockups/</code> and <code>wireframes/</code> do not exist (key-screen mocks are rendering concurrently — not faulted). <code>imports/</code> exists and is empty. <code>.working/</code> holds <code>source-extract.md</code>, <code>oddspark-desktop.png</code>, and <code>oddspark-mobile.png</code>. The two screenshots are the extraction basis for the entire dark palette and both type families — the most load-bearing visual references in the workspace — and they are handled thinly.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Screenshots appear only in the frontmatter <code>sources</code> list, never linked inline</h3>
+              <span class="finding-location">DESIGN.md frontmatter <code>sources</code>; § Brand &amp; Style, § Colors, § Typography</span>
+            </header>
+            <div class="finding-note">The screenshots appear only in DESIGN.md's frontmatter <code>sources</code> list, labelled "oddspark.dev (live extraction, 2026-07-28)." They are never linked inline at <code>§ Brand &amp; Style</code>, <code>§ Colors</code>, or <code>§ Typography</code> — the three sections that derive from them — and nothing names what each illustrates or how they differ (desktop vs. mobile is inferable from the filenames alone). A consumer questioning whether <code>#0B0D10</code> is right has no pointer from the claim to the evidence.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add an inline reference line at each of the three sections naming what the image shows.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">No spines-win-on-conflict statement exists in either file</h3>
+              <span class="finding-location">DESIGN.md § Colors; EXPERIENCE.md preamble</span>
+            </header>
+            <div class="finding-note">No spines-win-on-conflict statement exists in either file. EXPERIENCE.md's preamble establishes precedence <em>between the two spines</em> ("DESIGN.md owns appearance and this file owns behavior") but never establishes precedence over the visual references — which matters more than usual here, because DESIGN.md tells consumers the dark values are "inherited verbatim… do not re-derive or nudge," inviting them to treat the screenshots as authoritative over the spine.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one line in DESIGN.md stating the spine wins on conflict with any referenced image.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">EXPERIENCE.md's <code>sources</code> omits the origin it credits in prose</h3>
+              <span class="finding-location">EXPERIENCE.md frontmatter <code>sources</code>; § Inspiration &amp; Anti-patterns</span>
+            </header>
+            <div class="finding-note">EXPERIENCE.md's <code>sources</code> frontmatter lists only the four planning documents, omitting oddspark.dev and the screenshots — yet <code>§ Inspiration &amp; Anti-patterns</code> opens by crediting oddspark.dev for "the entire visual and structural posture… the identity transfer is verbatim." A file that inherits from a source should declare it.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add the oddspark.dev line to EXPERIENCE.md's <code>sources</code>, matching DESIGN.md's.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>6. Bloat &amp; overspecification</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Both files are dense with decisions and almost free of filler. No pixel values appear where a token would do — the literal dimensions that remain (<code>results-bar.height: 34px</code>, <code>security-toggle</code> 40×20, <code>availability-cell</code> 44px, the 6px live dot) are component-specific values living exactly where the spec says component values live. The scope, FR list, and phasing are inherited by reference rather than restated. Tables are used where tables belong: the IA, the Voice and Tone copy set, Component Patterns, State Patterns, and Responsive are all tabular, and the prose sections are prose because they carry rationale. DESIGN.md's editorial voice is licensed and used well.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Foundation restates PRD glossary definitions it already inherits by reference</h3>
+              <span class="finding-location">EXPERIENCE.md § Foundation</span>
+            </header>
+            <div class="finding-note"><code>EXPERIENCE.md § Foundation</code> restates the three audiences with quoted PRD §3 glossary definitions across five lines, in a document whose second sentence says personas are inherited by reference. The <em>derived</em> content in those lines (that Cloudflare Access means there's no login screen to design; that the two Voter contexts share one surface) is the load-bearing part and earns its place; the quoted definitions around it don't.</div>
+            <div class="finding-fix"><strong>Fix:</strong> keep the derivations, drop the quotes.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Editorial voice appears several times per flow rather than once at the climax</h3>
+              <span class="finding-location">EXPERIENCE.md § Key Flows</span>
+            </header>
+            <div class="finding-note">A handful of Key Flow lines carry DESIGN.md-grade editorial voice: "Justin isn't monitoring a system; he's watching an opinion take shape," "that is the whole argument for the product," "which is a kind of power." The shape references do allow evocative climax beats, so this is calibration rather than a violation — but Oddspark's flows reach for it several times per flow rather than once.</div>
+            <div class="finding-fix"><strong>Fix:</strong> keep one per flow, at the climax.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>7. Inheritance discipline</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The four <code>sources</code> paths in both frontmatters all resolve on disk. UJ IDs and titles are verbatim against PRD §2.3. Glossary terms are used consistently and capitalized correctly throughout both files — Poll, Vote, Voter, Creator, Tally, Ballot, Ballot Manifest, Round, Security Toggle, Voter Code, Visibility Setting, Deadline, Custom Link, Unlisted, Demo Poll, Comment. FR citations are dense and accurate; spot-checking a dozen against <code>.working/source-extract.md</code>, every one attaches to the right requirement. The four <code>[ASSUMPTION]</code> tags that reinterpret source material are correctly scoped and flagged. EXPERIENCE.md's token references all resolve to real DESIGN.md tokens.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Component names differ between the two spines for nearly every shared component</h3>
+              <span class="finding-location">DESIGN.md § Components vs EXPERIENCE.md § Component Patterns</span>
+            </header>
+            <div class="finding-note">Component names differ between the two spines for nearly every shared component, so the visual contract and the behavioral contract cannot be joined mechanically. <code>poll-option</code> / "Poll option" in DESIGN.md is "Option row (single-select)" and "Option row (multi-select)" in EXPERIENCE.md; <code>availability-cell</code> / "Availability grid cell" is "Availability grid"; <code>comment</code> / "Comment" splits into "Comment composer" and "Comment list"; <code>trust-badge</code> / "Trust badge" appears as "The trust badge" in a different section entirely; <code>results-bar</code>, <code>poll-card</code>, <code>round-table</code>, and <code>input-code</code> have no EXPERIENCE.md counterpart under any name. A consumer building the option row has to read both files end to end and infer the mapping.</div>
+            <div class="finding-fix"><strong>Fix:</strong> use the frontmatter token name as the canonical identifier in every heading and table row in both files, with the prose name after it.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">EXPERIENCE.md names mode-specific <code>-dark</code> tokens in mode-neutral behavioral prose</h3>
+              <span class="finding-location">EXPERIENCE.md § Interaction Primitives; § Timezone Handling</span>
+            </header>
+            <div class="finding-note">EXPERIENCE.md references mode-specific <code>-dark</code> color tokens in mode-neutral behavioral prose: the focus outline in <code>§ Interaction Primitives</code> and the <code>+1 day</code> flag in <code>§ Timezone Handling</code> both name <code>{colors.solar-dark}</code> / <code>{colors.entropy-dark}</code> in rules that apply in both modes. Since EXPERIENCE.md owns behavior and not appearance, these should either be semantic or point at a mode-neutral name.</div>
+            <div class="finding-fix"><strong>Fix:</strong> resolves alongside the light-mode binding fix in §2; introduce mode-neutral aliases and reference those.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">"Session Check(s)" / "IP Check(s)" pluralization drifts against the PRD glossary</h3>
+              <span class="finding-location">EXPERIENCE.md § Trust Surfaces; § Component Patterns; § Key Flows</span>
+            </header>
+            <div class="finding-note">"Session Check" / "Session Checks" and "IP Check" / "IP Checks" alternate between singular and plural across <code>§ Trust Surfaces</code>, <code>§ Component Patterns</code>, and the Key Flows. The PRD glossary is singular. Cosmetic, but glossary terms are the one vocabulary a consumer greps for.</div>
+            <div class="finding-fix"><strong>Fix:</strong> pick the plural form the FRs use and apply it uniformly.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>8. Shape fit</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>DESIGN.md carries all eight canonical sections in locked order: Brand &amp; Style → Colors → Typography → Layout &amp; Spacing → Elevation &amp; Depth → Shapes → Components → Do's and Don'ts. No section is missing and none is out of place.</p>
+            <p>EXPERIENCE.md carries all eight required defaults (Foundation, Information Architecture, Voice and Tone, Component Patterns, State Patterns, Interaction Primitives, Accessibility Floor, Key Flows). Both required-when-applicable sections are present and correctly triggered: Inspiration &amp; Anti-patterns (the memlog and sources name oddspark.dev, Doodle, and StrawPoll as references and the survey-form feel as an explicit reject) and Responsive &amp; Platform (multi-surface with three stated breakpoints). Nothing was dropped.</p>
+            <p>Three invented sections, all of which earn their place: <strong>Live Results &amp; Motion</strong> (the product's signature, too detailed to live in a Component Patterns cell, and correctly cross-linked from it), <strong>Trust Surfaces</strong> (trustworthiness is the PRD's stated core value and the badge spans voting page, Tally, and every rejection message — it belongs in one place rather than smeared across three tables), and <strong>Timezone Handling</strong> (FR-12/FR-13 with a worked example upstream, and the single most likely way a Meeting Poll produces a wrong answer).</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Responsive and Accessibility Floor sit behind the narrative sections</h3>
+              <span class="finding-location">EXPERIENCE.md § Responsive &amp; Platform; § Accessibility Floor</span>
+            </header>
+            <div class="finding-note"><code>§ Responsive &amp; Platform</code> sits last, after Key Flows and Inspiration — later than in either shape reference, both of which place it before the narrative sections. Layout behavior is something a developer reads early and a reviewer reads late; burying it behind the flows works against the first reader. <code>§ Accessibility Floor</code> is similarly pushed past three invented sections.</div>
+            <div class="finding-fix"><strong>Fix:</strong> move Responsive and Accessibility Floor up to sit with the other structural defaults, leaving Inspiration and Key Flows as the closing narrative pair.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details>
+        <summary>
+          <h2>Accessibility review</h2>
+          <span class="reviewer-source">review-accessibility.md</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Against the stated pragmatic bar — "keyboard navigation, sensible contrast, alt text on Image Poll images" — the spine's <em>intent</em> is unusually strong for a portfolio project: no gestures, no drag ranking, no icon-only buttons, no hover-only affordances, tap targets specified, a real reduced-motion contract, and alt text that blocks publication. The failures are not philosophical, they are arithmetic and specification gaps. Two of the three named bar items are broken in the shipped tokens: the light-mode focus ring sits at <strong>2.25:1</strong>, which is not a visible focus indicator, and the spine's explicit claim that <code>dim</code> clears 4.5:1 "in both modes" is false in dark mode (<strong>4.02:1</strong> on void, <strong>3.82:1</strong> on panel) for the token that carries the trust badge, the lost-connection warning, and every piece of metadata in the product.</p>
+            <p>The deeper structural problem is that <strong>every gold token in <code>components:</code> is dark-only</strong>. <code>DESIGN.md</code> prose correctly says gold-as-ink is unreadable on paper and introduces <code>solar-ink-light</code> for it — then no component references it. An implementer following the token table and swapping <code>-dark</code> for <code>-light</code> ships a light mode where the selected-option marker, the leading bar edge, the winning round cell, and the focus ring are all between 2.25:1 and 2.42:1. That is one editing pass to fix and it is the highest-leverage change in this review.</p>
+            <p><em>This reviewer also produced a "Verified claims" table enumerating the contrast pairs that hold — <code>text</code>, <code>entropy</code>, <code>alarm</code>, <code>on-solar</code>-over-<code>solar</code>, the wash compositing values, and the confirmed non-issues (motion photosensitivity, the <code>+1 day</code> marker, eliminated round-table rows, hairlines, skip links). Those passing measurements are preserved in the source file, <code>review-accessibility.md</code>, rather than reproduced here.</em></p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">The focus outline is invisible in light mode</h3>
+              <span class="finding-location">DESIGN.md § Components → Poll option; EXPERIENCE.md § Interaction Primitives, "Focus"</span>
+            </header>
+            <div class="finding-note">The focus outline is <code>2px solid {colors.solar-dark}</code>. In light mode gold measures <strong>2.25:1 against <code>void-light</code></strong> and <strong>2.42:1 against <code>panel-light</code></strong> — below the 3:1 a focus indicator needs to be perceivable at all. Keyboard navigation is the first item in the PRD's accessibility bar, and half the product's modes have an invisible focus ring.</div>
+            <div class="finding-fix"><strong>Fix:</strong> promote focus to a mode-aware token — <code>focus-ring-dark: {colors.solar-dark}</code> (8.04:1 on void, verified) and <code>focus-ring-light: {colors.solar-ink-light}</code> <code>#8A6D10</code> (<strong>4.57:1</strong> on <code>void-light</code>, <strong>4.91:1</strong> on white). No shape change; it stays a 2px square outline at 2px offset.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Gold-as-ink has no light-mode binding anywhere in <code>components:</code></h3>
+              <span class="finding-location">DESIGN.md § Components (all of it); rule exists only in prose at § Colors</span>
+            </header>
+            <div class="finding-note">Mechanically swapping suffixes yields: selected option marker <code>◆</code> <strong>2.25:1</strong>, results-bar <code>leadingEdgeLeader</code> <strong>2.42:1</strong>, round-table <code>winnerColor</code> <strong>2.42:1</strong>, availability <code>bestColumnRule</code> <strong>2.25:1</strong>, input focus underline <strong>2.42:1</strong>, live-indicator dot <strong>2.25:1</strong>. Every one is a load-bearing signal.</div>
+            <div class="finding-fix"><strong>Fix:</strong> split the token's two jobs explicitly — <code>solar-*</code> is a <strong>fill only</strong> (<code>#0B0D10</code> on it verified at <strong>8.04:1</strong>, hover <strong>9.69:1</strong>); every glyph, rule, edge, marker, and underline binds to <code>solar-ink-*</code>. Rewrite the component tokens to reference <code>solar-ink</code> and add the light twins. One caveat to carry: <code>solar-ink-light</code> on <code>solar-wash-light</code> over white is <strong>3.91:1</strong> (the availability "yes" <code>✓</code> sitting on its own fill) — darken the on-wash glyph to <code>#7A5F0D</code> (<strong>4.81:1</strong>) or <code>#6E560B</code> (<strong>5.57:1</strong>).</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title"><code>dim-dark</code> fails the spine's stated contrast floor</h3>
+              <span class="finding-location">DESIGN.md § Colors, "Contrast floor"</span>
+            </header>
+            <div class="finding-note"><code>{colors.dim-dark}</code> <code>#67737F</code> measures <strong>4.02:1</strong> on <code>void-dark</code> and <strong>3.82:1</strong> on <code>panel-dark</code>, against the spine's stated floor. The claim is true in light mode (<code>dim-light</code> <strong>5.40:1</strong> / <strong>5.80:1</strong>) and false in dark. <code>dim</code> carries the trust badge, the live-indicator label, the lost-connection notice, poll-card metadata, comment attribution, table column heads, toggle descriptions, and the results-bar raw count — at 11px and 12px.</div>
+            <div class="finding-fix"><strong>Fix:</strong> lift <code>dim-dark</code> to <code>#78848F</code> (<strong>5.09:1</strong> void, <strong>4.84:1</strong> panel). It is still visibly the middle step of the three-step hierarchy. If the "inherited verbatim, do not tune" constraint on dark values is genuinely inviolable, then the contrast-floor sentence has to be rewritten to exclude <code>dim</code>, and every essential-information role listed above has to move to <code>text-dark</code> — which is the more invasive of the two fixes.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">The results-bar count token contradicts the prose two paragraphs above it</h3>
+              <span class="finding-location">DESIGN.md § Components → Results bar — <code>countColor</code></span>
+            </header>
+            <div class="finding-note"><code>{components.results-bar.countColor}</code> is <code>dim-dark</code>, and the count sits <em>inside</em> the bar. Over the fills that measures <strong>2.80:1</strong> on <code>entropy-wash</code> and <strong>2.50:1</strong> on <code>solar-wash</code>. This also contradicts the same section's prose two paragraphs earlier: "Both stay <code>{colors.text-dark}</code>; the wash is thin enough that text reads identically over filled and unfilled regions."</div>
+            <div class="finding-fix"><strong>Fix:</strong> delete the <code>countColor</code> token and let the count inherit <code>text-dark</code>, which measures <strong>8.59:1</strong> / <strong>7.67:1</strong> over the two washes — the prose was right and the token was wrong. Differentiate the count from the percentage with the existing <code>caption</code> size step, not with color.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Leadership in the Tally is carried by hue alone</h3>
+              <span class="finding-location">DESIGN.md § Components → Results bar, "Leader treatment"</span>
+            </header>
+            <div class="finding-note"><code>solar-wash</code> vs <code>entropy-wash</code> composited over <code>panel-dark</code> is <code>#3C361C</code> vs <code>#252F3C</code> — a luminance ratio of <strong>1.12:1</strong>; the 2px leading edges are <strong>1.38:1</strong> apart. There is no glyph, no text, no weight change. This directly violates the spine's own Do ("Render every state with glyph <em>plus</em> color") and its own Accessibility Floor, whose list of glyph-carried states — availability cells, Toggles, eliminated options, selected options — conspicuously omits the leader. Bar length does not rescue it: the case where leadership matters most is a near-tie, where lengths are indistinguishable, and the spine's <code>TIED</code> rule means "no gold" is itself information the reader must be able to detect.</div>
+            <div class="finding-fix"><strong>Fix:</strong> prefix the leading bar's value with the <code>◆</code> marker already used for a selected option, in <code>solar-ink</code>, inside the existing right-hand value cluster — <code>◆ 47% · 122</code>. It reuses a system glyph, costs one character of width, needs no box, and makes <code>TIED</code> (no <code>◆</code> on any bar, label above the group) legible as the absence of a mark rather than the absence of a hue.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Availability "No" and "Unanswered" are distinguished by glyph shape alone at 2.05:1</h3>
+              <span class="finding-location">DESIGN.md § Components → Availability grid cell</span>
+            </header>
+            <div class="finding-note">Availability <strong>No</strong> (<code>×</code>) and <strong>Unanswered</strong> (<code>·</code>) are both <code>faint</code> on no fill — <strong>2.05:1</strong> dark, <strong>2.48:1</strong> light — distinguished from each other by glyph shape alone, at a ratio the spine itself declares "below a readable contrast ratio… by design." A voter with low vision cannot tell "I declined this slot" from "I haven't answered yet," which is the difference between a submitted answer and an omission on the one Vote in the product that can be edited.</div>
+            <div class="finding-fix"><strong>Fix:</strong> <code>No</code> is an answer, not an absence — move <code>noGlyphColor</code> to <code>dim</code> (<strong>5.09:1</strong> at the corrected value). Keep <code>Unanswered</code> at <code>faint</code>; it is correctly the null state.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title"><code>CLOSED</code> renders in <code>faint</code> at 2.05:1, breaking the spine's own Don't</h3>
+              <span class="finding-location">DESIGN.md § Components → Poll card</span>
+            </header>
+            <div class="finding-note"><code>CLOSED</code> renders in <code>label-caps</code> <code>{colors.faint-dark}</code> on the poll card — 11px, letterspaced, uppercase, at <strong>2.05:1</strong>. This is a Poll's primary status and it breaks the spine's own Don't: "No <code>{colors.faint-dark}</code> on text a user has to read."</div>
+            <div class="finding-fix"><strong>Fix:</strong> <code>dim</code>, matching the metadata line it sits beside.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">No focus or announcement contract for post-submit outcomes</h3>
+              <span class="finding-location">EXPERIENCE.md § State Patterns; § Accessibility Floor</span>
+            </header>
+            <div class="finding-note">Voting is a server round-trip on a server-rendered page, and nothing says where focus lands or what a screen reader hears after <strong>Counted.</strong>, already-voted, VPN-blocked, bad code, CAPTCHA failure, or rate-limiting. A screen-reader user lands at the top of a reloaded document and must hunt for the result of the most consequential action in the product — including its climax moment. The <code>aria-live</code> region specified for the Tally does not help, because it announces <em>changes</em> to an already-rendered region, not the state of a fresh document.</div>
+            <div class="finding-fix"><strong>Fix:</strong> on every post-submit render, the outcome line is a <code>tabindex="-1"</code> element focused on load and is the first content in the main landmark; the document <code>&lt;title&gt;</code> leads with the outcome ("Counted — {question}" / "Already voted — {question}"). Add this to <code>§ Accessibility Floor</code> as its own bullet alongside "Focus order."</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">The availability cell's keyboard model is internally contradictory and has no clean ARIA mapping</h3>
+              <span class="finding-location">EXPERIENCE.md § Accessibility Floor</span>
+            </header>
+            <div class="finding-note">The spine specifies "each cell is a three-state control reachable by <code>Tab</code>, cycled with <code>Space</code>, set directly with arrow keys" — but in a grid, arrow keys conventionally <em>move between cells</em>, so the two behaviors collide, and <code>Tab</code> landing on every cell of a Voters × slots matrix is a large tab-stop count. Three states also have no honest ARIA state: <code>aria-checked="mixed"</code> would describe "if-need-be" as partially-yes, which it is not. A competent implementer will guess, and the guesses diverge.</div>
+            <div class="finding-fix"><strong>Fix:</strong> model each slot as a <code>radiogroup</code> of three named radios — <code>Yes</code> / <code>If need be</code> / <code>No</code> — which the desktop layout already renders as "three discrete targets." <code>Tab</code> moves between slots, arrows select within a slot, state is announced natively, and the group's accessible name is the slot's local time. Retire cycle-on-tap on mobile too; a four-step cycle that can land on "unanswered" is both slow and easy to overshoot.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The reduced-motion contract is incomplete</h3>
+              <span class="finding-location">EXPERIENCE.md § Interaction Primitives; § Live Results &amp; Motion</span>
+            </header>
+            <div class="finding-note"><code>§ Interaction Primitives</code> claims "Three, and only three" motion primitives, but <code>§ Live Results &amp; Motion</code> defines five timed behaviors: the 480ms width transition, the 180ms spark, the 2400ms pulse, the <strong>400ms count-up</strong>, and the <strong>240ms leader cross-fade</strong>. The reduced-motion clause covers widths, numbers, the spark, and the dot — the <strong>leader cross-fade is in neither list</strong>.</div>
+            <div class="finding-fix"><strong>Fix:</strong> correct the primitives count to five and add "the leader's fill and edge change color instantly" to the reduced-motion contract. The change of <em>state</em> must survive; only the 240ms interpolation is dropped.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The signature moment has no screen-reader equivalent</h3>
+              <span class="finding-location">EXPERIENCE.md § Accessibility Floor — <code>aria-live</code> scope</span>
+            </header>
+            <div class="finding-note"><code>aria-live</code> is scoped to the aggregate totals line — correct, and the reasoning for it is sound — but the consequence is that a screen-reader user hears "122 votes… 123 votes…" and never learns that the lead changed hands. The product's climax is a leadership change, and it is announced to nobody.</div>
+            <div class="finding-fix"><strong>Fix:</strong> leader changes are rare relative to Votes, so announce them on the same polite region: "Pizza now leading, 47 percent." Announce <code>TIED</code> the same way when gold is withdrawn. This is additive to the aggregate line and does not reintroduce per-bar chatter.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The lost-connection notice is structural annotation doing a warning's job</h3>
+              <span class="finding-location">EXPERIENCE.md § State Patterns — "Live connection lost"</span>
+            </header>
+            <div class="finding-note">The notice is a <code>label-caps</code> line — 11px, 0.18em tracking, uppercase, <code>dim</code> (<strong>4.02:1</strong> at the current value) — and it is the only thing standing between a reader and silently stale numbers. Separately, the spine says the notice "announces once" but never says reconnection announces, so a screen-reader user who is told the data is stale is never told it is fresh again.</div>
+            <div class="finding-fix"><strong>Fix:</strong> render the notice in <code>caption</code> 12px <code>{colors.text-*}</code> — it is a warning, not structural annotation — and announce reconnection on the same polite region ("Updates resumed"). The <code>§ State Patterns</code> row already specifies that reconnection "snaps to current values"; it just needs to say so out loud.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title"><code>void → panel</code> is not a perceivable step, and three behaviors depend on it</h3>
+              <span class="finding-location">DESIGN.md § Elevation &amp; Depth; EXPERIENCE.md § State Patterns</span>
+            </header>
+            <div class="finding-note"><strong>1.05:1</strong> in dark (<code>#101419</code> on <code>#0B0D10</code>), <strong>1.07:1</strong> in light (white on <code>#F5F7F9</code>). Three specified behaviors depend on it and none of them will be visible: the results-bar <code>trackBackground</code>, the option row's <code>hoverBackground</code>, and the cold-load skeleton — "Skeleton bars at the correct count and height, filled to zero width" — which contradicts the Empty Poll row's promise that "The chart's shape is visible before it has data."</div>
+            <div class="finding-fix"><strong>Fix:</strong> don't add a second elevation step — use the system's own device. Give each results bar a 1px <code>rule</code> baseline so the bar group reads as ruled bands whether or not it has data; that makes the zero state, the skeleton, and per-option extents all legible with a hairline rather than a tone. For option-row hover, accept that the fill is a near-no-op and let the focus outline carry the affordance (hover is not an accessibility surface; the invisible skeleton is).</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The locked Security Toggle renders as an OFF toggle</h3>
+              <span class="finding-location">DESIGN.md § Components → Security toggle</span>
+            </header>
+            <div class="finding-note">The spine specifies the on-appearance "at 55% opacity"; <code>trackOn</code> is <code>solar-wash-dark</code> at alpha 0.24, so 55% of that is an effective <strong>0.132 alpha → 1.21:1 against void</strong> — an empty rectangle. If the opacity is applied to the whole control (the natural reading of the sentence), the <code>caption</code> description drops to <strong>2.00:1</strong>. The Creator looking at a Poll's protections after the first Vote sees the state inverted, which the spine explicitly does not want: "Locked Toggles are never hidden or greyed past legibility; the Creator needs to see what is protecting the Poll."</div>
+            <div class="finding-fix"><strong>Fix:</strong> drop the opacity mechanism and give locked its own tokens — full-strength <code>trackOn</code>, knob in <code>dim</code> rather than <code>solar-ink</code> (removing the affordance without removing the state), and the word <code>LOCKED</code> in <code>label-caps</code> beside the name. The state is then carried by text, not by a tone that reads as its own opposite.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Option-row semantics are under-specified in the way that most often goes wrong</h3>
+              <span class="finding-location">EXPERIENCE.md § Interaction Primitives; DESIGN.md § Components → Poll option</span>
+            </header>
+            <div class="finding-note">The spine says rows are "radio/checkbox semantics" and that "the marker is a monospace glyph rather than a native radio or checkbox" — which reads as an instruction to build ARIA widgets by hand, and separately means the marker glyphs (<code>·</code>, <code>◆</code>, <code>[ ]</code>, <code>[×]</code>) will be spoken as punctuation ("middle dot, Pizza" / "left bracket, times, right bracket, Pizza").</div>
+            <div class="finding-fix"><strong>Fix:</strong> two sentences in <code>§ Component Patterns</code> — the control is a visually-hidden native <code>&lt;input type="radio|checkbox"&gt;</code> with the row as its <code>&lt;label&gt;</code>, which yields roles, names, checked state, arrow-key group navigation, and <code>Space</code> for free; the marker is drawn from the label's <code>::before</code> and is decorative. The visual spec is unchanged; only the implementation is pinned.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The rank builder performs a silent bulk state change</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns (FR-8)</span>
+            </header>
+            <div class="finding-note">Unranking an option "compacts the ranks below it" — one activation silently renumbers every control beneath it, and nothing announces the result. A screen-reader user unranks their second choice and has no way to know what the other four options now hold without re-traversing them.</div>
+            <div class="finding-fix"><strong>Fix:</strong> each option is a button whose accessible name states its rank and its action ("Pizza, rank 2 of 4, activate to unrank"), and a rank change posts a single polite announcement of the new summary — which the <code>RANKED {n} OF {total}</code> line already computes and can serve as the live region.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">14px Courier Prime is a real problem for the multi-sentence copy</h3>
+              <span class="finding-location">DESIGN.md § Typography; EXPERIENCE.md § Voice and Tone</span>
+            </header>
+            <div class="finding-note">Courier Prime's x-height is roughly 0.42em, so <code>body</code> at 14px has the apparent size of about 11px in a humanist sans, and monospace removes the word-shape cues that make sustained prose fast. Option labels, counts, timestamps and codes are short and glanceable — 14px is correct there, and the tabular-figures argument for keeping them monospaced is sound. It bites in three places: the rejection and explanation copy in <code>§ Voice and Tone</code>, which is the longest and most consequential prose on the voting page (the IP-check and VPN messages run three sentences); Security Toggle descriptions at <code>caption</code> 12px, which are the copy the design says is the whole point of the toggle; and comment bodies.</div>
+            <div class="finding-fix"><strong>Fix:</strong> widen <code>body-lg</code> 16px from "landing-page prose only" to "any multi-sentence block on any surface," and lift toggle descriptions from <code>caption</code> to <code>body</code>. The ramp doesn't change, only where its steps are allowed.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title"><code>label-caps</code> at 11px carries essential information it was not designed for</h3>
+              <span class="finding-location">DESIGN.md § Typography — <code>label-caps</code></span>
+            </header>
+            <div class="finding-note">Uppercase plus 0.18em tracking removes word-shape entirely, so 11px caps read materially slower than 11px sentence case — acceptable for <code>QUESTION</code>, column heads, and field labels, where the reader is scanning for position rather than reading. It crosses into essential information at: the <strong>trust badge</strong> (the product's core trust claim), <strong><code>TIED</code></strong>, the <strong>lost-connection notice</strong>, <strong><code>CLOSED</code></strong>, <strong><code>RANKED {n} OF {total}</code></strong>, <strong><code>122 VOTERS · 208 SELECTIONS</code></strong> (which exists specifically to stop the numbers looking like a bug), and the timezone line.</div>
+            <div class="finding-fix"><strong>Fix:</strong> add one variant — same family, same caps, same tracking, at 12px in <code>{colors.text-*}</code> — for labels that carry information rather than structure. The identity is the caps and the tracking, not the 11px; nothing about the silhouette changes and the two variants are indistinguishable at a glance.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Touch-target contradiction between the two spines</h3>
+              <span class="finding-location">DESIGN.md § Components → Availability grid cell (44px) vs EXPERIENCE.md § Interaction Primitives (48px)</span>
+            </header>
+            <div class="finding-note">DESIGN.md specifies <code>size: 44px</code>, while EXPERIENCE.md specifies "Minimum 48px tap targets on every voting-surface control (option rows, <strong>availability cells</strong>, the vote button)."</div>
+            <div class="finding-fix"><strong>Fix:</strong> 48px, and confirm it survives the mobile three-target row — three 48px targets plus a slot label fits a 320px viewport at the 20px mobile margin.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The Turnstile widget has no accessibility or theming contract</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns — "Turnstile widget"</span>
+            </header>
+            <div class="finding-note">Three consequences: it renders its own light chrome on a <code>#0B0D10</code> page unless <code>theme</code> is bound to the resolved mode; it is a bordered, rounded, shadowed box inside a system whose first Don't is "No rounded corners"; and its focus ring, contrast, and announcements are Cloudflare's, not yours. <em>The rubric review flagged the same gap from the visual-contract side (Turnstile has zero DESIGN.md mentions).</em></div>
+            <div class="finding-fix"><strong>Fix:</strong> bind <code>theme</code> to the resolved color mode (including on manual override, not just OS preference), set <code>appearance: "interaction-only"</code> so the widget is absent until a challenge is actually required — which matches the spine's own "never blocks reading the Poll" rule — and state in the spine that the widget's chrome is the one sanctioned exception to the shape rules, so an implementer doesn't try to restyle a third-party iframe.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">The disabled vote button reads as absent rather than waiting</h3>
+              <span class="finding-location">DESIGN.md § Components → Buttons</span>
+            </header>
+            <div class="finding-note">The disabled vote button is <code>{colors.faint-dark}</code> text on transparent — <strong>2.05:1</strong>. Disabled controls are WCAG-exempt, so this is inside the bar, but it is the <em>first</em> state a voter sees on a min-selection or ranked Poll, and at 2.05:1 the primary action reads as absent rather than as waiting.</div>
+            <div class="finding-fix"><strong>Fix:</strong> <code>dim</code> text, keeping the existing <code>label-caps</code> hint above it to say what unlocks it.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">The Voter Code field autofocuses ahead of the question</h3>
+              <span class="finding-location">EXPERIENCE.md § Component Patterns</span>
+            </header>
+            <div class="finding-note">The Voter Code field is "focused on load." Autofocus drops a screen-reader user into an edit field before the Poll question has been announced, on the one surface where the question is the entire point.</div>
+            <div class="finding-fix"><strong>Fix:</strong> drop the autofocus, or keep it and give the field an <code>aria-describedby</code> pointing at the question so context arrives with the focus. The field already sits above the options and is hard to miss visually.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Overlay focus return is unspecified</h3>
+              <span class="finding-location">EXPERIENCE.md § Accessibility Floor</span>
+            </header>
+            <div class="finding-note">The spine says focus is trapped inside the two confirmations and the code panel and that <code>Esc</code> always leaves — but not that focus returns to the control that opened them.</div>
+            <div class="finding-fix"><strong>Fix:</strong> one clause: focus returns to the invoking control on close, by any means.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">The Security Toggle's hit area is the 40×20px track</h3>
+              <span class="finding-location">DESIGN.md § Components → Security toggle</span>
+            </header>
+            <div class="finding-note">The hit area is well under 44px. Creator-surface, one user, so the impact is small.</div>
+            <div class="finding-fix"><strong>Fix:</strong> the name and description are inside the <code>&lt;label&gt;</code>, making the whole row the target.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li><strong>Frontmatter.</strong> DESIGN.md is complete (<code>name</code>, <code>description</code>, <code>status</code>, <code>updated</code>, <code>sources</code>). EXPERIENCE.md omits <code>description</code>, which matches both shape references, so that's fine — but its <code>sources</code> list omits oddspark.dev and the two screenshots that it credits in <code>§ Inspiration &amp; Anti-patterns</code> (see §5, §7).</li>
+        <li><strong>Cross-references.</strong> All eight inter-spine section references resolve to real headings: DESIGN.md → <code>EXPERIENCE.md § Voice and Tone</code>, <code>§ Live Results &amp; Motion</code>, <code>§ Trust Surfaces</code>; EXPERIENCE.md → <code>DESIGN.md § Colors</code>, <code>§ Brand &amp; Style</code>, <code>§ Components</code>, <code>§ Components → Results bar</code>. No broken cross-refs.</li>
+        <li><strong>Token references.</strong> Zero unresolved <code>{path.to.token}</code> references across both files. The only brace-delimited strings that don't resolve are copy placeholders in <code>§ Voice and Tone</code> (<code>{deadline, local}</code>, <code>{slug}</code>, <code>{question}</code>, <code>{n}</code>, <code>{when}</code>, <code>{time}</code>, <code>{A}</code>, <code>{B}</code>, <code>{max}</code>, <code>{min}</code>, <code>{total}</code>, <code>{link}</code>), which is correct usage — though it does mean the two syntaxes collide visually. Worth a one-line note distinguishing them.</li>
+        <li><strong>Name inconsistencies.</strong> Component name drift between the spines is the significant one (§7). Also: <code>md</code> used as a breakpoint name with no definition (§2); "Session Check(s)" / "IP Check(s)" pluralization drift (§7); "vote button" (EXPERIENCE.md, ~12 occurrences) is never tied to <code>button-primary</code> (DESIGN.md), though DESIGN.md's Buttons section does say the primary button "on the voting surface is always the vote action," which closes it by implication.</li>
+        <li><strong>Internal contradictions.</strong> Two, both flagged above: "Three, and only three" motion primitives versus the fourth documented animation (§2), and "a wash never carries text-contrast responsibility" versus <code>availability-cell</code> glyphs sitting on washes (§2).</li>
+        <li><strong>No Mermaid diagrams</strong> in either file; nothing to syntax-check.</li>
+        <li><strong>Contrast figures</strong> in this review were computed with the WCAG 2.x relative-luminance formula against the hexes as written, compositing the rgba washes over their stated <code>panel</code> tracks. The accessibility reviewer computed independently with the same method and arrived at matching values.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: _bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/review-rubric.md</span>
+        <span>Generated: 2026-07-28 23:45 EDT</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

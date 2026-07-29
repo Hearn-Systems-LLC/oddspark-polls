@@ -1,0 +1,69 @@
+---
+interface Props {
+  type?: "button" | "submit" | "reset";
+  disabled?: boolean;
+  href?: string;
+  class?: string;
+}
+
+const {
+  type = "button",
+  disabled = false,
+  href,
+  class: className = "",
+} = Astro.props;
+
+const classes = ["btn-primary", disabled ? "is-disabled" : "", className]
+  .filter(Boolean)
+  .join(" ");
+---
+
+{
+  href && !disabled ? (
+    <a class={classes} href={href}>
+      <slot />
+    </a>
+  ) : (
+    <button class={classes} type={type} disabled={disabled}>
+      <slot />
+    </button>
+  )
+}
+
+<style>
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: var(--space-4) var(--space-6);
+    border: none;
+    border-radius: var(--rounded-default);
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-color);
+    font-family: var(--font-machine);
+    font-size: var(--type-button-size);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: var(--type-button-ls);
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .btn-primary:hover:not(:disabled):not(.is-disabled) {
+    background: var(--btn-primary-hover-bg);
+  }
+
+  .btn-primary:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .btn-primary:disabled,
+  .btn-primary.is-disabled {
+    color: var(--btn-disabled-color);
+    background: var(--color-panel);
+    cursor: not-allowed;
+  }
+</style>

@@ -1,0 +1,113 @@
+# generated: 2026-07-29T11:11:59-0400
+# last_updated: 2026-07-29T12:00:21-0400
+# project: oddspark-polls
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
+
+generated: 2026-07-29T11:11:59-0400
+last_updated: 2026-07-29T12:00:21-0400
+project: oddspark-polls
+project_key: NOKEY
+tracking_system: file-system
+story_location: "{project-root}/_bmad-output/implementation-artifacts"
+
+development_status:
+  epic-1: in-progress
+  1-1-project-foundation-deployable-skeleton: review
+  1-2-creator-sign-in-with-google-or-github: ready-for-dev
+  1-3-create-a-multiple-choice-poll: backlog
+  1-4-custom-links: backlog
+  1-5-cast-a-vote-that-counts-exactly-once: backlog
+  1-6-voting-page-states-resilience: backlog
+  1-7-multi-select-voting: backlog
+  1-8-results-view-with-visibility-settings: backlog
+  1-9-live-updating-results: backlog
+  1-10-motion-system-chart-toggle: backlog
+  1-11-creator-dashboard: backlog
+  1-12-close-edit-delete: backlog
+  1-13-share-a-poll: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-per-poll-security-toggles: backlog
+  2-2-ip-checks: backlog
+  2-3-captcha-on-the-vote-action: backlog
+  2-4-trust-badge: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-listing-control-opt-into-discovery: backlog
+  3-2-discover-catalog-sitemap: backlog
+  3-3-administrator-delisting: backlog
+  3-4-landing-page: backlog
+  3-5-demo-poll: backlog
+  3-6-presentable-repository: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-comment-with-your-vote: backlog
+  4-2-comment-list-moderation: backlog
+  4-3-csv-export: backlog
+  4-4-xlsx-export: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-cast-a-ranked-ballot: backlog
+  5-2-deterministic-irv-tabulation: backlog
+  5-3-per-round-display-ballot-manifest: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-upload-image-options: backlog
+  6-2-vote-on-an-image-poll: backlog
+  6-3-media-cleanup-lifecycle: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-propose-time-slots: backlog
+  7-2-mark-availability: backlog
+  7-3-revise-your-availability: backlog
+  7-4-availability-grid-tally: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-generate-manage-voter-codes: backlog
+  8-2-vote-with-a-voter-code: backlog
+  8-3-vpn-blocking: backlog
+  epic-8-retrospective: optional

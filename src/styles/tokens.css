@@ -1,0 +1,386 @@
+/**
+ * DESIGN.md token set — single canonical stylesheet source.
+ * Mode-suffixed source tokens collapse to unsuffixed runtime vars.
+ *
+ * Light-mode rule: -dark → -light suffix swap, with exactly three
+ * …Light exceptions (results-bar leader marker, availability yes glyph, overlay scrim).
+ */
+
+/* ── Source tokens (both modes explicit; neither is default) ── */
+:root {
+  /* Colors — dark */
+  --color-void-dark: #0b0d10;
+  --color-panel-dark: #101419;
+  --color-rule-dark: #1d242c;
+  --color-text-dark: #c6cfd8;
+  --color-dim-dark: #78848f;
+  --color-faint-dark: #3d4750;
+  --color-entropy-dark: #6e8fb8;
+  --color-entropy-wash-dark: rgba(110, 143, 184, 0.22);
+  --color-solar-dark: #c9a227;
+  --color-solar-hover-dark: #d9b33a;
+  --color-solar-ink-dark: #c9a227;
+  --color-solar-wash-dark: rgba(201, 162, 39, 0.24);
+  --color-on-solar-dark: #0b0d10;
+  --color-focus-ring-dark: #c9a227;
+  --color-alarm-dark: #b8705e;
+
+  /* Colors — light */
+  --color-void-light: #f5f7f9;
+  --color-panel-light: #ffffff;
+  --color-rule-light: #d8dee4;
+  --color-text-light: #1a2028;
+  --color-dim-light: #5a6773;
+  --color-faint-light: #9aa6b2;
+  --color-entropy-light: #3d6491;
+  --color-entropy-wash-light: rgba(61, 100, 145, 0.16);
+  --color-solar-light: #c9a227;
+  --color-solar-hover-light: #d9b33a;
+  --color-solar-ink-light: #8a6d10;
+  --color-solar-ink-on-wash-light: #6e560b;
+  --color-solar-wash-light: rgba(201, 162, 39, 0.28);
+  --color-on-solar-light: #0b0d10;
+  --color-focus-ring-light: #8a6d10;
+  --color-alarm-light: #9a4b33;
+
+  /* Light-mode-only exception sources */
+  --color-results-bar-leader-marker-light: #8a6d10;
+  --color-availability-yes-glyph-light: #6e560b;
+  --color-overlay-scrim-light: rgba(26, 32, 40, 0.36);
+  --color-overlay-scrim-dark: rgba(11, 13, 16, 0.72);
+
+  /* Typography families */
+  --font-machine: "Courier Prime", "Courier New", monospace;
+  --font-human: "Newsreader", "Times New Roman", serif;
+
+  /* Typography scale */
+  --type-display-size: 40px;
+  --type-display-lh: 1.15;
+  --type-display-ls: -0.01em;
+  --type-display-mobile-size: 30px;
+  --type-display-mobile-lh: 1.2;
+  --type-poll-question-size: 26px;
+  --type-poll-question-lh: 1.3;
+  --type-heading-lg-size: 24px;
+  --type-heading-lg-lh: 1.25;
+  --type-heading-md-size: 19px;
+  --type-heading-md-lh: 1.35;
+  --type-body-size: 14px;
+  --type-body-lh: 1.65;
+  --type-body-lg-size: 16px;
+  --type-body-lg-lh: 1.7;
+  --type-label-caps-size: 11px;
+  --type-label-caps-lh: 1.4;
+  --type-label-caps-ls: 0.18em;
+  --type-label-caps-lg-size: 12px;
+  --type-button-size: 13px;
+  --type-button-ls: 0.22em;
+  --type-data-size: 14px;
+  --type-data-lh: 1.2;
+  --type-data-lg-size: 20px;
+  --type-data-lg-lh: 1.1;
+  --type-caption-size: 12px;
+  --type-caption-lh: 1.5;
+
+  /* Motion (defined now; nothing animates in story 1.1) */
+  --motion-bar-transition: 480ms;
+  --motion-spark: 180ms;
+  --motion-count-up: 400ms;
+  --motion-leader-crossfade: 240ms;
+  --motion-pulse: 2400ms;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Breakpoints (reference; media queries use literals) */
+  --bp-sm: 640px;
+  --bp-lg: 1024px;
+
+  /* Radius — zero everywhere except live-indicator full */
+  --rounded-sm: 0;
+  --rounded-default: 0;
+  --rounded-md: 0;
+  --rounded-lg: 0;
+  --rounded-xl: 0;
+  --rounded-full: 9999px;
+
+  /* Spacing */
+  --space-hairline: 1px;
+  --space-unit: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-14: 56px;
+  --space-20: 80px;
+  --space-gutter-mobile: 20px;
+  --space-gutter-desktop: 32px;
+  --space-margin-mobile: 20px;
+  --space-margin-desktop: 48px;
+  --space-section-gap: 56px;
+  --space-measure: 68ch;
+
+  /* Component tokens (bound to dark source; runtime mode swaps resolve) */
+  --btn-primary-bg: var(--color-solar);
+  --btn-primary-hover-bg: var(--color-solar-hover);
+  --btn-primary-color: var(--color-on-solar);
+  --btn-secondary-bg: transparent;
+  --btn-secondary-color: var(--color-text);
+  --btn-secondary-border: var(--space-hairline) solid var(--color-rule);
+  --btn-disabled-color: var(--color-dim);
+  --input-border-bottom: var(--space-hairline) solid var(--color-rule);
+  --input-border-bottom-focus: var(--space-hairline) solid var(--color-solar-ink);
+  --input-placeholder: var(--color-faint);
+  --poll-option-marker: var(--color-faint);
+  --poll-option-marker-selected: var(--color-solar-ink);
+  --poll-option-hover-bg: var(--color-panel);
+  --results-bar-height: 34px;
+  --results-bar-fill: var(--color-entropy-wash);
+  --results-bar-fill-leader: var(--color-solar-wash);
+  --results-bar-edge: var(--color-entropy);
+  --results-bar-edge-leader: var(--color-solar-ink);
+  --results-bar-leader-marker-color: var(--color-solar-ink);
+  --overlay-scrim: var(--color-overlay-scrim);
+  --focus-outline: 2px solid var(--color-focus-ring);
+  --focus-outline-offset: 2px;
+}
+
+/* ── Dark mode runtime (unsuffixed) ── */
+:root,
+[data-mode="dark"] {
+  color-scheme: dark;
+  --color-void: var(--color-void-dark);
+  --color-panel: var(--color-panel-dark);
+  --color-rule: var(--color-rule-dark);
+  --color-text: var(--color-text-dark);
+  --color-dim: var(--color-dim-dark);
+  --color-faint: var(--color-faint-dark);
+  --color-entropy: var(--color-entropy-dark);
+  --color-entropy-wash: var(--color-entropy-wash-dark);
+  --color-solar: var(--color-solar-dark);
+  --color-solar-hover: var(--color-solar-hover-dark);
+  --color-solar-ink: var(--color-solar-ink-dark);
+  --color-solar-wash: var(--color-solar-wash-dark);
+  --color-on-solar: var(--color-on-solar-dark);
+  --color-focus-ring: var(--color-focus-ring-dark);
+  --color-alarm: var(--color-alarm-dark);
+  --color-overlay-scrim: var(--color-overlay-scrim-dark);
+  --results-bar-leader-marker-color: var(--color-solar-ink-dark);
+}
+
+/* ── Light mode runtime ── */
+[data-mode="light"] {
+  color-scheme: light;
+  --color-void: var(--color-void-light);
+  --color-panel: var(--color-panel-light);
+  --color-rule: var(--color-rule-light);
+  --color-text: var(--color-text-light);
+  --color-dim: var(--color-dim-light);
+  --color-faint: var(--color-faint-light);
+  --color-entropy: var(--color-entropy-light);
+  --color-entropy-wash: var(--color-entropy-wash-light);
+  --color-solar: var(--color-solar-light);
+  --color-solar-hover: var(--color-solar-hover-light);
+  --color-solar-ink: var(--color-solar-ink-light);
+  --color-solar-wash: var(--color-solar-wash-light);
+  --color-on-solar: var(--color-on-solar-light);
+  --color-focus-ring: var(--color-focus-ring-light);
+  --color-alarm: var(--color-alarm-light);
+  /* Exception: overlay.scrimLight */
+  --color-overlay-scrim: var(--color-overlay-scrim-light);
+  /* Exception: results-bar.leaderMarkerColorLight */
+  --results-bar-leader-marker-color: var(--color-results-bar-leader-marker-light);
+}
+
+/* OS preference when no manual override (applied via html without data-mode) */
+@media (prefers-color-scheme: light) {
+  :root:not([data-mode]) {
+    color-scheme: light;
+    --color-void: var(--color-void-light);
+    --color-panel: var(--color-panel-light);
+    --color-rule: var(--color-rule-light);
+    --color-text: var(--color-text-light);
+    --color-dim: var(--color-dim-light);
+    --color-faint: var(--color-faint-light);
+    --color-entropy: var(--color-entropy-light);
+    --color-entropy-wash: var(--color-entropy-wash-light);
+    --color-solar: var(--color-solar-light);
+    --color-solar-hover: var(--color-solar-hover-light);
+    --color-solar-ink: var(--color-solar-ink-light);
+    --color-solar-wash: var(--color-solar-wash-light);
+    --color-on-solar: var(--color-on-solar-light);
+    --color-focus-ring: var(--color-focus-ring-light);
+    --color-alarm: var(--color-alarm-light);
+    --color-overlay-scrim: var(--color-overlay-scrim-light);
+    --results-bar-leader-marker-color: var(--color-results-bar-leader-marker-light);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mode]) {
+    color-scheme: dark;
+    --color-void: var(--color-void-dark);
+    --color-panel: var(--color-panel-dark);
+    --color-rule: var(--color-rule-dark);
+    --color-text: var(--color-text-dark);
+    --color-dim: var(--color-dim-dark);
+    --color-faint: var(--color-faint-dark);
+    --color-entropy: var(--color-entropy-dark);
+    --color-entropy-wash: var(--color-entropy-wash-dark);
+    --color-solar: var(--color-solar-dark);
+    --color-solar-hover: var(--color-solar-hover-dark);
+    --color-solar-ink: var(--color-solar-ink-dark);
+    --color-solar-wash: var(--color-solar-wash-dark);
+    --color-on-solar: var(--color-on-solar-dark);
+    --color-focus-ring: var(--color-focus-ring-dark);
+    --color-alarm: var(--color-alarm-dark);
+    --color-overlay-scrim: var(--color-overlay-scrim-dark);
+    --results-bar-leader-marker-color: var(--color-solar-ink-dark);
+  }
+}
+
+/* ── Base layout (UX-DR1) ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-void);
+  color: var(--color-text);
+  font-family: var(--font-machine);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-lh);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--color-void);
+  color: var(--color-text);
+}
+
+.site-shell {
+  max-width: var(--space-measure);
+  margin-inline: auto;
+  padding-inline: var(--space-margin-mobile);
+  padding-block: var(--space-8);
+}
+
+@media (min-width: 640px) {
+  .site-shell {
+    padding-inline: var(--space-margin-desktop);
+  }
+}
+
+.site-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-6);
+  border-bottom: var(--space-hairline) solid var(--color-rule);
+  margin-bottom: var(--space-8);
+}
+
+.site-title {
+  font-family: var(--font-human);
+  font-size: var(--type-heading-lg-size);
+  font-weight: 400;
+  line-height: var(--type-heading-lg-lh);
+  margin: 0;
+}
+
+.site-tagline {
+  font-family: var(--font-machine);
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-lh);
+  color: var(--color-dim);
+  margin: var(--space-2) 0 0;
+}
+
+.label-caps {
+  font-family: var(--font-machine);
+  font-size: var(--type-label-caps-size);
+  font-weight: 400;
+  line-height: var(--type-label-caps-lh);
+  letter-spacing: var(--type-label-caps-ls);
+  text-transform: uppercase;
+  color: var(--color-dim);
+}
+
+.section {
+  margin-bottom: var(--space-section-gap);
+}
+
+.section-title {
+  font-family: var(--font-human);
+  font-size: var(--type-heading-md-size);
+  font-weight: 400;
+  line-height: var(--type-heading-md-lh);
+  margin: 0 0 var(--space-4);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.rule {
+  border: 0;
+  border-top: var(--space-hairline) solid var(--color-rule);
+  margin: var(--space-6) 0;
+}
+
+/* Smoke marker — token-derived, used by staging smoke check */
+.token-smoke-marker {
+  /* solar-dark fill hex appears in HTML for deploy gate assertion */
+  --smoke-token: var(--color-solar-dark);
+}
+
+/* Focus rings for native focusable elements that aren't components */
+:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.mode-toggle {
+  font-family: var(--font-machine);
+  font-size: var(--type-label-caps-size);
+  letter-spacing: var(--type-label-caps-ls);
+  text-transform: uppercase;
+  color: var(--color-dim);
+  background: transparent;
+  border: var(--space-hairline) solid var(--color-rule);
+  border-radius: var(--rounded-default);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.mode-toggle:hover {
+  border-color: var(--color-dim);
+  color: var(--color-text);
+}
+
+.mode-toggle:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-outline-offset);
+}

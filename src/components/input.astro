@@ -1,0 +1,83 @@
+---
+interface Props {
+  id: string;
+  name: string;
+  label: string;
+  type?: string;
+  value?: string;
+  placeholder?: string;
+  required?: boolean;
+  error?: boolean;
+  class?: string;
+}
+
+const {
+  id,
+  name,
+  label,
+  type = "text",
+  value = "",
+  placeholder = "",
+  required = false,
+  error = false,
+  class: className = "",
+} = Astro.props;
+---
+
+<div class:list={["field", className]}>
+  <label class="label-caps field-label" for={id}>{label}</label>
+  <input
+    class:list={["field-input", error && "is-error"]}
+    id={id}
+    name={name}
+    type={type}
+    value={value}
+    placeholder={placeholder}
+    required={required}
+    aria-invalid={error ? "true" : undefined}
+  />
+</div>
+
+<style>
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .field-label {
+    display: block;
+  }
+
+  .field-input {
+    width: 100%;
+    min-height: 44px;
+    padding: var(--space-2) 0;
+    border: none;
+    border-bottom: var(--input-border-bottom);
+    border-radius: var(--rounded-default);
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .field-input::placeholder {
+    color: var(--input-placeholder);
+  }
+
+  .field-input:focus {
+    outline: none;
+    border-bottom: var(--input-border-bottom-focus);
+  }
+
+  .field-input:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .field-input.is-error {
+    border-bottom: var(--space-hairline) solid var(--color-alarm);
+  }
+</style>

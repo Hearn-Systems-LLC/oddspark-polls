@@ -1,0 +1,86 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Local default (wrangler dev). Staging/production selected at build time via CLOUDFLARE_ENV.
+  // main is the Astro Cloudflare adapter entry (adapter emits dist worker on build).
+  "name": "oddspark-polls-local",
+  "main": "@astrojs/cloudflare/entrypoints/server",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist"
+  },
+  "observability": {
+    "enabled": true
+  },
+  // Astro sessions KV (adapter default binding name SESSION)
+  "kv_namespaces": [
+    {
+      "binding": "SESSION",
+      "id": "5f20e060b0ca4b04bdaadc0a97e8c8dc"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "oddspark-polls-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "db/migrations"
+    }
+  ],
+  // R2 for poll media (Epic 6). Named MEDIA to avoid clashing with Cloudflare Images "IMAGES".
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "oddspark-polls-local"
+    }
+  ],
+  "env": {
+    "staging": {
+      "name": "oddspark-polls-staging",
+      "kv_namespaces": [
+        {
+          "binding": "SESSION",
+          "id": "f219b14e370243368015a02f39a72bcb"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "oddspark-polls-staging",
+          "database_id": "31436bc9-f1bc-48e7-bec6-5120b8737b4a",
+          "migrations_dir": "db/migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "oddspark-polls-staging"
+        }
+      ]
+    },
+    "production": {
+      "name": "oddspark-polls",
+      "kv_namespaces": [
+        {
+          "binding": "SESSION",
+          "id": "8b1420bf80b742eaac4d6b56bd94797e"
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "oddspark-polls",
+          "database_id": "3c2bbc50-6224-4052-9d9c-2bab17919c5f",
+          "migrations_dir": "db/migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA",
+          "bucket_name": "oddspark-polls"
+        }
+      ]
+    }
+  }
+}

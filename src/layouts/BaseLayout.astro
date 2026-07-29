@@ -1,0 +1,42 @@
+---
+import "../styles/fonts.css";
+import "../styles/tokens.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = "oddspark polls",
+  description = "Trustworthy casual polls — free, full-featured, no subscription.",
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <!-- Anti-flash mode: apply stored override before paint when JS is available -->
+    <script is:inline>
+      (function () {
+        try {
+          var stored = localStorage.getItem("oddspark-mode");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.setAttribute("data-mode", stored);
+          }
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <slot />
+    <script src="../scripts/mode-override.ts"></script>
+  </body>
+</html>

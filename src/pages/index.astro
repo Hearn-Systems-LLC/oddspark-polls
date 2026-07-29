@@ -1,0 +1,101 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import ButtonPrimary from "../components/button-primary.astro";
+import ButtonSecondary from "../components/button-secondary.astro";
+import Input from "../components/input.astro";
+import PollOption from "../components/poll-option.astro";
+import ResultsBar from "../components/results-bar.astro";
+import Overlay from "../components/overlay.astro";
+---
+
+<BaseLayout title="oddspark polls — foundation">
+  <div class="site-shell">
+    <header class="site-header">
+      <div>
+        <p class="label-caps">polls.oddspark.dev</p>
+        <h1 class="site-title">oddspark polls</h1>
+        <p class="site-tagline">
+          Trustworthy casual polls — multiple-choice, ranked, image, meeting.
+          Free. No subscription.
+        </p>
+      </div>
+      <button
+        type="button"
+        class="mode-toggle"
+        data-mode-toggle
+        aria-pressed="false"
+      >
+        Toggle mode
+      </button>
+    </header>
+
+    <main>
+      <section class="section">
+        <h2 class="section-title">Foundation status</h2>
+        <p>
+          Deployable skeleton is live. Auth, poll creation, and voting land in
+          later stories. This page proves the design-token system, primitives,
+          and deploy gate.
+        </p>
+        <!-- Token-derived smoke marker for staging/production HTTP smoke check -->
+        <p
+          class="token-smoke-marker label-caps"
+          data-smoke-marker="oddspark-token-solar"
+          data-token-solar="#C9A227"
+        >
+          smoke · solar · #C9A227
+        </p>
+      </section>
+
+      <hr class="rule" />
+
+      <section class="section">
+        <h2 class="section-title">Buttons</h2>
+        <div class="stack" style="flex-direction: row; flex-wrap: wrap; gap: var(--space-3);">
+          <ButtonPrimary type="button">Vote</ButtonPrimary>
+          <ButtonSecondary type="button">Share</ButtonSecondary>
+          <ButtonPrimary type="button" disabled>Counting…</ButtonPrimary>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Input</h2>
+        <Input
+          id="demo-question"
+          name="question"
+          label="Poll question"
+          placeholder="What should we ship next?"
+        />
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Poll options</h2>
+        <div class="stack" style="gap: 0;">
+          <PollOption
+            id="opt-a"
+            name="demo"
+            value="a"
+            label="Multiple choice"
+            checked
+          />
+          <PollOption id="opt-b" name="demo" value="b" label="Ranked choice" />
+          <PollOption id="opt-c" name="demo" value="c" label="Image poll" />
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Results bars</h2>
+        <div class="stack" style="gap: 0;">
+          <ResultsBar label="Multiple choice" percent={47} count={122} leader />
+          <ResultsBar label="Ranked choice" percent={31} count={80} />
+          <ResultsBar label="Image poll" percent={22} count={57} />
+        </div>
+      </section>
+
+      <!-- Overlay primitive present but closed; open=false demonstrates token-bound structure without trapping focus -->
+      <Overlay open={false} title="Confirm">
+        <p>Overlay primitive is wired; closed by default on this page.</p>
+      </Overlay>
+    </main>
+  </div>
+</BaseLayout>

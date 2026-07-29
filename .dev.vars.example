@@ -1,0 +1,9 @@
+# Local secrets for wrangler dev / astro dev (copy to .dev.vars — gitignored).
+# No production secrets belong here.
+
+# Example placeholders for later stories:
+# BETTER_AUTH_SECRET=
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=

@@ -12,9 +12,27 @@ _bmad/config.user.toml
 # Node
 node_modules/
 *.log
+dist/
+.deploy/
+.astro/
+.pnpm-store/
 
 # Cloudflare / local secrets
 .wrangler/
 .dev.vars
 .env
 .env.*
+!.dev.vars.example
+.gstack/
+
+# Test / Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

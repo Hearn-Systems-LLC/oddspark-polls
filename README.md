@@ -1,51 +1,122 @@
 # oddspark-polls
 
-A free, full-featured polling app — StrawPoll's paid-tier feature set with no paywall.
+Trustworthy casual polls at [polls.oddspark.dev](https://polls.oddspark.dev) — multiple-choice, ranked, image, and meeting polls with vote security and no subscription wall.
 
-- **Deploy target:** Cloudflare, at `polls.oddspark.dev`
-- **Build method:** [BMad Method](https://bmadcode.com/) v6.10.0, with the
-  [bmad-loop](https://github.com/bmad-code-org/bmad-loop) orchestrator driving the
-  implementation phase.
+This is a **public demonstration build**: the product is real, the repo is presentable, and nothing secret belongs in history.
 
-The product scope, architecture, and stack are defined by the BMad planning
-artifacts under `_bmad-output/`, not by this README. Nothing here is
-implementation yet.
+## Stack
 
-## Workflow status
+| Layer | Choice |
+| --- | --- |
+| Runtime | Cloudflare Workers (`nodejs_compat`) |
+| Framework | Astro 7 (SSR via `@astrojs/cloudflare`) |
+| Database | Cloudflare D1 (forward-only SQL migrations) |
+| Object storage | Cloudflare R2 (poll images; later stories) |
+| Auth | Better Auth + Google/GitHub OAuth (Story 1.2) |
+| Tests | Vitest (unit + workerd integration) · Playwright e2e |
+| Package manager | pnpm 11.17.0 · Node 24.18.0 |
 
-| Phase | Step | Skill | Status |
-|---|---|---|---|
-| 1 — Analysis | Product Brief | `bmad-product-brief` | next |
-| 2 — Planning | PRD (required) | `bmad-prd` | |
-| 2 — Planning | UX | `bmad-ux` | |
-| 3 — Solutioning | Architecture (required) | `bmad-architecture` | |
-| 3 — Solutioning | Epics & Stories (required) | `bmad-create-epics-and-stories` | |
-| 3 — Solutioning | Readiness check (required) | `bmad-check-implementation-readiness` | |
-| 4 — Implementation | Sprint planning (required) | `bmad-sprint-planning` | |
-| 4 — Implementation | Autonomous build | `bmad-loop run` | |
+Binding truth lives in `wrangler.jsonc`. Secrets never do.
 
-Run each planning step in a fresh context window.
+## Environments
 
-## bmad-loop
+| Env | Worker name | D1 | R2 |
+| --- | --- | --- | --- |
+| local | `oddspark-polls-local` (`wrangler dev`) | local D1 | local R2 |
+| staging | `oddspark-polls-staging` | `oddspark-polls-staging` | `oddspark-polls-staging` |
+| production | `oddspark-polls` | `oddspark-polls` | `oddspark-polls` |
 
-The orchestrator is configured and preflighted. It drives **claude** for the dev
-pass and **codex** for the independent review pass (`.bmad-loop/policy.toml`,
-gitignored — machine-specific).
+### Secrets
 
 ```bash
-bmad-loop validate --project .    # preflight
-bmad-loop run --dry-run           # print the plan, spawn nothing
-bmad-loop run                     # execute the sprint queue
-bmad-loop tui                     # dashboard
+# Per environment (staging / production)
+pnpm wrangler secret put SOME_SECRET --env staging
+pnpm wrangler secret put SOME_SECRET --env production
+
+# Local: copy and edit
+cp .dev.vars.example .dev.vars
 ```
 
-`bmad-loop run` requires `_bmad-output/implementation-artifacts/sprint-status.yaml`,
-which `bmad-sprint-planning` produces. Until then there is no story queue to run.
+## Local development
 
-### One-time, per machine
+```bash
+# Prerequisites: Node 24.18.0 (see .nvmrc), pnpm 11.17.0
+nvm use
+corepack enable
+pnpm install
 
-Spawned sessions cannot answer first-run dialogs, so accept them by hand once:
+# Apply local D1 migrations
+pnpm migrate:local
 
-- `claude` — launch once in this directory, accept workspace trust + hooks approval.
-- `codex` — launch once in this directory, accept workspace trust, then
-  "Hooks need review" → **Trust all and continue**. Untrusted hooks silently never fire.
+# Dev server
+pnpm dev
+
+# Tests
+pnpm test              # unit + integration
+pnpm test:e2e          # Playwright (starts dev server)
+
+# Production build
+pnpm build
+```
+
+## Deploy gate (AR-3)
+
+Order is fixed:
+
+1. Tests + build
+2. Staging migration
+3. Staging deploy
+4. Staging smoke (HTTP 200 + token marker in HTML)
+5. Production migration
+6. Production deploy
+
+GitHub Actions: `.github/workflows/deploy.yml`.
+
+Manual:
+
+```bash
+pnpm test && pnpm build
+pnpm migrate:staging && pnpm deploy:staging
+SMOKE_URL=https://oddspark-polls-staging.hearnsystems.workers.dev pnpm smoke:staging
+pnpm migrate:production && pnpm deploy:production
+```
+
+### Live URLs (foundation placeholder)
+
+| Environment | URL |
+| --- | --- |
+| Staging | https://oddspark-polls-staging.hearnsystems.workers.dev |
+| Production | https://oddspark-polls.hearnsystems.workers.dev |
+
+Custom domain `polls.oddspark.dev` is wired later.
+
+## Migrations
+
+- Files: `db/migrations/NNNN_description.sql` (forward-only)
+- Checksums: `db/migrations.manifest.json` (CI rejects edits to historical files)
+- Guard: `pnpm migrations:guard`
+- Refresh checksums after adding a new migration: `pnpm migrations:checksum`
+
+## Design system
+
+Tokens come from DESIGN.md and live in `src/styles/tokens.css`. Mode is OS preference by default; a progressive-enhancement toggle persists light/dark in `localStorage`. Courier Prime + Newsreader are self-hosted under `public/fonts/`.
+
+## Recovery
+
+D1 Time Travel is the database recovery floor. After any restore, reconcile R2 from D1 ownership records. See [docs/recovery.md](docs/recovery.md).
+
+## Project layout
+
+Hexagonal structural seed:
+
+- `src/pages` — inbound HTTP / SSR pages
+- `src/middleware.ts` — request context, CSRF boundary, telemetry
+- `src/components` — token-bound UI primitives
+- `src/modules/*` — domain modules (identity, polls, voting, …)
+- `src/adapters/*` — outbound adapters (d1, r2, telemetry, …)
+- `db/migrations` — D1 SQL
+- `tests/{unit,integration,e2e}`
+
+## License / demonstration
+
+Built in public as a demonstration of the BMad Method implementation path. Do not commit secrets, OAuth client secrets, or personal data.

@@ -1,0 +1,106 @@
+---
+/**
+ * Static token-bound results bar skeleton (Story 1.1).
+ * Live data and animation arrive with results stories.
+ */
+interface Props {
+  label: string;
+  percent: number;
+  count: number;
+  leader?: boolean;
+  class?: string;
+}
+
+const {
+  label,
+  percent,
+  count,
+  leader = false,
+  class: className = "",
+} = Astro.props;
+
+const width = Math.max(0, Math.min(100, percent));
+---
+
+<div
+  class:list={["results-bar", leader && "is-leader", className]}
+  role="img"
+  aria-label={`${label}: ${percent}% · ${count}`}
+>
+  <div class="results-bar-track" style={`--bar-width: ${width}%`}>
+    <div class="results-bar-fill"></div>
+    <div class="results-bar-content">
+      <span class="results-bar-label">
+        {leader && (
+          <span class="results-bar-leader-mark" aria-hidden="true">◆</span>
+        )}
+        {label}
+      </span>
+      <span class="results-bar-value">{percent}% · {count}</span>
+    </div>
+  </div>
+</div>
+
+<style>
+  .results-bar {
+    border-bottom: var(--space-hairline) solid var(--color-rule);
+  }
+
+  .results-bar-track {
+    position: relative;
+    min-height: var(--results-bar-height);
+    background: var(--color-panel);
+  }
+
+  .results-bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--bar-width);
+    background: var(--results-bar-fill);
+    border-right: 2px solid var(--results-bar-edge);
+  }
+
+  .results-bar.is-leader .results-bar-fill {
+    background: var(--results-bar-fill-leader);
+    border-right-color: var(--results-bar-edge-leader);
+  }
+
+  .results-bar-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-1);
+    min-height: var(--results-bar-height);
+    padding-inline: var(--space-3);
+  }
+
+  .results-bar-label {
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-text);
+  }
+
+  .results-bar-leader-mark {
+    color: var(--results-bar-leader-marker-color);
+    margin-right: var(--space-2);
+  }
+
+  .results-bar-value {
+    font-family: var(--font-machine);
+    font-size: var(--type-data-size);
+    font-weight: 700;
+    line-height: var(--type-data-lh);
+    color: var(--color-text);
+    white-space: nowrap;
+  }
+
+  @media (min-width: 1024px) {
+    .results-bar-track,
+    .results-bar-content {
+      min-height: 38px;
+    }
+  }
+</style>

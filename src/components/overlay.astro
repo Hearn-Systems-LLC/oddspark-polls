@@ -1,0 +1,65 @@
+---
+/**
+ * Token-bound overlay / scrim primitive.
+ * Open state controlled by caller; no client JS required for static demo.
+ */
+interface Props {
+  open?: boolean;
+  title?: string;
+  class?: string;
+}
+
+const { open = false, title = "Dialog", class: className = "" } = Astro.props;
+---
+
+{
+  open && (
+    <div class:list={["overlay", className]} role="dialog" aria-modal="true" aria-label={title}>
+      <div class="overlay-scrim"></div>
+      <div class="overlay-panel">
+        <p class="label-caps overlay-title">{title}</p>
+        <div class="overlay-body">
+          <slot />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+<style>
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: var(--space-margin-mobile);
+  }
+
+  .overlay-scrim {
+    position: absolute;
+    inset: 0;
+    background: var(--overlay-scrim);
+  }
+
+  .overlay-panel {
+    position: relative;
+    z-index: 1;
+    width: min(100%, 28rem);
+    background: var(--color-panel);
+    border: var(--space-hairline) solid var(--color-rule);
+    border-radius: var(--rounded-default);
+    padding: var(--space-6);
+  }
+
+  .overlay-title {
+    margin: 0 0 var(--space-4);
+  }
+
+  .overlay-body {
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-text);
+  }
+</style>

@@ -1,0 +1,28 @@
+/**
+ * Self-hosted fonts (NFR-5). Voter surface must not wait on a third-party CDN.
+ * Courier Prime: 400, 700. Newsreader: 400 only.
+ */
+
+@font-face {
+  font-family: "Courier Prime";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/courier-prime-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Courier Prime";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/courier-prime-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/newsreader-400.woff2") format("woff2");
+}

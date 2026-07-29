@@ -1,0 +1,49 @@
+{
+  "name": "oddspark-polls",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trustworthy casual polls at polls.oddspark.dev",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": "24.18.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test",
+    "test:watch": "vitest",
+    "types": "wrangler types",
+    "check": "astro check",
+    "migrate:local": "wrangler d1 migrations apply DB --local",
+    "migrate:staging": "wrangler d1 migrations apply DB --env staging --remote",
+    "migrate:production": "wrangler d1 migrations apply DB --env production --remote",
+    "migrations:guard": "node scripts/migrations-guard.mjs",
+    "migrations:checksum": "node scripts/migrations-checksum.mjs",
+    "build:staging": "CLOUDFLARE_ENV=staging astro build",
+    "build:production": "CLOUDFLARE_ENV=production astro build",
+    "deploy:staging": "node scripts/deploy.mjs staging",
+    "deploy:production": "node scripts/deploy.mjs production",
+    "smoke:staging": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "14.1.6",
+    "astro": "7.1.5",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.19.0",
+    "@playwright/test": "1.62.0",
+    "esbuild": "0.28.1",
+    "fast-check": "4.9.0",
+    "playwright": "1.62.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "wrangler": "4.115.0"
+  }
+}

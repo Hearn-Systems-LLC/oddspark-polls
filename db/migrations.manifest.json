@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-29T15:28:55.725Z",
+  "migrations": [
+    {
+      "file": "0001_baseline.sql",
+      "sha256": "1d10aa514a65cac1c6b3dd940d539a8075faa6c55906761e46773f1edd934d21"
+    }
+  ]
+}

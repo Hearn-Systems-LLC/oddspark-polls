@@ -23,7 +23,7 @@ See Cloudflare docs: [D1 Time Travel](https://developers.cloudflare.com/d1/refer
 
 ## Post-restore R2 reconciliation
 
-Image objects live in R2 (`IMAGES` binding). D1 holds ownership / reference records for adopted media (schema lands with Epic 6).
+Image objects live in R2 (`MEDIA` binding). D1 holds ownership / reference records for adopted media (schema lands with Epic 6).
 
 After any D1 restore:
 

@@ -6,7 +6,9 @@
  * …Light exceptions (results-bar leader marker, availability yes glyph, overlay scrim).
  */
 
-/* ── Source tokens (both modes explicit; neither is default) ── */
+/* ── Source tokens (both modes explicit) ──
+   Dark binds unconditionally as the no-preference fallback; light binds via
+   prefers-color-scheme or a manual data-mode override. */
 :root {
   /* Colors — dark */
   --color-void-dark: #0b0d10;
@@ -47,7 +49,7 @@
   --color-results-bar-leader-marker-light: #8a6d10;
   --color-availability-yes-glyph-light: #6e560b;
   --color-overlay-scrim-light: rgba(26, 32, 40, 0.36);
-  --color-overlay-scrim-dark: rgba(11, 13, 16, 0.72);
+  --color-overlay-scrim-dark: rgba(11, 13, 16, 0.82);
 
   /* Typography families */
   --font-machine: "Courier Prime", "Courier New", monospace;
@@ -132,11 +134,14 @@
   --btn-disabled-color: var(--color-dim);
   --input-border-bottom: var(--space-hairline) solid var(--color-rule);
   --input-border-bottom-focus: var(--space-hairline) solid var(--color-solar-ink);
+  --input-border-bottom-error: var(--space-hairline) solid var(--color-alarm);
   --input-placeholder: var(--color-faint);
   --poll-option-marker: var(--color-faint);
   --poll-option-marker-selected: var(--color-solar-ink);
   --poll-option-hover-bg: var(--color-panel);
   --results-bar-height: 34px;
+  --results-bar-height-desktop: 38px;
+  --results-bar-leading-edge-width: 2px;
   --results-bar-fill: var(--color-entropy-wash);
   --results-bar-fill-leader: var(--color-solar-wash);
   --results-bar-edge: var(--color-entropy);
@@ -337,11 +342,8 @@ body {
   margin: var(--space-6) 0;
 }
 
-/* Smoke marker — token-derived, used by staging smoke check */
-.token-smoke-marker {
-  /* solar-dark fill hex appears in HTML for deploy gate assertion */
-  --smoke-token: var(--color-solar-dark);
-}
+/* The staging smoke check asserts the data-smoke-marker attribute in the
+   served HTML; the hook lives on the placeholder page, no CSS needed. */
 
 /* Focus rings for native focusable elements that aren't components */
 :focus-visible {

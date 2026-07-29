@@ -1,11 +1,19 @@
 ---
-import BaseLayout from "../layouts/BaseLayout.astro";
+import BaseLayout from "../layouts/base-layout.astro";
 import ButtonPrimary from "../components/button-primary.astro";
 import ButtonSecondary from "../components/button-secondary.astro";
 import Input from "../components/input.astro";
 import PollOption from "../components/poll-option.astro";
 import ResultsBar from "../components/results-bar.astro";
 import Overlay from "../components/overlay.astro";
+// ?raw inlines the file at build time — the served HTML carries a value
+// provably derived from the canonical token source.
+import tokensCss from "../styles/tokens.css?raw";
+
+const solarHex = tokensCss.match(
+  /--color-solar-dark:\s*(#[0-9a-fA-F]{3,8})\s*;/,
+)?.[1];
+if (!solarHex) throw new Error("tokens.css: --color-solar-dark not found");
 ---
 
 <BaseLayout title="oddspark polls — foundation">
@@ -37,13 +45,9 @@ import Overlay from "../components/overlay.astro";
           later stories. This page proves the design-token system, primitives,
           and deploy gate.
         </p>
-        <!-- Token-derived smoke marker for staging/production HTTP smoke check -->
-        <p
-          class="token-smoke-marker label-caps"
-          data-smoke-marker="oddspark-token-solar"
-          data-token-solar="#C9A227"
-        >
-          smoke · solar · #C9A227
+        <!-- Token-derived smoke marker asserted by the staging smoke check -->
+        <p class="label-caps" data-smoke-marker="oddspark-token-solar" data-token-solar={solarHex}>
+          smoke · solar · {solarHex}
         </p>
       </section>
 

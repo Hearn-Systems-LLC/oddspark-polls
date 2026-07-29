@@ -4,7 +4,7 @@ baseline_commit: c5197a46636ccb091f44a95edb8fbddb3a5b20b1
 
 # Story 1.1: Project Foundation & Deployable Skeleton
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -67,6 +67,57 @@ so that every later story builds on a deployable, tested, secure floor instead o
   - [x] Remove the stray empty `{output_folder}/` directory at repo root
 - [x] Task 8: Prove the exit criterion (AC: #2, exit)
   - [x] Run the full gate end-to-end; styled placeholder page live on staging and production; record deployed URLs in Dev Agent Record
+
+### Review Findings
+
+Code review 2026-07-29 (bmad-code-review; blind + edge-case + acceptance layers, findings verified against source).
+
+- [x] [Review][Patch] New migrations must fail CI until manifested — guard currently `console.warn`s and exits 0 for unmanifested new files; per review decision, fail until `pnpm migrations:checksum` is refreshed in the same commit [scripts/migrations-guard.mjs:93-111]
+- [x] [Review][Defer] Overlay primitive never demonstrated (rendered `open={false}`) — accepted per review decision: overlay exists token-bound and opens in later stories; AD-2 forbids the client JS an open demo would need [src/pages/index.astro] — deferred, accepted deviation
+- [x] [Review][Patch] `workflow_dispatch` from any branch deploys to production — `if:` precedence makes the gate `(push && main) || dispatch`, so a manual dispatch on any branch runs staging + production deploy [high] [.github/workflows/deploy.yml:59,109]
+- [x] [Review][Patch] CSRF fails open on unrecognized `Sec-Fetch-Site` value — unknown value with no Origin passes instead of failing closed [src/lib/csrf.ts:84-99]
+- [x] [Review][Patch] Telemetry record lost on thrown errors — no try/finally around `await next()`, so exceptions emit zero records, violating one-record-per-operation [src/middleware.ts:68-85]
+- [x] [Review][Patch] Migrations guard is self-referential — editing a historical migration and running `pnpm migrations:checksum` in the same commit passes CI; compare against git HEAD instead of working tree [scripts/migrations-guard.mjs:79-115]
+- [x] [Review][Patch] Tested artifact ≠ deployed artifact — CI builds without `CLOUDFLARE_ENV`, uploads `dist` nobody downloads, deploy jobs rebuild from source [.github/workflows/deploy.yml:46-54, scripts/deploy.mjs:59-63]
+- [x] [Review][Patch] `pnpm check` broken (`@astrojs/check` not installed, interactive prompt) and no typecheck step anywhere in CI [package.json, .github/workflows/deploy.yml]
+- [x] [Review][Patch] Vacuous focus-ring e2e — `expect(["2px","0px"]).toContain(...)` passes with or without the focus ring [tests/e2e/placeholder.spec.ts:49]
+- [x] [Review][Patch] Middleware chain untested — integration tests call `checkCsrf` directly; `worker-entry.ts` is a stub, so the 403-before-handler wiring has no test [tests/integration/csrf.integration.test.ts, tests/integration/worker-entry.ts]
+- [x] [Review][Patch] Overlay scrim dark value contradicts canonical DESIGN.md — `rgba(11,13,16,0.72)` vs specified `0.82` [src/styles/tokens.css:50]
+- [x] [Review][Patch] Overlay deviates from DESIGN token body — four-sided hairline box (spec: top/bottom only), `padding: var(--space-6)` (spec: paddingY 6 / paddingX 5), title `label-caps` (spec: `heading-md`) [src/components/overlay.astro:45-56]
+- [x] [Review][Patch] Recovery runbook references `IMAGES` R2 binding; binding truth is `MEDIA` [docs/recovery.md:26]
+- [x] [Review][Patch] `Origin: null` with `Sec-Fetch-Site: same-origin` false-rejects legitimate same-origin posts (sandboxed iframes); add the missing test cases (metadata-only allow, `sec-fetch-site: none`, unknown value, `"null"` origin) [src/lib/csrf.ts:92-94]
+- [x] [Review][Patch] `x-request-id` only attached to 403 responses — users hitting other errors can't report the ID [src/middleware.ts:56-62]
+- [x] [Review][Patch] Guard hardening: malformed manifest entry bypasses numbering via `NaN`; invalid JSON / missing dir crash raw; uppercase `.SQL` invisible to both scripts [scripts/migrations-guard.mjs:96-103, scripts/migrations-checksum.mjs:16]
+- [x] [Review][Patch] Checksums hash raw bytes — CRLF rewrite of a historical `.sql` false-fails CI; add `.gitattributes` (`*.sql text eol=lf`) or normalize [scripts/migrations-checksum.mjs:21-23]
+- [x] [Review][Patch] Smoke hex assertion is vacuous — `#C9A227` is hardcoded in the page, so deleting the solar token still passes [scripts/smoke.mjs:24,45-50, src/pages/index.astro]
+- [x] [Review][Patch] Smoke fetch has no timeout — hung connection defeats the 5-attempt retry loop [scripts/smoke.mjs:26-29]
+- [x] [Review][Patch] `cancel-in-progress: true` can abort a run between production migration and production deploy, leaving prod schema ahead of code [.github/workflows/deploy.yml:10-12]
+- [x] [Review][Patch] `deploy.mjs` `run()` hangs on spawn ENOENT (no `error` listener); `parseJsonc` quote-parity heuristic mis-strips `//` for future edits [scripts/deploy.mjs:26-57]
+- [x] [Review][Patch] `aria-pressed` never reflects state — hardcoded `false` in markup, click always sets `true`, never synced at init [src/scripts/mode-override.ts:62, src/pages/index.astro:27]
+- [x] [Review][Patch] "Neither mode is default" comment contradicts code — `:root` binds dark unconditionally as the no-preference fallback [src/styles/tokens.css header]
+- [x] [Review][Patch] Literal values restated instead of token-bound — results-bar `2px`/`38px` (DESIGN has `leadingEdgeWidth`/`heightDesktop`), input error border literal [src/components/results-bar.astro, src/components/input.astro]
+- [x] [Review][Patch] `BaseLayout.astro` violates kebab-case component naming convention [src/layouts/BaseLayout.astro]
+- [x] [Review][Defer] Playwright e2e not in CI gate — spec gate requires unit+integration only; add when e2e suite grows — deferred, pre-existing
+- [x] [Review][Defer] Mode-toggle label goes stale on OS theme change (no `matchMedia` change listener) [src/scripts/mode-override.ts:52-69] — deferred, pre-existing
+- [x] [Review][Defer] `…Light` exception tokens `availability-yes-glyph-light` / `solar-ink-on-wash-light` defined but unconsumed — canonical DESIGN tokens for Epic 7 availability-cell [src/styles/tokens.css:41,48-50] — deferred, pre-existing
+- [x] [Review][Defer] Structural Seed deviation — `src/lib/`, `src/layouts/`, `src/styles/` not in the seed tree; additive and sensible, but ARCHITECTURE-SPINE seed should be updated to match — deferred, pre-existing
+- [x] [Review][Defer] poll-option uses a real `<span>` marker instead of decorative `::before` on the row — visually equivalent [src/components/poll-option.astro] — deferred, pre-existing
+- [x] [Review][Defer] results-bar `NaN`/`Infinity` percent unhandled — clamp gives false input-safety; latent until live data [src/components/results-bar.astro:23] — deferred, pre-existing
+
+Dismissed as noise/false positives (verified): tsconfig broken under TS 7 (`tsc --noEmit` verified passing on 7.0.2); `env.d.ts` globals inert (file has `declare global`); hostile-spread telemetry test wouldn't compile (compiles); `worker-configuration.d.ts` missing SESSION (env.d.ts covers it, CI regenerates); `minimumReleaseAgeExclude` without policy (no-op config); `/api/auth/*` pass-through before Better Auth (spec-mandated, nothing mounted); no production smoke step (spec gate ends at production deploy); e2e title mentions fonts without assertion (cosmetic).
+
+#### Review round 2 (re-review of the patches)
+
+- [x] [Review][Patch] Migration guard missed pure renames — `R100` bypass; fixed with `--no-renames` + fail on any non-`A` status [scripts/migrations-guard.mjs]
+- [x] [Review][Patch] `MIGRATIONS_BASE` was empty on push, skipping the history anchor on the deploy path; now falls back to `github.event.before` [.github/workflows/deploy.yml:45]
+- [x] [Review][Patch] Smoke marker still not token-derived after round 1; now `?raw`-inlined from tokens.css at build time and smoke reads the expected hex from tokens.css itself [src/pages/index.astro, scripts/smoke.mjs]
+- [x] [Review][Patch] Manifest hardening round 2: non-array `migrations` fails cleanly, duplicate `file` entries rejected [scripts/migrations-guard.mjs]
+- [x] [Review][Patch] Multiple `[data-mode-toggle]` buttons diverged after one click; click now syncs all toggles [src/scripts/mode-override.ts]
+- [x] [Review][Patch] `headers.set` on immutable responses (e.g. `Response.redirect()`) would throw and double-emit telemetry; now clones and emits once [src/middleware.ts]
+- [x] [Review][Patch] Smoke timeout/fetch failure died with an unhandled stack; now exits with a one-line error [scripts/smoke.mjs]
+- [x] [Review][Defer] Round-2 findings in Story 1.2 WIP code (not this story's diff): telemetry chain position vs creator-guard 303/session-middleware throw; session-middleware auth-lookup failure path + dropped rotated cookies on error + possible duplicate `set-cookie` on `/api/auth/*`; `/admin` CSRF-surface but not creator-guarded; `readRequestCsrfToken` buffers full multipart bodies; session CSRF token compared with `!==` (non-constant-time) — deferred to Story 1.2 session
+- [x] [Review][Defer] `.astro` files have no type coverage (`tsc` skips them; `astro check` unavailable on the pinned stack) — deferred, revisit when `@astrojs/check` supports TS 7
+- [x] [Review][Defer] `parseJsonc` doesn't handle block comments/BOM (wrangler's JSONC accepts `/* */`; would fail with opaque error if ever added) — deferred, latent
 
 ## Dev Notes
 
@@ -222,6 +273,7 @@ Grok 4.5 (xAI) via bmad-dev-story
 ### File List
 
 - `.dev.vars.example`
+- `.gitattributes`
 - `.github/workflows/deploy.yml`
 - `.gitignore`
 - `.nvmrc`
@@ -229,6 +281,7 @@ Grok 4.5 (xAI) via bmad-dev-story
 - `astro.config.mjs`
 - `db/migrations/0001_baseline.sql`
 - `db/migrations.manifest.json`
+- `_bmad-output/implementation-artifacts/deferred-work.md`
 - `docs/recovery.md`
 - `package.json`
 - `playwright.config.ts`
@@ -258,6 +311,7 @@ Grok 4.5 (xAI) via bmad-dev-story
 - `src/components/results-bar.astro`
 - `src/env.d.ts`
 - `src/layouts/BaseLayout.astro`
+- `src/layouts/base-layout.astro`
 - `src/lib/csrf.ts`
 - `src/lib/request-context.ts`
 - `src/middleware.ts`
@@ -274,6 +328,7 @@ Grok 4.5 (xAI) via bmad-dev-story
 - `src/styles/fonts.css`
 - `src/styles/tokens.css`
 - `tests/e2e/placeholder.spec.ts`
+- `tests/integration/astro-middleware-shim.ts`
 - `tests/integration/csrf.integration.test.ts`
 - `tests/integration/worker-entry.ts`
 - `tests/unit/csrf.test.ts`
@@ -290,3 +345,5 @@ Grok 4.5 (xAI) via bmad-dev-story
 ### Change Log
 
 - 2026-07-29: Implemented Story 1.1 foundation — scaffold, CSRF, tokens, telemetry, migrations, CI, deploy to staging+production, public GitHub remote.
+- 2026-07-29: Code review (blind/edge/acceptance layers) — 24 findings patched: workflow_dispatch restricted to main, CSRF fail-closed on unknown Sec-Fetch-Site + "null" Origin handling, telemetry emits on throw + x-request-id on all responses, migration guard fails on unmanifested new files + base-branch diff for historical edits + manifest validation, .gitattributes LF pin, CI typechecks (tsc) + builds production flavor + queues instead of cancel-in-progress, smoke timeout + non-vacuous marker, deploy.mjs spawn-error handling + scanner-based JSONC, overlay scrim 0.82 + DESIGN token body, token-bound results-bar/input values, aria-pressed sync, base-layout.astro rename, MEDIA binding in recovery doc, middleware-chain integration tests + CSRF edge-case unit tests + real focus-ring e2e. Verified: 29 unit/integration tests, 3 e2e, tsc --noEmit, guard, build all pass. Status → done.
+- 2026-07-29: Review round 2 (re-review of patches) — 7 further fixes: guard rename bypass (--no-renames), history anchor on push deploys (github.event.before), genuinely token-derived smoke marker (?raw build-time inline + smoke reads tokens.css), manifest array/duplicate validation, multi-toggle aria sync, immutable-header clone + single telemetry emit, clean smoke error exit. Verified: 56 unit/integration tests, 7 e2e, tsc, guard, build, live local smoke all pass. 1.2-WIP-scope findings deferred to the active Story 1.2 session.

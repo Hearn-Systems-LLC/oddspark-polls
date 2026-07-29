@@ -9,7 +9,9 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel mid-flight: a cancelled run between production migration and
+  # production deploy would leave prod schema ahead of code. Queue instead.
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: "24.18.0"
@@ -21,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the migration guard can diff against the base branch
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -35,28 +40,30 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Migration guard
+        env:
+          # Anchors historical-migration immutability to history: PR base on
+          # pull_request, the pre-push HEAD on push (the deploy path).
+          MIGRATIONS_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before || '' }}
         run: pnpm migrations:guard
 
       - name: Unit + integration tests
         run: pnpm test
 
+      - name: Type check
+        run: pnpm check
+
       - name: Refresh binding types
         run: pnpm types
 
+      # Build the production-flavored artifact — the same CLOUDFLARE_ENV the
+      # deploy jobs rebuild with — so the gate tests what actually ships.
       - name: Build
-        run: pnpm build
-
-      - name: Upload dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist
-          retention-days: 3
+        run: pnpm build:production
 
   deploy-staging:
     name: Staging migrate → deploy → smoke
     needs: test-and-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -106,7 +113,7 @@ jobs:
   deploy-production:
     name: Production migrate → deploy
     needs: deploy-staging
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     steps:

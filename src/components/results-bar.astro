@@ -57,7 +57,7 @@ const width = Math.max(0, Math.min(100, percent));
     inset: 0 auto 0 0;
     width: var(--bar-width);
     background: var(--results-bar-fill);
-    border-right: 2px solid var(--results-bar-edge);
+    border-right: var(--results-bar-leading-edge-width) solid var(--results-bar-edge);
   }
 
   .results-bar.is-leader .results-bar-fill {
@@ -100,7 +100,7 @@ const width = Math.max(0, Math.min(100, percent));
   @media (min-width: 1024px) {
     .results-bar-track,
     .results-bar-content {
-      min-height: 38px;
+      min-height: var(--results-bar-height-desktop);
     }
   }
 </style>

@@ -1,0 +1,20 @@
+.bmad-loop/runs/
+.bmad-loop/cache/
+.bmad-loop/policy.toml
+
+# BMad personal config (install answers scoped to one person)
+_bmad/config.user.toml
+
+# oh-my-claudecode operational state (project-scoped skills are the exception)
+.omc/
+!.omc/skills/
+
+# Node
+node_modules/
+*.log
+
+# Cloudflare / local secrets
+.wrangler/
+.dev.vars
+.env
+.env.*

@@ -39,7 +39,7 @@ const outcomeKind =
         <form method="post" action="/api/sign-in">
           <input type="hidden" name="provider" value="google" />
           <input type="hidden" name="return" value={returnAddress} />
-          <ButtonSecondary type="submit" class="provider-button">
+          <ButtonSecondary type="submit">
             CONTINUE WITH GOOGLE
           </ButtonSecondary>
         </form>
@@ -47,7 +47,7 @@ const outcomeKind =
         <form method="post" action="/api/sign-in">
           <input type="hidden" name="provider" value="github" />
           <input type="hidden" name="return" value={returnAddress} />
-          <ButtonSecondary type="submit" class="provider-button">
+          <ButtonSecondary type="submit">
             CONTINUE WITH GITHUB
           </ButtonSecondary>
         </form>

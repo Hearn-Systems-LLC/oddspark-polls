@@ -1,4 +1,5 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { SIGN_IN_DENIED_PATH } from "../../modules/identity/index";
 
 type AuthEnv = Pick<
   Env,
@@ -29,10 +30,7 @@ function resolveBaseURL(value: string): string {
 
 export function createAuthOptions(env: AuthEnv): BetterAuthOptions {
   const baseURL = resolveBaseURL(env.BETTER_AUTH_URL);
-  const defaultAuthErrorURL = new URL(
-    "/sign-in?outcome=denied&return=%2Fcreator",
-    baseURL,
-  ).toString();
+  const defaultAuthErrorURL = new URL(SIGN_IN_DENIED_PATH, baseURL).toString();
 
   return {
     database: env.DB,
@@ -41,6 +39,11 @@ export function createAuthOptions(env: AuthEnv): BetterAuthOptions {
     trustedOrigins: [baseURL],
     onAPIError: {
       errorURL: defaultAuthErrorURL,
+      // better-call's router otherwise converts non-APIError endpoint throws
+      // (D1 failure mid-callback, constraint violations) into bare 500s.
+      // Rethrow them so the mount route's own catch can redirect to the
+      // denial outcome instead.
+      throw: true,
     },
     databaseHooks: {
       account: {
@@ -113,6 +116,13 @@ export function createAuthOptions(env: AuthEnv): BetterAuthOptions {
     account: {
       modelName: "account",
       encryptOAuthTokens: true,
+      // Auto-link a returning provider when it vouches for the same verified
+      // email (Google/GitHub only). The secure requireLocalEmailVerified gate
+      // stays at its default: linking never uses an unverified local row.
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ["google", "github"],
+      },
       fields: {
         accountId: "account_id",
         providerId: "provider_id",

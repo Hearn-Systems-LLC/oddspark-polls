@@ -6,6 +6,8 @@ import { createSignInDestinations } from "../../modules/identity/index";
 
 const signInRequestSchema = z.object({
   provider: z.enum(["google", "github"]),
+  // Length is capped inside validateReturnAddress (raw + normalized forms)
+  // so every invalid value takes the same /creator fallback path.
   return: z.string().optional(),
 });
 

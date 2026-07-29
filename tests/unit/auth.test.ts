@@ -74,6 +74,9 @@ describe("Better Auth factory", () => {
     expect(options.onAPIError?.errorURL).toBe(
       "https://polls.example.test/sign-in?outcome=denied&return=%2Fcreator",
     );
+    // Rethrow non-APIError endpoint failures so the mount route's catch can
+    // redirect to the denial outcome instead of better-call's bare 500.
+    expect(options.onAPIError?.throw).toBe(true);
   });
 
   it("maps every Better Auth model field explicitly to snake_case", () => {
@@ -105,6 +108,10 @@ describe("Better Auth factory", () => {
     expect(options.account).toEqual({
       modelName: "account",
       encryptOAuthTokens: true,
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ["google", "github"],
+      },
       fields: {
         accountId: "account_id",
         providerId: "provider_id",

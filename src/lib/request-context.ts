@@ -11,6 +11,9 @@ export type RequestContext = {
   principal: CreatorPrincipal | null;
   csrfToken: SessionCsrfToken | null;
   sessionExpired: boolean;
+  /** Set when the Better Auth session lookup itself failed (D1 error, missing
+   * binding). The request degrades to signed-out; telemetry marks the record. */
+  sessionLookupFailed: boolean;
 };
 
 export const REQUEST_CONTEXT_KEY = "requestContext" as const;

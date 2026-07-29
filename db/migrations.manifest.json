@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-29T17:33:36.509Z",
+  "generatedAt": "2026-07-29T22:36:05.420Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -9,6 +9,10 @@
     {
       "file": "0002_identity_auth.sql",
       "sha256": "467255c36c9306668606fa7cfebe9ec3914e3557239f3f69fa2a0617473689b2"
+    },
+    {
+      "file": "0003_user_email_case_insensitive.sql",
+      "sha256": "e7ddcbbb702813d6aaa5c0b1b7be14da6e82c2fa72ee3969075159420a2f092a"
     }
   ]
 }

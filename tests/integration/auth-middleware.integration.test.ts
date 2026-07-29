@@ -210,6 +210,121 @@ describe("identity delivery middleware", () => {
     ).toBe(false);
   });
 
+  it("does not treat a GET to the sign-out path as a completed sign-out", async () => {
+    const { cookie } = await createAuthenticatedCookie();
+    const context = makeContext(
+      new Request("https://polls.example.test/api/auth/sign-out", {
+        headers: { cookie },
+      }),
+    );
+
+    const response = (await onRequest(
+      context,
+      (() => new Response("not-a-sign-out")) as never,
+    )) as Response;
+
+    expect(response.status).toBe(200);
+    expect(
+      response.headers
+        .getSetCookie()
+        .some((value) =>
+          /oddspark\.creator_session_seen=;\s*Path=\/;\s*Max-Age=0/u.test(
+            value,
+          ),
+        ),
+    ).toBe(false);
+  });
+
+  it("degrades to signed-out instead of 500 when the session lookup fails", async () => {
+    const { cookie } = await createAuthenticatedCookie();
+    // Force getSession to throw: hide the table it queries. applyD1Migrations
+    // only replays unapplied migrations, so restore it explicitly — a plain
+    // DROP would poison every later test in this file.
+    await testEnv.DB.prepare("ALTER TABLE session RENAME TO session_hidden").run();
+    try {
+      const context = makeContext(
+        new Request("https://polls.example.test/creator", {
+          headers: { cookie },
+        }),
+      );
+
+      const response = (await onRequest(
+        context,
+        (() => new Response("should-not-run")) as never,
+      )) as Response;
+
+      // Degraded: no principal, so the guard redirects — but without the
+      // misleading "expired" reason, and no 500.
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe("/sign-in?return=%2Fcreator");
+      expect(context.locals.requestContext?.sessionLookupFailed).toBe(true);
+      expect(context.locals.requestContext?.sessionExpired).toBe(false);
+      expect(context.locals.principal).toBeNull();
+    } finally {
+      await testEnv.DB.prepare("ALTER TABLE session_hidden RENAME TO session").run();
+    }
+  });
+
+  it("does not append getSession cookies on Better Auth mount paths", async () => {
+    const { cookie } = await createAuthenticatedCookie();
+    // Better Auth refreshes when expiresAt - expiresIn + updateAge <= now
+    // (session older than updateAge = 1 day of its 7-day life). Simulate by
+    // moving expiry to 5 days out, i.e. "created 2 days ago" — getSession
+    // then emits a session-refresh Set-Cookie the middleware could append.
+    await testEnv.DB.prepare(
+      "UPDATE session SET expires_at = ?",
+    )
+      .bind(new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString())
+      .run();
+    const context = makeContext(
+      new Request("https://polls.example.test/api/auth/get-session", {
+        headers: { cookie },
+      }),
+    );
+
+    const response = (await onRequest(
+      context,
+      (() => new Response("auth-handler-response")) as never,
+    )) as Response;
+
+    expect(response.status).toBe(200);
+    // The mount path manages its own cookies; the middleware must not append
+    // any session refresh headers from its pre-handler getSession call.
+    expect(
+      response.headers
+        .getSetCookie()
+        .some((value) => /better-auth\.session_token=/u.test(value)),
+    ).toBe(false);
+  });
+
+  it("still appends getSession refresh cookies on application paths", async () => {
+    const { cookie } = await createAuthenticatedCookie();
+    await testEnv.DB.prepare(
+      "UPDATE session SET expires_at = ?",
+    )
+      .bind(new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString())
+      .run();
+    const context = makeContext(
+      new Request("https://polls.example.test/creator", {
+        headers: { cookie },
+      }),
+    );
+
+    const response = (await onRequest(
+      context,
+      (() => new Response("creator")) as never,
+    )) as Response;
+
+    expect(response.status).toBe(200);
+    // Sanity check the fixture: the aged session really does produce a
+    // refresh cookie, which application paths must keep receiving.
+    expect(
+      response.headers
+        .getSetCookie()
+        .some((value) => /better-auth\.session_token=[^;]/u.test(value)),
+    ).toBe(true);
+  });
+
   it("requires the session-bound CSRF token on authenticated creator posts", async () => {
     const { cookie } = await createAuthenticatedCookie();
     const context = makeContext(

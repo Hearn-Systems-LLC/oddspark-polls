@@ -40,6 +40,20 @@ describe("return-address policy", () => {
     }
   });
 
+  it("rejects an oversized return value that would break the state cookie", () => {
+    expect(validateReturnAddress(`/creator?pad=${"a".repeat(4096)}`)).toBe(
+      "/creator",
+    );
+  });
+
+  it("rejects multibyte input whose percent-encoded form exceeds the cap", () => {
+    // 500 × "€" is 500 UTF-16 units (passes the raw check) but ~4500 chars
+    // once URL-normalized — over the state-cookie budget.
+    expect(validateReturnAddress(`/creator/${"€".repeat(500)}`)).toBe(
+      "/creator",
+    );
+  });
+
   it("matches only the creator route boundary", () => {
     expect(isCreatorSurfacePath("/creator")).toBe(true);
     expect(isCreatorSurfacePath("/creator/new")).toBe(true);

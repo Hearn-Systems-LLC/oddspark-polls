@@ -79,3 +79,31 @@ if (!html.includes(tokenHex)) {
 }
 
 console.log(`smoke: ok ${url} (200 + token marker + token hex ${tokenHex})`);
+
+// Auth liveness: createAuth throws at request time when any of the six auth
+// bindings is missing, so a deploy with a forgotten secret would pass the
+// page check above while every auth call 500s. /api/auth/ok is Better Auth's
+// unauthenticated health route — it exercises auth config construction (but
+// not D1; a broken DB binding with valid secrets still passes). Join
+// relatively so a SMOKE_URL with a path prefix is preserved.
+const authUrl = new URL("api/auth/ok", url.endsWith("/") ? url : `${url}/`).toString();
+let authRes;
+try {
+  authRes = await fetch(authUrl, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(15000),
+  });
+} catch (err) {
+  const reason = err instanceof Error ? err.message : String(err);
+  console.error(`smoke: auth liveness request failed for ${authUrl}: ${reason}`);
+  process.exit(1);
+}
+
+if (authRes.status !== 200) {
+  console.error(
+    `smoke: auth liveness expected 200, got ${authRes.status} for ${authUrl} — check auth bindings`,
+  );
+  process.exit(1);
+}
+
+console.log(`smoke: ok ${authUrl} (auth liveness 200)`);

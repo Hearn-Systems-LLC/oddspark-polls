@@ -1,5 +1,13 @@
 const RETURN_FALLBACK = "/creator";
 const RETURN_POLICY_ORIGIN = "https://return-policy.invalid";
+// Long enough for any real creator path; short enough that embedding the
+// value in Better Auth's OAuth state cookie stays well under the 4KB
+// browser cookie limit.
+export const MAX_RETURN_ADDRESS_LENGTH = 512;
+// Denial landing path for auth-flow failures. Shared by the Better Auth
+// errorURL default and the auth handler's catch-all fallback so the two can
+// never drift.
+export const SIGN_IN_DENIED_PATH = "/sign-in?outcome=denied&return=%2Fcreator";
 const ENCODED_PATH_SEPARATOR = /%(?:2f|5c)/i;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
@@ -32,7 +40,11 @@ export type CreatorPrincipal = {
 export function validateReturnAddress(
   value: string | null | undefined,
 ): string {
-  if (typeof value !== "string" || !isSafeRelativePath(value)) {
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_RETURN_ADDRESS_LENGTH ||
+    !isSafeRelativePath(value)
+  ) {
     return RETURN_FALLBACK;
   }
 
@@ -41,6 +53,9 @@ export function validateReturnAddress(
     const normalized = `${parsed.pathname}${parsed.search}${parsed.hash}`;
     if (
       parsed.origin !== RETURN_POLICY_ORIGIN ||
+      // Enforce the cap on the normalized form too — percent-encoding
+      // inflates multibyte input well past the raw length.
+      normalized.length > MAX_RETURN_ADDRESS_LENGTH ||
       !isSafeRelativePath(normalized) ||
       !isCreatorSurfacePath(parsed.pathname)
     ) {

@@ -9,6 +9,7 @@ import {
 import {
   checkCsrf,
   createSessionCsrfToken,
+  isBetterAuthMountPath,
   readRequestCsrfToken,
 } from "./lib/csrf";
 import type { RequestContext } from "./lib/request-context";
@@ -33,16 +34,21 @@ const CREATOR_SESSION_MARKER_COOKIE = "oddspark.creator_session_seen";
 const CREATOR_SESSION_MARKER_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+function escapeRegExpLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const CREATOR_SESSION_MARKER_PATTERN = new RegExp(
+  `(?:^|;\\s*)${escapeRegExpLiteral(CREATOR_SESSION_MARKER_COOKIE)}=1(?:;|$)`,
+  "u",
+);
+
 function hasSessionCookie(headers: Headers): boolean {
   return SESSION_COOKIE_PATTERN.test(headers.get("cookie") ?? "");
 }
 
 function hasCreatorSessionMarker(headers: Headers): boolean {
-  const cookie = headers.get("cookie") ?? "";
-  return new RegExp(
-    `(?:^|;\\s*)${CREATOR_SESSION_MARKER_COOKIE}=1(?:;|$)`,
-    "u",
-  ).test(cookie);
+  return CREATOR_SESSION_MARKER_PATTERN.test(headers.get("cookie") ?? "");
 }
 
 function creatorSessionMarkerCookie(
@@ -91,6 +97,7 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     principal: null,
     csrfToken: null,
     sessionExpired: false,
+    sessionLookupFailed: false,
   };
 
   context.locals.requestContext = requestContext;
@@ -112,11 +119,22 @@ const sessionMiddleware = defineMiddleware(async (context, next) => {
     return next();
   }
 
-  const authResult = await createAuth(workerEnv).api.getSession({
-    headers: context.request.headers,
-    returnHeaders: true,
-  });
-  const authData = authResult.response;
+  const lookupSession = () =>
+    createAuth(workerEnv).api.getSession({
+      headers: context.request.headers,
+      returnHeaders: true,
+    });
+  let authResult: Awaited<ReturnType<typeof lookupSession>> | null = null;
+  try {
+    authResult = await lookupSession();
+  } catch {
+    // A failed auth lookup (missing binding, D1 error) must degrade to
+    // signed-out, not 500 every route for cookie-bearing visitors. Flag it so
+    // the outer telemetry record marks this request as an error — one record
+    // per request, no double emission.
+    requestContext.sessionLookupFailed = true;
+  }
+  const authData = authResult?.response ?? null;
 
   if (authData) {
     const principal: CreatorPrincipal = {
@@ -129,17 +147,24 @@ const sessionMiddleware = defineMiddleware(async (context, next) => {
       workerEnv.BETTER_AUTH_SECRET,
     );
     context.locals.principal = principal;
-  } else {
+  } else if (!requestContext.sessionLookupFailed) {
+    // Definitive "session invalid" — only when the lookup itself succeeded.
+    // A failed lookup leaves session state unknown; showing the expiry line
+    // then would be wrong.
     requestContext.sessionExpired = true;
   }
 
   const pathname = new URL(context.request.url).pathname;
-  const isSignOutRequest = pathname === "/api/auth/sign-out";
+  const isSignOutRequest =
+    pathname === "/api/auth/sign-out" &&
+    context.request.method.toUpperCase() === "POST";
   let response = await next();
 
   // A sign-out response owns the session-cookie deletion. Appending refresh
   // headers from the preceding getSession call could otherwise restore it.
-  if (!isSignOutRequest) {
+  // The same hazard applies to every Better Auth handler route — they manage
+  // their own cookies, so never append getSession headers on the mount path.
+  if (!isSignOutRequest && !isBetterAuthMountPath(pathname) && authResult) {
     response = appendAuthCookies(response, authResult.headers);
   }
 
@@ -248,7 +273,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
 
       const status = response.status;
       const result =
-        status >= 500
+        rc.sessionLookupFailed || status >= 500
           ? "error"
           : status === 403
             ? "csrf_rejected"

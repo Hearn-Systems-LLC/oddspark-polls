@@ -17,7 +17,7 @@ const { open = false, title = "Dialog", class: className = "" } = Astro.props;
     <div class:list={["overlay", className]} role="dialog" aria-modal="true" aria-label={title}>
       <div class="overlay-scrim"></div>
       <div class="overlay-panel">
-        <p class="label-caps overlay-title">{title}</p>
+        <p class="overlay-title">{title}</p>
         <div class="overlay-body">
           <slot />
         </div>
@@ -47,12 +47,20 @@ const { open = false, title = "Dialog", class: className = "" } = Astro.props;
     z-index: 1;
     width: min(100%, 28rem);
     background: var(--color-panel);
-    border: var(--space-hairline) solid var(--color-rule);
+    /* DESIGN.md overlay body: single top and bottom hairline, never a box */
+    border-top: var(--space-hairline) solid var(--color-rule);
+    border-bottom: var(--space-hairline) solid var(--color-rule);
     border-radius: var(--rounded-default);
-    padding: var(--space-6);
+    padding: var(--space-6) var(--space-5);
   }
 
   .overlay-title {
+    /* DESIGN.md: title in heading-md (Newsreader 19px), not label-caps */
+    font-family: var(--font-human);
+    font-size: var(--type-heading-md-size);
+    font-weight: 400;
+    line-height: var(--type-heading-md-lh);
+    color: var(--color-text);
     margin: 0 0 var(--space-4);
   }
 

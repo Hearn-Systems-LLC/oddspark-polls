@@ -26,16 +26,76 @@ Binding truth lives in `wrangler.jsonc`. Secrets never do.
 | staging | `oddspark-polls-staging` | `oddspark-polls-staging` | `oddspark-polls-staging` |
 | production | `oddspark-polls` | `oddspark-polls` | `oddspark-polls` |
 
-### Secrets
+### OAuth applications and secrets
 
-```bash
-# Per environment (staging / production)
-pnpm wrangler secret put SOME_SECRET --env staging
-pnpm wrangler secret put SOME_SECRET --env production
+Authentication uses six separate provider registrations: one Google OAuth
+client and one GitHub OAuth App for each environment. Keeping them separate
+prevents a local or staging callback from sharing production credentials.
 
-# Local: copy and edit
-cp .dev.vars.example .dev.vars
+| Environment | Base URL | Google authorized redirect URI | GitHub callback URL |
+| --- | --- | --- | --- |
+| local | `http://localhost:4321` | `http://localhost:4321/api/auth/callback/google` | `http://localhost:4321/api/auth/callback/github` |
+| staging | `https://oddspark-polls-staging.hearnsystems.workers.dev` | `https://oddspark-polls-staging.hearnsystems.workers.dev/api/auth/callback/google` | `https://oddspark-polls-staging.hearnsystems.workers.dev/api/auth/callback/github` |
+| production | `https://oddspark-polls.hearnsystems.workers.dev` | `https://oddspark-polls.hearnsystems.workers.dev/api/auth/callback/google` | `https://oddspark-polls.hearnsystems.workers.dev/api/auth/callback/github` |
+
+Create registrations named `Oddspark Polls — Local`, `Oddspark Polls — Staging`,
+and `Oddspark Polls — Production` in each provider. Set each application's
+homepage/origin to the matching base URL and its callback to the exact URI
+above. Do not add the future custom domain until it is actually bound.
+
+Every environment requires all six bindings:
+
+- `BETTER_AUTH_SECRET`
+- `BETTER_AUTH_URL`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+
+Initialize local auth once with the masked provisioning helper. It generates an
+independent Better Auth master secret, accepts provider credentials through
+hidden prompts, and never places them in command arguments or shell history:
+
+```zsh
+./scripts/provision-auth-secrets.zsh local initialize
 ```
+
+Cloudflare secret writes are upserts, not create-only operations, so the helper
+intentionally refuses remote master-secret initialization. Bootstrap
+`BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` once in each target Worker's
+dashboard, verifying the environment before saving. Then provision or rotate
+only the Google and GitHub credentials with:
+
+```zsh
+./scripts/provision-auth-secrets.zsh local rotate-providers
+./scripts/provision-auth-secrets.zsh staging rotate-providers
+./scripts/provision-auth-secrets.zsh production rotate-providers
+```
+
+Local provisioning atomically replaces only the ignored `.dev.vars` file using
+a mode-`600` temporary file on the same filesystem. Remote provider
+provisioning sends dotenv over stdin to one `wrangler secret bulk` request, so
+each operation creates one Worker version rather than one per secret.
+Cloudflare preserves secrets omitted from a bulk update, so provider rotation
+never replaces `BETTER_AUTH_SECRET` or `BETTER_AUTH_URL`. Wrangler disk logs and
+metrics are disabled for this operation. Never paste a credential into chat, a
+command argument, `wrangler.jsonc`, CI logs, or Git.
+
+Rotating `BETTER_AUTH_SECRET` is intentionally outside this helper because it
+invalidates active sessions and makes previously encrypted OAuth access and
+refresh tokens unreadable. Treat any such rotation as a planned incident with
+session cleanup and provider reauthentication.
+
+Verify remote names without returning their values:
+
+```zsh
+WRANGLER_WRITE_LOGS=false WRANGLER_SEND_METRICS=false \
+  pnpm exec wrangler secret list --env staging --format json
+```
+
+`wrangler secret bulk` creates and deploys a Worker version immediately. After
+provisioning, deploy the tested application build and validate both provider
+round-trips before promoting.
 
 ## Local development
 

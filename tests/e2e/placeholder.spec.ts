@@ -36,7 +36,12 @@ test.describe("placeholder foundation page", () => {
   }) => {
     await page.goto("/");
     const vote = page.getByRole("button", { name: "Vote" });
-    await vote.focus();
+    // Keyboard navigation triggers :focus-visible (element.focus() may not)
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press("Tab");
+      if (await vote.evaluate((el) => document.activeElement === el)) break;
+    }
+    await expect(vote).toBeFocused();
     const outline = await vote.evaluate((el) => {
       const styles = getComputedStyle(el);
       return {
@@ -45,7 +50,9 @@ test.describe("placeholder foundation page", () => {
         outlineOffset: styles.outlineOffset,
       };
     });
-    // Focus-visible outline is 2px solid with 2px offset (may only show :focus-visible)
-    expect(["2px", "0px"]).toContain(outline.outlineWidth);
+    // Focus-visible outline is exactly 2px solid with 2px offset
+    expect(outline.outlineWidth).toBe("2px");
+    expect(outline.outlineStyle).toBe("solid");
+    expect(outline.outlineOffset).toBe("2px");
   });
 });

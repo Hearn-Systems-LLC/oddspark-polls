@@ -1,17 +1,34 @@
 /// <reference types="astro/client" />
 
 import type { RequestContext } from "./lib/request-context";
+import type { CreatorPrincipal } from "./modules/identity/index";
 
 type Runtime = import("@astrojs/cloudflare").Runtime;
 
 declare global {
+  interface AuthBindings {
+    BETTER_AUTH_SECRET: string;
+    BETTER_AUTH_URL: string;
+    GOOGLE_CLIENT_ID: string;
+    GOOGLE_CLIENT_SECRET: string;
+    GITHUB_CLIENT_ID: string;
+    GITHUB_CLIENT_SECRET: string;
+  }
+
   namespace App {
     interface Locals extends Runtime {
       requestContext?: RequestContext;
+      principal?: CreatorPrincipal | null;
     }
   }
 
-  interface Env {
+  namespace Cloudflare {
+    interface Env extends AuthBindings {}
+    interface StagingEnv extends AuthBindings {}
+    interface ProductionEnv extends AuthBindings {}
+  }
+
+  interface Env extends AuthBindings {
     DB: D1Database;
     MEDIA: R2Bucket;
     ASSETS: Fetcher;

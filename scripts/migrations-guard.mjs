@@ -4,6 +4,7 @@
  * Compares db/migrations/*.sql against db/migrations.manifest.json.
  */
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readdir, readFile, access } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,8 +19,17 @@ function fail(message) {
   process.exit(1);
 }
 
-const files = (await readdir(migrationsDir))
-  .filter((f) => f.endsWith(".sql"))
+let dirEntries;
+try {
+  dirEntries = await readdir(migrationsDir);
+} catch {
+  fail("cannot read db/migrations/ — directory missing or unreadable");
+}
+
+// Match .sql case-insensitively so uppercase .SQL files are validated
+// (and rejected by the filename check) instead of passing invisibly.
+const files = dirEntries
+  .filter((f) => /\.sql$/i.test(f))
   .sort();
 
 if (files.length === 0) {
@@ -71,10 +81,36 @@ if (!manifestExists) {
   );
 }
 
-const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-const byFile = new Map(
-  (manifest.migrations ?? []).map((m) => [m.file, m.sha256]),
-);
+let manifest;
+try {
+  manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+} catch {
+  fail("db/migrations.manifest.json is not valid JSON — regenerate: pnpm migrations:checksum");
+}
+
+const migrations = manifest.migrations ?? [];
+if (!Array.isArray(migrations)) {
+  fail("manifest 'migrations' must be an array — regenerate: pnpm migrations:checksum");
+}
+const seenFiles = new Set();
+for (const m of migrations) {
+  if (
+    typeof m?.file !== "string" ||
+    !/^\d{4}_.+\.sql$/.test(m.file) ||
+    typeof m?.sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(m.sha256)
+  ) {
+    fail(
+      `malformed manifest entry (${JSON.stringify(m)}) — regenerate: pnpm migrations:checksum`,
+    );
+  }
+  if (seenFiles.has(m.file)) {
+    fail(`duplicate manifest entry for ${m.file} — regenerate: pnpm migrations:checksum`);
+  }
+  seenFiles.add(m.file);
+}
+
+const byFile = new Map(migrations.map((m) => [m.file, m.sha256]));
 
 // Historical files in the manifest must still match checksums.
 for (const [file, expected] of byFile) {
@@ -90,7 +126,9 @@ for (const [file, expected] of byFile) {
   }
 }
 
-// New files not yet in manifest are allowed only at the end (higher numbers).
+// New files not yet in manifest are allowed only at the end (higher numbers),
+// and must be checksummed in the same commit — an unmanifested migration
+// would otherwise apply at the deploy gate without integrity protection.
 const newFiles = files.filter((f) => !byFile.has(f));
 if (newFiles.length > 0) {
   const maxManifest = Math.max(
@@ -105,9 +143,36 @@ if (newFiles.length > 0) {
       );
     }
   }
-  console.warn(
-    `migrations-guard: ${newFiles.length} new migration(s) not yet in manifest — run pnpm migrations:checksum after review`,
+  fail(
+    `${newFiles.length} new migration(s) not in manifest (${newFiles.join(", ")}) — run: pnpm migrations:checksum and commit the manifest`,
   );
+}
+
+// Historical immutability against the base branch (CI sets MIGRATIONS_BASE).
+// The manifest check above anchors the working tree to itself; this anchors
+// it to history, so edit + re-checksum in one commit is still rejected.
+const migrationsBase = process.env.MIGRATIONS_BASE;
+if (migrationsBase) {
+  let diff;
+  try {
+    diff = execFileSync(
+      "git",
+      // --no-renames: a pure rename must surface as D+A so the D is caught
+      // (D1 tracks applied migrations by filename; a rename is a re-apply).
+      ["diff", "--name-status", "--no-renames", `${migrationsBase}...HEAD`, "--", "db/migrations"],
+      { cwd: root, encoding: "utf8" },
+    );
+  } catch {
+    fail(`cannot diff migrations against ${migrationsBase} (fetch the base ref, e.g. fetch-depth: 0)`);
+  }
+  for (const line of diff.split("\n").filter(Boolean)) {
+    const [status, file] = line.split("\t");
+    if (!status?.startsWith("A")) {
+      fail(
+        `historical migration changed vs ${migrationsBase} (${status}): ${file} — migrations are forward-only`,
+      );
+    }
+  }
 }
 
 console.log(

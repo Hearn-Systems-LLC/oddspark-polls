@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
+  classifyAuthProviderOutcome,
   emitTelemetry,
   isForbiddenTelemetryKey,
   type TelemetryRecord,
@@ -63,5 +64,29 @@ describe("telemetry adapter", () => {
     expect(raw).not.toContain("ABC123");
     expect(raw).not.toContain("token");
     expect(raw).not.toContain("voterCode");
+  });
+
+  it("classifies auth initiation and callback outcomes without logging payloads", () => {
+    expect(
+      classifyAuthProviderOutcome("/api/sign-in", 303, "https://github.com/login"),
+    ).toBe("ok");
+    expect(
+      classifyAuthProviderOutcome(
+        "/api/auth/callback/google",
+        302,
+        "/creator?outcome=signed-in",
+      ),
+    ).toBe("ok");
+    expect(
+      classifyAuthProviderOutcome(
+        "/api/auth/callback/github",
+        302,
+        "/sign-in?outcome=denied&error=access_denied",
+      ),
+    ).toBe("error");
+    expect(
+      classifyAuthProviderOutcome("/api/auth/callback/google", 500, null),
+    ).toBe("error");
+    expect(classifyAuthProviderOutcome("/creator", 200, null)).toBe("none");
   });
 });

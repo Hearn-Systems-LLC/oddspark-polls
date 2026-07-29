@@ -19,7 +19,7 @@
     "test:e2e": "playwright test",
     "test:watch": "vitest",
     "types": "wrangler types",
-    "check": "astro check",
+    "check": "tsc --noEmit",
     "migrate:local": "wrangler d1 migrations apply DB --local",
     "migrate:staging": "wrangler d1 migrations apply DB --env staging --remote",
     "migrate:production": "wrangler d1 migrations apply DB --env production --remote",
@@ -34,6 +34,7 @@
   "dependencies": {
     "@astrojs/cloudflare": "14.1.6",
     "astro": "7.1.5",
+    "better-auth": "1.6.25",
     "zod": "4.4.3"
   },
   "devDependencies": {

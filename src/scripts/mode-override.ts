@@ -59,14 +59,19 @@ function init(): void {
       const next = opposite(currentResolvedMode());
       applyMode(next);
       writeStoredMode(next);
-      button.setAttribute("aria-pressed", "true");
-      button.textContent = next === "dark" ? "Use light mode" : "Use dark mode";
+      // Sync every toggle on the page, not just the clicked one.
+      for (const b of buttons) syncToggle(b, next);
     });
 
-    const resolved = currentResolvedMode();
-    button.textContent =
-      resolved === "dark" ? "Use light mode" : "Use dark mode";
+    syncToggle(button, currentResolvedMode());
   }
+}
+
+/** Keep label and aria-pressed truthful for the resolved mode. */
+function syncToggle(button: HTMLElement, resolved: Mode): void {
+  button.setAttribute("aria-pressed", String(resolved === "dark"));
+  button.textContent =
+    resolved === "dark" ? "Use light mode" : "Use dark mode";
 }
 
 if (document.readyState === "loading") {

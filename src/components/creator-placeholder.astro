@@ -1,0 +1,55 @@
+---
+import BaseLayout from "../layouts/base-layout.astro";
+
+const signedIn = Astro.url.searchParams.get("outcome") === "signed-in";
+---
+
+<BaseLayout
+  title={signedIn ? "Signed in — Oddspark Polls" : "Creator — Oddspark Polls"}
+>
+  <main class="site-shell creator-shell">
+    {
+      signedIn && (
+        <p class="outcome-line" data-outcome="signed-in" tabindex="-1" autofocus>
+          Signed in.
+        </p>
+      )
+    }
+
+    <section aria-labelledby="creator-heading">
+      <h1 id="creator-heading">Creator</h1>
+      <p>Your creator space is ready. Poll management will appear here.</p>
+    </section>
+  </main>
+
+  {
+    signedIn && (
+      <script is:inline>
+        document.querySelector("[data-outcome]")?.focus({ preventScroll: true });
+      </script>
+    )
+  }
+</BaseLayout>
+
+<style>
+  .creator-shell {
+    min-height: 100dvh;
+    padding-block: var(--space-8);
+  }
+
+  .outcome-line {
+    margin: 0 0 var(--space-6);
+  }
+
+  h1 {
+    margin: 0 0 var(--space-4);
+    font-family: var(--font-human);
+    font-size: var(--type-heading-lg-size);
+    font-weight: 400;
+    line-height: var(--type-heading-lg-lh);
+  }
+
+  p {
+    margin-block: 0;
+  }
+</style>

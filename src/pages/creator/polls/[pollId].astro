@@ -1,0 +1,163 @@
+---
+import { env } from "cloudflare:workers";
+import BaseLayout from "../../../layouts/base-layout.astro";
+import { createPollPersistence } from "../../../adapters/d1/index";
+import { RECENTLY_CREATED_WINDOW_MS } from "../../../modules/polls/index";
+import type { PollId, UserId } from "../../../shared/domain/index";
+
+// Create-confirmation surface (Story 1.3). Grows into the full poll detail
+// with Stories 1.11/1.12. Creator responses are never cached (AD-21).
+Astro.response.headers.set("cache-control", "private, no-store");
+
+// Only GET/HEAD are meaningful here (same method gate as /creator/new).
+if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: { allow: "GET, HEAD", "cache-control": "private, no-store" },
+  });
+}
+
+const principal = Astro.locals.requestContext?.principal ?? null;
+if (!principal) {
+  // Built manually so the no-store header rides along — an early
+  // Astro.redirect return doesn't compose Astro.response.headers.
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/sign-in?return=${encodeURIComponent(Astro.url.pathname)}`,
+      "cache-control": "private, no-store",
+    },
+  });
+}
+
+const pollId = (Astro.params.pollId ?? "") as PollId;
+const poll = await createPollPersistence(env.DB).findPollForOwner(
+  pollId,
+  principal.userId as UserId,
+);
+if (!poll) {
+  Astro.response.status = 404;
+}
+
+// The "just created" outcome (line + title) belongs to the publish redirect
+// (bare `?created` only), not to a bookmarked or shared link revisited later.
+const created =
+  poll !== null &&
+  Astro.url.searchParams.get("created") === "" &&
+  Date.now() - poll.createdAtMs < RECENTLY_CREATED_WINDOW_MS;
+const canonicalUrl = poll
+  ? `${Astro.url.origin}/${poll.canonicalReference}`
+  : null;
+// Plain-text UTC echo of the resolved deadline (no-JS creators get zone
+// interpretation feedback): date, space, HH:MM:SS, " UTC".
+const deadlineNote =
+  poll?.deadlineMs != null
+    ? (() => {
+        const iso = new Date(poll.deadlineMs).toISOString();
+        return `Voting closes ${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC.`;
+      })()
+    : null;
+const title = poll
+  ? created
+    ? "Poll created — Oddspark Polls"
+    : `${poll.question} — Oddspark Polls`
+  : "Not found — Oddspark Polls";
+---
+
+<BaseLayout title={title}>
+  <main class="poll-detail-shell">
+    {
+      poll ? (
+        <>
+          {created && (
+            <p class="outcome-line" tabindex="-1" autofocus>
+              Your Poll is live.
+            </p>
+          )}
+          <h1>{poll.question}</h1>
+          {poll.description && <p class="poll-description">{poll.description}</p>}
+          <section class="link-block" aria-labelledby="poll-link-label">
+            <p class="group-label" id="poll-link-label">POLL LINK</p>
+            <p class="canonical-url">{canonicalUrl}</p>
+            <p class="helper-note">
+              This is the link you'll share when voting opens. Its reference
+              never changes.
+            </p>
+            {deadlineNote && <p class="helper-note">{deadlineNote}</p>}
+          </section>
+        </>
+      ) : (
+        <h1 class="outcome-line" tabindex="-1" autofocus>
+          This Poll doesn't exist.
+        </h1>
+      )
+    }
+  </main>
+</BaseLayout>
+
+<style>
+  .poll-detail-shell {
+    width: min(100%, var(--space-measure));
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  .outcome-line {
+    margin: 0 0 var(--space-6);
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
+  }
+
+  h1 {
+    margin: 0 0 var(--space-4);
+    font-family: var(--font-human);
+    font-size: var(--type-heading-lg-size);
+    font-weight: 400;
+    line-height: var(--type-heading-lg-lh);
+  }
+
+  .poll-description {
+    margin: 0 0 var(--space-6);
+    color: var(--color-dim);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    white-space: pre-wrap;
+  }
+
+  .link-block {
+    margin-top: var(--space-8);
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .group-label {
+    margin: 0;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .canonical-url {
+    margin: 0;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    user-select: all;
+    overflow-wrap: anywhere;
+  }
+
+  .helper-note {
+    margin: 0;
+    color: var(--color-dim);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  @media (min-width: 640px) {
+    .poll-detail-shell {
+      padding-inline: var(--space-margin-desktop);
+    }
+  }
+</style>

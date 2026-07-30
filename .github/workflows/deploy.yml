@@ -46,11 +46,39 @@ jobs:
           MIGRATIONS_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before || '' }}
         run: pnpm migrations:guard
 
+      # The provisioning unit tests spawn the real provision-auth-secrets.zsh;
+      # ubuntu runners ship without zsh (actions/runner-images#4849).
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: Unit + integration tests
         run: pnpm test
 
       - name: Type check
         run: pnpm check
+
+      # E2E runs the real dev server: it needs Playwright's browser, local D1
+      # migrations applied, and a throwaway .dev.vars — generated here, never
+      # a real secret (no OAuth round-trip happens in e2e).
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Apply local D1 migrations
+        run: pnpm migrate:local
+
+      - name: Write throwaway local auth env
+        run: |
+          {
+            echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)"
+            echo "BETTER_AUTH_URL=http://127.0.0.1:4391"
+            echo "GOOGLE_CLIENT_ID=ci-placeholder"
+            echo "GOOGLE_CLIENT_SECRET=ci-placeholder"
+            echo "GITHUB_CLIENT_ID=ci-placeholder"
+            echo "GITHUB_CLIENT_SECRET=ci-placeholder"
+          } > .dev.vars
+
+      - name: E2E tests
+        run: pnpm test:e2e
 
       - name: Refresh binding types
         run: pnpm types

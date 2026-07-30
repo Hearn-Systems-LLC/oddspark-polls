@@ -1,0 +1,705 @@
+import { expect, test } from "@playwright/test";
+import {
+  agePoll,
+  assertUuid,
+  requireBaseUrl,
+  cleanupCreator,
+  d1Query,
+  hasBetterAuthSecret,
+  seedCreatorSession,
+} from "./creator-session.mjs";
+
+// Route-level coverage of the real /creator/new page (Task 7): a Better Auth
+// session is seeded straight into local D1 and the session cookie signed with
+// the local BETTER_AUTH_SECRET, so the browser drives the real middleware and
+// page frontmatter end to end. (.mjs like no-raw-html.test.mjs: node APIs
+// without node types.)
+
+// Serial: each test shells out to wrangler against the same local D1 file,
+// and a cold wrangler start is slow.
+test.describe.configure({ mode: "serial", timeout: 120_000 });
+
+test.describe("authenticated create flow (seeded session)", () => {
+  test.skip(
+    !hasBetterAuthSecret(),
+    "BETTER_AUTH_SECRET is not provisioned in .dev.vars — the authed suite needs local auth material",
+  );
+
+  const seededUserIds = [];
+
+  async function signIn(context, baseURL) {
+    const seeded = await seedCreatorSession();
+    assertUuid(seeded.userId);
+    seededUserIds.push(seeded.userId);
+    await context.addCookies([
+      {
+        name: "better-auth.session_token",
+        value: seeded.cookieValue,
+        url: requireBaseUrl(baseURL),
+      },
+    ]);
+    return seeded;
+  }
+
+  test.afterAll(() => {
+    for (const userId of seededUserIds) {
+      cleanupCreator(userId);
+    }
+  });
+
+  test("renders the create form for a signed-in creator — the static route, not the catch-all", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    // The catch-all creator/[...path].astro would render the placeholder
+    // ("Your creator space is ready.") instead of the form.
+    await expect(
+      page.getByRole("heading", { name: "Create a Poll" }),
+    ).toBeVisible();
+    await expect(page.locator("[data-option-row]")).toHaveCount(4);
+    await expect(
+      page.getByRole("button", { name: "PUBLISH POLL" }),
+    ).toBeVisible();
+  });
+
+  test("publishes a poll and persists the submitted shape", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const seeded = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Where should we eat?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
+    await page.locator("label.poll-option", { hasText: "AFTER CLOSE" }).click();
+
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes("/creator/new") &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+    expect(response.status()).toBe(303);
+
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+    await expect(page.getByText("Your Poll is live.")).toBeVisible();
+    await expect(page.locator(".canonical-url")).toContainText(
+      `${requireBaseUrl(baseURL)}/`,
+    );
+
+    const rows = d1Query(
+      `SELECT result_visibility, discovery_state, session_checks_enabled, representation_version FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+    );
+    expect(rows).toEqual([
+      {
+        result_visibility: "after_close",
+        discovery_state: "unlisted",
+        session_checks_enabled: 1,
+        representation_version: 1,
+      },
+    ]);
+
+    // The just-created outcome belongs to the publish redirect, not to a
+    // revisited or bookmarked confirmation URL.
+    await page.goto(page.url().replace("?created", ""));
+    await expect(page.getByText("Your Poll is live.")).toHaveCount(0);
+    await expect(page).toHaveTitle("Where should we eat? — Oddspark Polls");
+  });
+
+  test("re-renders an invalid submission as 422 with the Voice copy and values preserved", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
+
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes("/creator/new") &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+    expect(response.status()).toBe(422);
+
+    await expect(page).toHaveURL(/\/creator\/new$/);
+    await expect(
+      page.getByText("A Poll needs a question. Ask something."),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue("Pizza");
+    await expect(page.getByRole("textbox", { name: "OPTION 2" })).toHaveValue("Tacos");
+  });
+
+  test("echoes an unparseable deadline the datetime input would blank out", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const csrfToken = await page
+      .locator('input[name="csrf_token"]')
+      .getAttribute("value");
+
+    const body = new URLSearchParams();
+    body.set("csrf_token", csrfToken ?? "");
+    body.set("question", "Echo probe?");
+    body.append("option", "A");
+    body.append("option", "B");
+    body.set("visibility", "live");
+    body.set("deadline", "not-a-date");
+    body.set("intent", "publish");
+    const response = await page.request.post("/creator/new", {
+      data: body.toString(),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: requireBaseUrl(baseURL),
+        "sec-fetch-site": "same-origin",
+      },
+      maxRedirects: 0,
+    });
+
+    // The 422 re-render's datetime-local input can't hold the invalid value —
+    // the error line carries it instead.
+    expect(response.status()).toBe(422);
+    const html = await response.text();
+    expect(html).toContain("Check the date and time.");
+    expect(html).toContain("(You entered: not-a-date)");
+  });
+
+  test("escapes creator text on the confirmation and root-path pages", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("<script>alert(1)</script>");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza<script>alert(1)</script>");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
+    await page.getByRole("button", { name: "PUBLISH POLL" }).click();
+
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+    expect(await page.content()).not.toContain("<script>alert(1)</script>");
+    await expect(
+      page.getByRole("heading", { name: "<script>alert(1)</script>" }),
+    ).toBeVisible();
+
+    const canonical = await page.locator(".canonical-url").textContent();
+    expect(canonical).toBeTruthy();
+    await page.goto(canonical ?? "");
+    expect(await page.content()).not.toContain("<script>alert(1)</script>");
+    await expect(
+      page.getByText("Pizza<script>alert(1)</script>"),
+    ).toBeVisible();
+  });
+
+  test("publishes when Enter is pressed in a text field", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Enter-key poll?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Yes");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("No");
+    await page.getByRole("textbox", { name: "OPTION 2" }).press("Enter");
+
+    // Implicit submission must default to publish, not to ADD OPTION.
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+    await expect(page.getByText("Your Poll is live.")).toBeVisible();
+  });
+
+  test("adds an option row client-side when ADD OPTION is clicked", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const rows = page.locator("[data-option-row]");
+    await expect(rows).toHaveCount(4);
+    // Every remove control names its own row.
+    await expect(
+      rows.nth(0).getByRole("button", { name: "Remove option 1" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "ADD OPTION" }).click();
+    await expect(rows).toHaveCount(5);
+    await expect(page.getByRole("textbox", { name: "OPTION 5" })).toBeFocused();
+    await expect(
+      rows.nth(4).getByRole("button", { name: "Remove option 5" }),
+    ).toBeVisible();
+  });
+
+  test("keeps focus in the form when a focused REMOVE deletes its row", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const rows = page.locator("[data-option-row]");
+
+    // Removing a middle row moves focus to the previous row's input.
+    await rows.nth(2).getByRole("button", { name: "Remove option 3" }).click();
+    await expect(rows).toHaveCount(3);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe(
+      "option-2",
+    );
+
+    // Removing the first row falls forward to the new first row.
+    await rows.nth(0).getByRole("button", { name: "Remove option 1" }).click();
+    await expect(rows).toHaveCount(2);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe(
+      "option-1",
+    );
+
+    // At the 2-row floor REMOVE clears instead of deleting — focus stays.
+    await page
+      .getByRole("textbox", { name: "OPTION 1" })
+      .fill("Something");
+    await rows.nth(0).getByRole("button", { name: "Remove option 1" }).click();
+    await expect(rows).toHaveCount(2);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe(
+      "option-1",
+    );
+    await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue(
+      "",
+    );
+  });
+
+  test("adds an option row server-side without JavaScript instead of publishing", async ({
+    browser,
+    baseURL,
+  }) => {
+    const context = await browser.newContext({ javaScriptEnabled: false });
+    const seeded = await signIn(context, baseURL);
+    const page = await context.newPage();
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("No-JS round-trip?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
+
+    await page.getByRole("button", { name: "ADD OPTION" }).click();
+    await expect(page).toHaveURL(/\/creator\/new$/);
+    await expect(page.locator("[data-option-row]")).toHaveCount(5);
+    await expect(page.getByLabel("QUESTION")).toHaveValue("No-JS round-trip?");
+    await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue("Alpha");
+    await expect(page.getByRole("textbox", { name: "OPTION 2" })).toHaveValue("Beta");
+
+    // The regression being pinned: ADD OPTION must never create a poll.
+    const polls = d1Query(
+      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+    );
+    expect(polls[0]?.n).toBe(0);
+
+    await context.close();
+  });
+
+  test("declines a no-JS ADD OPTION at the cap with 200 guidance, values intact", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const csrfToken = await page
+      .locator('input[name="csrf_token"]')
+      .getAttribute("value");
+
+    const body = new URLSearchParams();
+    body.set("csrf_token", csrfToken ?? "");
+    body.set("question", "Full house?");
+    body.set("visibility", "live");
+    body.set("intent", "add-option");
+    for (let index = 1; index <= 30; index += 1) {
+      body.append("option", `Option ${index}`);
+    }
+    const response = await page.request.post("/creator/new", {
+      data: body.toString(),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: requireBaseUrl(baseURL),
+        "sec-fetch-site": "same-origin",
+      },
+      maxRedirects: 0,
+    });
+
+    // Nothing was validated — the decline is guidance on a 200, not a 422.
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("too many options. Keep it to 30.");
+    expect(html.match(/data-option-row/g)).toHaveLength(30);
+    expect(html).toContain('value="Option 30"');
+    expect(html).toContain('value="Full house?"');
+  });
+
+  test("bounds re-rendered option rows at the render ceiling", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const csrfToken = await page
+      .locator('input[name="csrf_token"]')
+      .getAttribute("value");
+
+    const post = (intent, filler) => {
+      const body = new URLSearchParams();
+      body.set("csrf_token", csrfToken ?? "");
+      body.set("question", "Ceiling probe?");
+      body.set("visibility", "live");
+      body.set("intent", intent);
+      body.append("option", "A");
+      body.append("option", "B");
+      for (const value of filler) {
+        body.append("option", value);
+      }
+      return page.request.post("/creator/new", {
+        data: body.toString(),
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: requireBaseUrl(baseURL),
+          "sec-fetch-site": "same-origin",
+        },
+        maxRedirects: 0,
+      });
+    };
+
+    // 150 non-blank options: validation rejects (>30) and the 422 re-render
+    // is bounded at 100 rows rather than echoing all 150.
+    const overCap = await post(
+      "publish",
+      Array.from({ length: 148 }, (_, index) => `Filler ${index}`),
+    );
+    expect(overCap.status()).toBe(422);
+    const overCapHtml = await overCap.text();
+    expect(overCapHtml).toContain("too many options. Keep it to 30.");
+    expect(overCapHtml.match(/data-option-row/g)).toHaveLength(100);
+
+    // 100 raw rows, only 2 non-blank: ADD OPTION declines against the
+    // ceiling with its own line — the 30-option copy would name the wrong
+    // limit.
+    const atCeiling = await post(
+      "add-option",
+      Array.from({ length: 98 }, () => ""),
+    );
+    expect(atCeiling.status()).toBe(200);
+    const atCeilingHtml = await atCeiling.text();
+    expect(atCeilingHtml).toContain("too many rows. Clear the blank ones first.");
+    expect(atCeilingHtml.match(/data-option-row/g)).toHaveLength(100);
+  });
+
+  test("disables ADD OPTION at 30 non-blank options and re-enables after a remove", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const rows = page.locator("[data-option-row]");
+    const addButton = page.getByRole("button", { name: "ADD OPTION" });
+    await expect(rows).toHaveCount(4);
+
+    // Blank rows don't count toward the cap — 30 blank rows stay addable.
+    for (let count = 4; count < 30; count += 1) {
+      await addButton.click();
+    }
+    await expect(rows).toHaveCount(30);
+    await expect(addButton).toBeEnabled();
+
+    // Filling all 30 hits the non-blank cap — the server enforces the same
+    // rule on the no-JS round-trip.
+    for (let index = 0; index < 30; index += 1) {
+      await rows.nth(index).locator("input").fill(`Option ${index + 1}`);
+    }
+    await expect(addButton).toBeDisabled();
+
+    await rows.nth(29).getByRole("button", { name: "Remove option 30" }).click();
+    await expect(rows).toHaveCount(29);
+    await expect(addButton).toBeEnabled();
+  });
+
+  test("echoes the resolved deadline in plain UTC on the confirmation page", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Deadline poll?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Yes");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("No");
+    await page.getByLabel("DEADLINE (OPTIONAL)").fill("2030-01-15T10:30");
+    await page.getByRole("button", { name: "PUBLISH POLL" }).click();
+
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+    await expect(
+      page.getByText(/Voting closes \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\./),
+    ).toBeVisible();
+  });
+
+  test("mints exactly one poll when the same form is POSTed twice", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const seeded = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const csrfToken = await page
+      .locator('input[name="csrf_token"]')
+      .getAttribute("value");
+    const pollId = await page
+      .locator('input[name="poll_id"]')
+      .getAttribute("value");
+    expect(csrfToken).toBeTruthy();
+    expect(pollId).toBeTruthy();
+
+    // The no-JS double-click / retried-POST case (D4): same nonce twice.
+    // (Serialized by hand — Playwright's `form` option can't repeat fields.)
+    const body = new URLSearchParams();
+    body.set("csrf_token", csrfToken ?? "");
+    body.set("poll_id", pollId ?? "");
+    body.set("timezone", "");
+    body.set("question", "Double POST poll?");
+    body.append("option", "A");
+    body.append("option", "B");
+    body.set("visibility", "live");
+    body.set("deadline", "");
+    body.set("intent", "publish");
+    const headers = {
+      "content-type": "application/x-www-form-urlencoded",
+      origin: requireBaseUrl(baseURL),
+      "sec-fetch-site": "same-origin",
+    };
+    const first = await page.request.post("/creator/new", {
+      data: body.toString(),
+      headers,
+      maxRedirects: 0,
+    });
+    const second = await page.request.post("/creator/new", {
+      data: body.toString(),
+      headers,
+      maxRedirects: 0,
+    });
+
+    expect(first.status()).toBe(303);
+    expect(second.status()).toBe(303);
+    const location = first.headers()["location"] ?? "";
+    expect(location).toContain(`/creator/polls/${pollId}?created`);
+    expect(second.headers()["location"]).toBe(location);
+
+    const polls = d1Query(
+      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+    );
+    expect(polls[0]?.n).toBe(1);
+  });
+
+  test("rejects a divergent resubmission of the same nonce and recovers with a fresh one", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const seeded = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const csrfToken = await page
+      .locator('input[name="csrf_token"]')
+      .getAttribute("value");
+    const pollId = await page
+      .locator('input[name="poll_id"]')
+      .getAttribute("value");
+
+    // Back-button → edit → publish: same nonce, different content.
+    const post = (nonce, question) => {
+      const body = new URLSearchParams();
+      body.set("csrf_token", csrfToken ?? "");
+      body.set("poll_id", nonce);
+      body.set("question", question);
+      body.append("option", "A");
+      body.append("option", "B");
+      body.set("visibility", "live");
+      body.set("intent", "publish");
+      return page.request.post("/creator/new", {
+        data: body.toString(),
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: requireBaseUrl(baseURL),
+          "sec-fetch-site": "same-origin",
+        },
+        maxRedirects: 0,
+      });
+    };
+
+    const first = await post(pollId ?? "", "Original question?");
+    expect(first.status()).toBe(303);
+
+    const divergent = await post(pollId ?? "", "Edited after the fact?");
+    expect(divergent.status()).toBe(422);
+    const html = await divergent.text();
+    expect(html).toContain("That Poll already published. Start a new one.");
+
+    // Only the first publish exists — the divergent edit minted nothing.
+    let polls = d1Query(
+      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+    );
+    expect(polls[0]?.n).toBe(1);
+
+    // The 422 re-render carries a fresh nonce; publishing with it succeeds.
+    const freshNonce = /name="poll_id" value="([^"]+)"/.exec(html)?.[1];
+    expect(freshNonce).toBeTruthy();
+    expect(freshNonce).not.toBe(pollId);
+    const recovered = await post(freshNonce ?? "", "Edited after the fact?");
+    expect(recovered.status()).toBe(303);
+    polls = d1Query(
+      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+    );
+    expect(polls[0]?.n).toBe(2);
+  });
+
+  test("answers a forged idempotency ID with a server-error re-render, not a redirect", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    // A nonce colliding with SOMEONE ELSE'S poll must never redirect to it.
+    const victim = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Victim's poll?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("A");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("B");
+    await page.getByRole("button", { name: "PUBLISH POLL" }).click();
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+    const victimPollId = page
+      .url()
+      .match(/\/creator\/polls\/([^?]+)\?created/)?.[1];
+    expect(victimPollId).toBeTruthy();
+
+    const attacker = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const csrfToken = await page
+      .locator('input[name="csrf_token"]')
+      .getAttribute("value");
+    const body = new URLSearchParams();
+    body.set("csrf_token", csrfToken ?? "");
+    body.set("poll_id", victimPollId ?? "");
+    body.set("question", "Forged collision?");
+    body.append("option", "A");
+    body.append("option", "B");
+    body.set("visibility", "live");
+    body.set("intent", "publish");
+    const forged = await page.request.post("/creator/new", {
+      data: body.toString(),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: requireBaseUrl(baseURL),
+        "sec-fetch-site": "same-origin",
+      },
+      maxRedirects: 0,
+    });
+
+    // Server-side failure registers as 500 (telemetry "error"), not 422.
+    expect(forged.status()).toBe(500);
+    // The nonce may already be a live Poll — "nothing was created" would be
+    // a lie, so the unconfirmable-retry copy shows instead.
+    expect(await forged.text()).toContain("may have published. Try again");
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${attacker.userId}'`,
+      )[0]?.n,
+    ).toBe(0);
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${victim.userId}'`,
+      )[0]?.n,
+    ).toBe(1);
+  });
+
+  test("shows no just-created outcome for a valued ?created param", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Valued created param?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("A");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("B");
+    await page.getByRole("button", { name: "PUBLISH POLL" }).click();
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+
+    await page.goto(page.url().replace("?created", "?created=lol"));
+    await expect(page.getByText("Your Poll is live.")).toHaveCount(0);
+    await expect(page).toHaveTitle("Valued created param? — Oddspark Polls");
+  });
+
+  test("ages out of the just-created window and dedupes a late retry without ?created", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const seeded = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const csrfToken = await page
+      .locator('input[name="csrf_token"]')
+      .getAttribute("value");
+    const pollId = await page
+      .locator('input[name="poll_id"]')
+      .getAttribute("value");
+    expect(pollId).toBeTruthy();
+
+    const post = () => {
+      const body = new URLSearchParams();
+      body.set("csrf_token", csrfToken ?? "");
+      body.set("poll_id", pollId ?? "");
+      body.set("question", "Aged poll?");
+      body.append("option", "A");
+      body.append("option", "B");
+      body.set("visibility", "live");
+      body.set("intent", "publish");
+      return page.request.post("/creator/new", {
+        data: body.toString(),
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: requireBaseUrl(baseURL),
+          "sec-fetch-site": "same-origin",
+        },
+        maxRedirects: 0,
+      });
+    };
+
+    const first = await post();
+    expect(first.status()).toBe(303);
+    expect(first.headers()["location"]).toBe(
+      `/creator/polls/${pollId}?created`,
+    );
+
+    // Backdate the poll beyond the 10-minute freshness window.
+    agePoll(pollId ?? "", Date.now() - 11 * 60 * 1000);
+
+    // Bare ?created on an aged poll shows no outcome line.
+    await page.goto(`/creator/polls/${pollId}?created`);
+    await expect(page.getByText("Your Poll is live.")).toHaveCount(0);
+    await expect(page).toHaveTitle("Aged poll? — Oddspark Polls");
+
+    // A late identical retry still dedupes — onto the plain confirmation.
+    const retry = await post();
+    expect(retry.status()).toBe(303);
+    expect(retry.headers()["location"]).toBe(`/creator/polls/${pollId}`);
+    const polls = d1Query(
+      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+    );
+    expect(polls[0]?.n).toBe(1);
+  });
+});

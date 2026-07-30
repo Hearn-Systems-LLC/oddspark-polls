@@ -25,6 +25,29 @@
 - Provisioning `.dev.vars` parser accepts values the runtime rejects: inline `#` comments pass the non-empty gate, `read -r -s` strips leading/trailing whitespace from pasted secrets, and `BETTER_AUTH_URL` format is not validated at provisioning time [scripts/provision-auth-secrets.zsh:66-91].
 - Remote provisioning can hang indefinitely on wrangler's browser OAuth login — no timeout, TTY check, or auth preflight before `wrangler secret bulk` [scripts/provision-auth-secrets.zsh:149,196].
 
+## Deferred from: code review of 1-3-create-a-multiple-choice-poll (2026-07-29)
+
+- Public poll page does a per-request D1 read with no caching decision — every bot scan and link preview of `/{anything}` hits `findPollByReference`; the page sets no `cache-control` (AD-21 governs creator surfaces only). Deferred: caching the public surface is a product/perf decision outside Story 1.3's ACs [src/pages/[reference].astro].
+- Closed/expired poll renders identically to open on the public page — `findPollByReference` fetches `deadline_ms`/`closed_at_ms` but the page never calls `effectivePollStatus`. Deferred: closed-state rendering belongs to the Story 1.5 vote-path scope [src/pages/[reference].astro:15-47].
+- Public poll page hand-rolls option-row markup instead of consuming the `poll-option` primitive (Task 6 said "as `poll-option` rows"). Accepted for 1.3: the rows are read-only until voting arrives; Story 1.5 must build its votable rows on the `poll-option` primitive rather than restyle it (decision, Justin 2026-07-29) [src/pages/[reference].astro:35-42].
+
+## Deferred from: code review round 2 of 1-3-create-a-multiple-choice-poll (2026-07-29)
+
+- Owner can get "This Poll doesn't exist" on their own poll if it has zero canonical `poll_reference` rows — the 0005 partial unique index enforces at-most-one canonical, not exactly-one; `findPollForOwner`'s inner join then yields null → 404. Deferred: latent corrupt-state handling, relevant when Story 1.4 starts writing custom references [src/adapters/d1/index.ts:123-132].
+
+## Deferred from: code review round 3 of 1-3-create-a-multiple-choice-poll (2026-07-29)
+
+- `poll_reference.is_canonical INTEGER NOT NULL DEFAULT 1` is the wrong default for a multi-reference table — a Story 1.4 custom-link insert that omits `is_canonical` defaults to 1 and explodes on the 0005 partial unique index. Deferred: SQLite can't ALTER a column default (needs a table rebuild); Story 1.4 must set `is_canonical` explicitly on every insert — call this out in its story spec [db/migrations/0004_polls.sql:43-50].
+
+## Deferred from: code review round 4 of 1-3-create-a-multiple-choice-poll (2026-07-29)
+
+- Every creator POST pays a double full-body parse — `readRequestCsrfToken` parses a cloned body in middleware and the page parses again; a large crafted multipart is fully materialized twice with no size cap anywhere in the chain. Deferred: request-size policy is a platform decision above this story (the mechanism predates 1.3; `/creator/new` is just the first route to exercise it) [src/lib/csrf.ts:194-213, src/pages/creator/new.astro].
+
+## Deferred from: code review round 6 of 1-3-create-a-multiple-choice-poll (2026-07-30)
+
+- The reachable sign-in redirect has no `cache-control` — `creatorGuardMiddleware` 303s every unauthenticated `/creator/*` request bare; the page-level defense-in-depth redirects patched in review round 5 are dead code by comparison. Deferred: pre-existing middleware behavior from Story 1.2; fix belongs to the middleware layer, not this story's diff [src/middleware.ts:237-242].
+- The 10s idle-restore can re-enable PUBLISH while a legitimately slow POST is still in flight — a second click stacks two navigations; the nonce dedupe keeps the database safe (exactly the D4 case), but the UI outcome is whichever response wins. Deferred: accepted residual; a request-aware restore is a larger client redesign [src/scripts/create-poll-form.ts].
+
 ## Deferred from: code review round 2 of 1-2-creator-sign-in-with-google-or-github (2026-07-29)
 
 - Signed-in users are bounced to `/sign-in` during transient D1 errors, indistinguishable from being signed out — retrying OAuth then returns 502 until D1 recovers. Accepted degradation of the session-lookup failure path; a distinct "transient error" outcome would need new UX copy [src/middleware.ts].

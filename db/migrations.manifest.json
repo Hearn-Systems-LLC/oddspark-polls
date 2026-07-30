@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-29T22:36:05.420Z",
+  "generatedAt": "2026-07-30T00:09:02.344Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -13,6 +13,14 @@
     {
       "file": "0003_user_email_case_insensitive.sql",
       "sha256": "e7ddcbbb702813d6aaa5c0b1b7be14da6e82c2fa72ee3969075159420a2f092a"
+    },
+    {
+      "file": "0004_polls.sql",
+      "sha256": "dc42c98261c517fed58621723b90b405850f453fa7e67aa60265cf64467ae969"
+    },
+    {
+      "file": "0005_poll_reference_canonical_unique.sql",
+      "sha256": "79befde3f5eecd90c601e558c9b655ff744a4ed0db7bbdac61f0dfdad27f47f9"
     }
   ]
 }

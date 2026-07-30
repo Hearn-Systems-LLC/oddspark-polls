@@ -51,12 +51,14 @@ describe("shared kernel enums", () => {
     // and persistFacts' vote facts feed projectResults — typed end to end,
     // never `unknown` (D5, decision 2026-07-29).
     type CreationFacts = { options: string[] };
-    type VoteFacts = { option: string; ballotId: string };
+    type Submission = { selectedOptionIds: string[] };
+    type ValidatedSubmission = { selectedOptionIds: [string] };
+    type VoteFacts = { selections: { pollOptionId: string }[] };
     const full: PollTypeStrategy<
       { labels: string[] },
       CreationFacts,
-      string,
-      string,
+      Submission,
+      ValidatedSubmission,
       VoteFacts,
       { tally: number }
     > = {
@@ -64,27 +66,51 @@ describe("shared kernel enums", () => {
       contractVersion: POLL_TYPE_CONTRACT_VERSION,
       create: (input) => ({ ok: true, value: { options: input.labels } }),
       validateSubmission: (submission, facts) =>
-        facts.options.includes(submission)
-          ? { ok: true, value: submission }
+        submission.selectedOptionIds.length === 1 &&
+        facts.options.includes(submission.selectedOptionIds[0] ?? "")
+          ? {
+              ok: true,
+              value: {
+                selectedOptionIds: [
+                  submission.selectedOptionIds[0] ?? "",
+                ],
+              },
+            }
           : { ok: false, error: { code: "unknown_option", message: "No." } },
-      persistFacts: (validated) => ({ option: validated, ballotId: "b-1" }),
-      projectResults: (facts) => ({ tally: facts.option.length }),
+      persistFacts: (validated) => ({
+        selections: validated.selectedOptionIds.map((pollOptionId) => ({
+          pollOptionId,
+        })),
+      }),
+      projectResults: (facts) => ({ tally: facts.selections.length }),
     };
 
     const created = full.create({ labels: ["a", "b"] }, { nowMs: 0 });
     expect(created).toEqual({ ok: true, value: { options: ["a", "b"] } });
     if (!created.ok) return;
 
-    const validated = full.validateSubmission?.("a", created.value);
-    expect(validated).toEqual({ ok: true, value: "a" });
-    const rejected = full.validateSubmission?.("z", created.value);
+    const validated = full.validateSubmission?.(
+      { selectedOptionIds: ["a"] },
+      created.value,
+    );
+    expect(validated).toEqual({
+      ok: true,
+      value: { selectedOptionIds: ["a"] },
+    });
+    const rejected = full.validateSubmission?.(
+      { selectedOptionIds: ["z"] },
+      created.value,
+    );
     expect(rejected?.ok).toBe(false);
     if (!validated?.ok) return;
 
     const persisted = full.persistFacts?.(validated.value);
-    expect(persisted).toEqual({ option: "a", ballotId: "b-1" });
-    expect(full.projectResults?.(persisted ?? { option: "", ballotId: "" }))
-      .toEqual({ tally: 1 });
+    expect(persisted).toEqual({
+      selections: [{ pollOptionId: "a" }],
+    });
+    expect(full.projectResults?.(persisted ?? { selections: [] })).toEqual({
+      tally: 1,
+    });
   });
 });
 

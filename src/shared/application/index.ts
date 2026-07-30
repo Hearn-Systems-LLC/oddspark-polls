@@ -2,7 +2,7 @@
 // contribution interfaces and the HTTP error envelope. Contract changes
 // require compile-time consumers and contract tests to change together.
 
-import type { PollType } from "../domain/index";
+import type { PollId, PollType } from "../domain/index";
 
 // Application errors are stable codes with safe messages and optional field
 // errors; HTTP adapters map them once (Consistency Conventions). Never
@@ -22,6 +22,26 @@ export type ApplicationError = {
 export type Result<T> =
   | { ok: true; value: T }
   | { ok: false; error: ApplicationError };
+
+// AD-24: every representation-changing command contributes this descriptor
+// to its one atomic persistence batch. Adapters map the shared descriptor to
+// provider SQL; commands never hand-roll the version update.
+export type RepresentationVersionIncrement = {
+  kind: "increment_representation_version";
+  pollId: PollId;
+  updatedAtMs: number;
+};
+
+export function incrementRepresentationVersion(
+  pollId: PollId,
+  updatedAtMs: number,
+): RepresentationVersionIncrement {
+  return {
+    kind: "increment_representation_version",
+    pollId,
+    updatedAtMs,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Poll Type strategy contract (AD-3), contract version 1.

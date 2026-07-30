@@ -120,6 +120,9 @@ describe("masked auth secret provisioning", () => {
     expect(original).toContain(
       "BETTER_AUTH_SECRET=test-master-secret-that-is-long-enough",
     );
+    expect(original).toContain(
+      "VOTE_DIGEST_SECRET=test-master-secret-that-is-long-enough",
+    );
 
     rmSync(sandbox.opensslTrace);
     const repeated = runProvision(
@@ -174,6 +177,9 @@ describe("masked auth secret provisioning", () => {
     expect(bindings).toContain(
       "BETTER_AUTH_SECRET=test-master-secret-that-is-long-enough",
     );
+    expect(bindings).toContain(
+      "VOTE_DIGEST_SECRET=test-master-secret-that-is-long-enough",
+    );
     expect(bindings).toContain("BETTER_AUTH_URL=http://localhost:4321");
     expect(bindings).toContain("GOOGLE_CLIENT_ID=new-google-client-id");
     expect(bindings).toContain(
@@ -207,6 +213,7 @@ describe("masked auth secret provisioning", () => {
     const destination = join(sandbox.projectRoot, ".dev.vars");
     const incomplete = [
       "BETTER_AUTH_SECRET=",
+      "VOTE_DIGEST_SECRET=test-vote-digest-secret",
       "BETTER_AUTH_URL=http://localhost:4321",
       "GOOGLE_CLIENT_ID=old-google-client-id",
       "GOOGLE_CLIENT_SECRET=old-google-client-secret",
@@ -230,7 +237,7 @@ describe("masked auth secret provisioning", () => {
 
     expect(rotated.status).toBe(1);
     expect(rotated.stderr).toContain(
-      "nonempty BETTER_AUTH_SECRET and BETTER_AUTH_URL",
+      "nonempty BETTER_AUTH_SECRET, BETTER_AUTH_URL, and VOTE_DIGEST_SECRET",
     );
     expect(readFileSync(destination, "utf8")).toBe(incomplete);
     expect(existsSync(sandbox.opensslTrace)).toBe(false);
@@ -242,6 +249,7 @@ describe("masked auth secret provisioning", () => {
     const incomplete = [
       "BETTER_AUTH_SECRET=valid-master-before-duplicate",
       "BETTER_AUTH_SECRET=   ",
+      "VOTE_DIGEST_SECRET=test-vote-digest-secret",
       "BETTER_AUTH_URL=http://localhost:4321",
       "GOOGLE_CLIENT_ID=old-google-client-id",
       "GOOGLE_CLIENT_SECRET=old-google-client-secret",
@@ -265,9 +273,80 @@ describe("masked auth secret provisioning", () => {
 
     expect(rotated.status).toBe(1);
     expect(rotated.stderr).toContain(
-      "nonempty BETTER_AUTH_SECRET and BETTER_AUTH_URL",
+      "nonempty BETTER_AUTH_SECRET, BETTER_AUTH_URL, and VOTE_DIGEST_SECRET",
     );
     expect(readFileSync(destination, "utf8")).toBe(incomplete);
+    expect(existsSync(sandbox.opensslTrace)).toBe(false);
+  });
+
+  it("refuses provider rotation when the vote digest secret is missing", () => {
+    const sandbox = createSandbox();
+    const destination = join(sandbox.projectRoot, ".dev.vars");
+    const incomplete = [
+      "BETTER_AUTH_SECRET=valid-master-secret",
+      "BETTER_AUTH_URL=http://localhost:4321",
+      "GOOGLE_CLIENT_ID=old-google-client-id",
+      "GOOGLE_CLIENT_SECRET=old-google-client-secret",
+      "GITHUB_CLIENT_ID=old-github-client-id",
+      "GITHUB_CLIENT_SECRET=old-github-client-secret",
+      "",
+    ].join("\n");
+    writeFileSync(destination, incomplete, { mode: 0o600 });
+
+    const rotated = runProvision(
+      sandbox,
+      ["local", "rotate-providers"],
+      [
+        "new-google-client-id",
+        "new-google-client-secret",
+        "new-github-client-id",
+        "new-github-client-secret",
+        "",
+      ].join("\n"),
+    );
+
+    expect(rotated.status).toBe(1);
+    expect(rotated.stderr).toContain("VOTE_DIGEST_SECRET");
+    expect(readFileSync(destination, "utf8")).toBe(incomplete);
+    expect(existsSync(sandbox.opensslTrace)).toBe(false);
+  });
+
+  it("initializes only the missing local vote digest secret for existing checkouts", () => {
+    const sandbox = createSandbox();
+    const destination = join(sandbox.projectRoot, ".dev.vars");
+    const existing = [
+      "BETTER_AUTH_SECRET=existing-auth-master",
+      "BETTER_AUTH_URL=http://localhost:4321",
+      "GOOGLE_CLIENT_ID=existing-google-id",
+      "GOOGLE_CLIENT_SECRET=existing-google-secret",
+      "GITHUB_CLIENT_ID=existing-github-id",
+      "GITHUB_CLIENT_SECRET=existing-github-secret",
+      "",
+    ].join("\n");
+    writeFileSync(destination, existing, { mode: 0o600 });
+
+    const initialized = runProvision(
+      sandbox,
+      ["local", "initialize-voting"],
+      "",
+    );
+    expect(initialized.status).toBe(0);
+    const bindings = readFileSync(destination, "utf8");
+    expect(bindings).toContain("BETTER_AUTH_SECRET=existing-auth-master");
+    expect(bindings).toContain("GOOGLE_CLIENT_ID=existing-google-id");
+    expect(bindings).toContain(
+      "VOTE_DIGEST_SECRET=test-master-secret-that-is-long-enough",
+    );
+
+    rmSync(sandbox.opensslTrace);
+    const repeated = runProvision(
+      sandbox,
+      ["local", "initialize-voting"],
+      "",
+    );
+    expect(repeated.status).toBe(1);
+    expect(repeated.stderr).toContain("already initialized");
+    expect(readFileSync(destination, "utf8")).toBe(bindings);
     expect(existsSync(sandbox.opensslTrace)).toBe(false);
   });
 
@@ -281,7 +360,7 @@ describe("masked auth secret provisioning", () => {
       [
         "#!/bin/sh",
         'if [ "$4" = "list" ]; then',
-        "  printf '%s\\n' '[{\"name\":\"BETTER_AUTH_SECRET\"},{\"name\":\"BETTER_AUTH_URL\"}]'",
+        "  printf '%s\\n' '[{\"name\":\"BETTER_AUTH_SECRET\"},{\"name\":\"BETTER_AUTH_URL\"},{\"name\":\"VOTE_DIGEST_SECRET\"}]'",
         "  exit 0",
         "fi",
         'if [ "$4" = "bulk" ]; then',
@@ -319,6 +398,7 @@ describe("masked auth secret provisioning", () => {
     );
     expect(payload).not.toContain("BETTER_AUTH_SECRET");
     expect(payload).not.toContain("BETTER_AUTH_URL");
+    expect(payload).not.toContain("VOTE_DIGEST_SECRET");
     expect(existsSync(sandbox.opensslTrace)).toBe(false);
   });
 });

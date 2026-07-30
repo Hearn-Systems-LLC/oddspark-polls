@@ -42,6 +42,7 @@ function createTestEnv(): Env {
     ASSETS: {} as Fetcher,
     BETTER_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
     BETTER_AUTH_URL: "https://polls.example.test",
+    VOTE_DIGEST_SECRET: "test-vote-digest-secret",
     GOOGLE_CLIENT_ID: "google-client-id",
     GOOGLE_CLIENT_SECRET: "google-client-secret",
     GITHUB_CLIENT_ID: "github-client-id",

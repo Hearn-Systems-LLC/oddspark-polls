@@ -4,7 +4,7 @@ baseline_commit: 5fa65b5c5b94416d11fa64838e39af98a03be766
 
 # Story 1.4: Custom Links
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Prerequisite: Story 1.3 is in `review` with its work uncommitted in the working tree. 1.4 builds directly on those files — start only after 1.3's review closes and its work is committed. -->
@@ -23,28 +23,28 @@ so that the URL itself is memorable and shareable.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Slug validation in the polls domain module (AC: #1, #3)
-  - [ ] `src/modules/polls/index.ts`: extend `CreatePollDraft` with `customLink: string` and `ValidatedCreatePoll` with `customLink: string | null`. Normalize (trim, then lowercase-fold `[ASSUMPTION: forgiving normalization, consistent with isReservedSlug's lowercase comparison]`), then validate: blank → `null` (generated-reference path, unchanged); non-blank must match `^[a-z0-9-]+$` and be ≤ 63 chars `[ASSUMPTION: cap unspecified in PRD/UX; 63 = DNS-label convention]`; then reject reserved via the EXISTING `isReservedSlug` from `src/modules/polls/reserved-slugs.ts` — do NOT write a second list (AC #3, AD-13)
-  - [ ] Extend `CREATE_POLL_COPY` (all follow the voice rules — flat, layout-neutral, no exclamation): `customLinkInvalid` `[ASSUMPTION: new line]`: "A Custom Link uses lowercase letters, digits, and hyphens. Nothing else." · `customLinkTooLong` `[ASSUMPTION: new line]`: "That Custom Link is too long. Keep it to 63 characters." · `customLinkReserved` (verbatim, epic): `` "`{slug}` is reserved by the application itself. Pick something less structural." `` · `customLinkTaken` (verbatim, epic): `` "`{slug}` is taken. Pick another." `` — `{slug}` interpolated at render with the normalized submitted value (Astro's default escaping applies; slugs reaching taken/reserved have already passed the charset gate)
-  - [ ] Validation order per field: format → length → reserved. "Taken" is NOT pre-checked here — uniqueness is decided by the D1 constraint inside the batch (AD-16: only D1 constraints are authoritative; a read-then-write availability check would be a race)
-- [ ] Task 2: Reference row + taken-collision mapping in command and adapter (AC: #1, #2)
-  - [ ] `src/modules/polls/index.ts`: when `customLink` is present, the batch's single reference row is the custom slug — `reference: { reference: customLink, kind: "custom", ... }` — and NO generated reference is created `[ASSUMPTION: "replaced as canonical" + Glossary "replacing the random Poll ID" read as substitution; one URL per Poll, no second guessable random URL]`; widen `PollPersistenceRows.reference.kind` to `"generated" | "custom"`; blank customLink keeps today's generated path byte-for-byte
-  - [ ] `src/adapters/d1/index.ts` `insertPoll`: on batch failure, detect the reference-uniqueness violation (D1 error message contains `UNIQUE constraint failed: poll_reference.reference` — the PK) and rethrow/return a distinguishable typed error (e.g. `ReferenceTakenError`); all other failures stay generic
-  - [ ] `createPoll` command: map the taken error to `fieldErrors.customLink = customLinkTaken` (422 re-render path) instead of the generic `poll_create_failed`; only when the draft had a custom link — a generated-reference collision (~impossible at 128 bits) stays the generic failure. The failed batch leaves no rows (AD-3 atomicity, already proven by 1.3's forced-failure test)
-  - [ ] NO migration: `poll_reference` (PK `reference`, `kind`, `is_canonical` default 1) already holds everything this story needs — the table was shaped in 1.3 exactly for this (`db/migrations/0004_polls.sql` comment). Custom and generated references share one namespace/one uniqueness constraint by construction
-- [ ] Task 3: Custom Link field on `/creator/new` (AC: #1, #2, #3)
-  - [ ] `src/pages/creator/new.astro`: add an optional field on the existing `input` primitive — label `CUSTOM LINK (OPTIONAL)` `[ASSUMPTION: label string unspecified; matches DEADLINE (OPTIONAL) idiom]` — placed after Deadline, before Description `[ASSUMPTION: UJ-1 narrative order — visibility, deadline, then custom link]`; helper note in the existing `helper-note` idiom `[ASSUMPTION: no helper text specified; layout-neutral, factual]`: "Lowercase letters, digits, and hyphens. Leave blank for a random link."
-  - [ ] Wire into the existing flow: form schema gains `customLink` (string, default ""), `values` carries it through the ADD OPTION round-trip and every 422 re-render (ballast preservation is already the page's pattern — extend, don't fork); error renders inline beneath the field in `caption`/`alarm` with `aria-describedby` via the input's `describedby` prop (the primitive already supports it, added in 1.3)
-  - [ ] Validate on submit ONLY — never on blur, no debounce, no async availability check, no "available" affirmative state, no URL preview while typing (EXPERIENCE.md hard rule; the `input-code` precedent explicitly rejects pre-submit checks as "a lie" — availability at typing time isn't availability at submit time). Do not autofocus the field
-  - [ ] No JS enhancement needed: `src/scripts/create-poll-form.ts` untouched unless the field breaks its row-indexing assumptions — verify it doesn't (it targets `[data-option-row]` only)
-- [ ] Task 4: Routing already resolves custom slugs — verify, don't build (AC: #1)
-  - [ ] `src/pages/[reference].astro` resolves ANY `poll_reference` row kind-agnostically and checks `isReservedSlug` first — confirm a created `/team-lunch` renders the poll page with zero changes to this file
-  - [ ] Confirmation page `src/pages/creator/polls/[pollId].astro` renders `canonicalReference` via `findPollForOwner` (`is_canonical = 1` join) — with the custom row canonical, the full custom URL appears with "It never changes." — zero changes expected; verify by test
-- [ ] Task 5: Tests + gates (AC: all)
-  - [ ] Unit (`tests/unit/polls.test.ts`): validation matrix — blank → null; valid `team-lunch`; uppercase `Team-Lunch` folds to valid; invalid chars (space, `/`, `_`, unicode, `.`) → invalid copy; 63/64 boundary; every reserved-registry entry rejected with reserved copy (import the registry, don't hand-copy the list); normalization idempotence; `PollPersistenceRows.kind` values
-  - [ ] Integration (`tests/integration/` — extend the 1.3 files): POST `/creator/new` with custom link → 303, `poll_reference` row `kind='custom'`, `is_canonical=1`, no generated row; duplicate slug (seed one, submit same) → 422 with exact taken copy, all other fields preserved, zero partial rows from the failed batch; reserved slug (`creator`, `results`) → 422 with exact reserved copy; created slug resolves at `/{slug}` (route test); mixed-case submission persists lowercase
-  - [ ] E2E (`tests/e2e/create-poll.spec.ts`): form shows the Custom Link field with its label; signed-out redirect still passes (regression)
-  - [ ] Gates: full Vitest suite, `pnpm check`, `pnpm migrations:guard` (manifest unchanged — no new migration), production build — all green before story-done
+- [x] Task 1: Slug validation in the polls domain module (AC: #1, #3)
+  - [x] `src/modules/polls/index.ts`: extend `CreatePollDraft` with `customLink: string` and `ValidatedCreatePoll` with `customLink: string | null`. Normalize (trim, then lowercase-fold `[ASSUMPTION: forgiving normalization, consistent with isReservedSlug's lowercase comparison]`), then validate: blank → `null` (generated-reference path, unchanged); non-blank must match `^[a-z0-9-]+$` and be ≤ 63 chars `[ASSUMPTION: cap unspecified in PRD/UX; 63 = DNS-label convention]`; then reject reserved via the EXISTING `isReservedSlug` from `src/modules/polls/reserved-slugs.ts` — do NOT write a second list (AC #3, AD-13)
+  - [x] Extend `CREATE_POLL_COPY` (all follow the voice rules — flat, layout-neutral, no exclamation): `customLinkInvalid` `[ASSUMPTION: new line]`: "A Custom Link uses lowercase letters, digits, and hyphens. Nothing else." · `customLinkTooLong` `[ASSUMPTION: new line]`: "That Custom Link is too long. Keep it to 63 characters." · `customLinkReserved` (verbatim, epic): `` "`{slug}` is reserved by the application itself. Pick something less structural." `` · `customLinkTaken` (verbatim, epic): `` "`{slug}` is taken. Pick another." `` — `{slug}` interpolated at render with the normalized submitted value (Astro's default escaping applies; slugs reaching taken/reserved have already passed the charset gate)
+  - [x] Validation order per field: format → length → reserved. "Taken" is NOT pre-checked here — uniqueness is decided by the D1 constraint inside the batch (AD-16: only D1 constraints are authoritative; a read-then-write availability check would be a race)
+- [x] Task 2: Reference row + taken-collision mapping in command and adapter (AC: #1, #2)
+  - [x] `src/modules/polls/index.ts`: when `customLink` is present, the batch's single reference row is the custom slug — `reference: { reference: customLink, kind: "custom", ... }` — and NO generated reference is created `[ASSUMPTION: "replaced as canonical" + Glossary "replacing the random Poll ID" read as substitution; one URL per Poll, no second guessable random URL]`; widen `PollPersistenceRows.reference.kind` to `"generated" | "custom"`; blank customLink keeps today's generated path byte-for-byte
+  - [x] `src/adapters/d1/index.ts` `insertPoll`: on batch failure, detect the reference-uniqueness violation (D1 error message contains `UNIQUE constraint failed: poll_reference.reference` — the PK) and rethrow/return a distinguishable typed error (e.g. `ReferenceTakenError`); all other failures stay generic
+  - [x] `createPoll` command: map the taken error to `fieldErrors.customLink = customLinkTaken` (422 re-render path) instead of the generic `poll_create_failed`; only when the draft had a custom link — a generated-reference collision (~impossible at 128 bits) stays the generic failure. The failed batch leaves no rows (AD-3 atomicity, already proven by 1.3's forced-failure test)
+  - [x] NO migration: `poll_reference` (PK `reference`, `kind`, `is_canonical` default 1) already holds everything this story needs — the table was shaped in 1.3 exactly for this (`db/migrations/0004_polls.sql` comment). Custom and generated references share one namespace/one uniqueness constraint by construction
+- [x] Task 3: Custom Link field on `/creator/new` (AC: #1, #2, #3)
+  - [x] `src/pages/creator/new.astro`: add an optional field on the existing `input` primitive — label `CUSTOM LINK (OPTIONAL)` `[ASSUMPTION: label string unspecified; matches DEADLINE (OPTIONAL) idiom]` — placed after Deadline, before Description `[ASSUMPTION: UJ-1 narrative order — visibility, deadline, then custom link]`; helper note in the existing `helper-note` idiom `[ASSUMPTION: no helper text specified; layout-neutral, factual]`: "Lowercase letters, digits, and hyphens. Leave blank for a random link."
+  - [x] Wire into the existing flow: form schema gains `customLink` (string, default ""), `values` carries it through the ADD OPTION round-trip and every 422 re-render (ballast preservation is already the page's pattern — extend, don't fork); error renders inline beneath the field in `caption`/`alarm` with `aria-describedby` via the input's `describedby` prop (the primitive already supports it, added in 1.3)
+  - [x] Validate on submit ONLY — never on blur, no debounce, no async availability check, no "available" affirmative state, no URL preview while typing (EXPERIENCE.md hard rule; the `input-code` precedent explicitly rejects pre-submit checks as "a lie" — availability at typing time isn't availability at submit time). Do not autofocus the field
+  - [x] No JS enhancement needed: `src/scripts/create-poll-form.ts` untouched unless the field breaks its row-indexing assumptions — verify it doesn't (it targets `[data-option-row]` only)
+- [x] Task 4: Routing already resolves custom slugs — verify, don't build (AC: #1)
+  - [x] `src/pages/[reference].astro` resolves ANY `poll_reference` row kind-agnostically and checks `isReservedSlug` first — confirm a created `/team-lunch` renders the poll page with zero changes to this file
+  - [x] Confirmation page `src/pages/creator/polls/[pollId].astro` renders `canonicalReference` via `findPollForOwner` (`is_canonical = 1` join) — with the custom row canonical, the full custom URL appears with "It never changes." — zero changes expected; verify by test
+- [x] Task 5: Tests + gates (AC: all)
+  - [x] Unit (`tests/unit/polls.test.ts`): validation matrix — blank → null; valid `team-lunch`; uppercase `Team-Lunch` folds to valid; invalid chars (space, `/`, `_`, unicode, `.`) → invalid copy; 63/64 boundary; every reserved-registry entry rejected with reserved copy (import the registry, don't hand-copy the list); normalization idempotence; `PollPersistenceRows.kind` values
+  - [x] Integration (`tests/integration/` — extend the 1.3 files): POST `/creator/new` with custom link → 303, `poll_reference` row `kind='custom'`, `is_canonical=1`, no generated row; duplicate slug (seed one, submit same) → 422 with exact taken copy, all other fields preserved, zero partial rows from the failed batch; reserved slug (`creator`, `results`) → 422 with exact reserved copy; created slug resolves at `/{slug}` (route test); mixed-case submission persists lowercase
+  - [x] E2E (`tests/e2e/create-poll.spec.ts`): form shows the Custom Link field with its label; signed-out redirect still passes (regression)
+  - [x] Gates: full Vitest suite, `pnpm check`, `pnpm migrations:guard` (manifest unchanged — no new migration), production build — all green before story-done
 
 ## Dev Notes
 
@@ -140,8 +140,46 @@ Bans that bite: no rounded corners, no spinner, no toast, no live "checking…" 
 
 ### Agent Model Used
 
+Codex (GPT-5)
+
+### Implementation Plan
+
+- Task 1: add failing domain tests for normalization, charset, length, reserved paths, reason codes, and the shared registry; implement provider-free validation and copy without an availability query.
+- Task 2: add failing command/adapter tests for custom reference rows and typed uniqueness collisions; implement the domain-owned error and D1 mapping.
+- Task 3: add failing form assertions, then extend the existing schema/value/422 ballast path with the optional field and accessible inline error.
+- Task 4: prove the existing public and creator queries resolve the canonical custom row without changing either route.
+- Task 5: complete unit, workerd integration, authenticated browser, signed-out browser, type, migration, generated-types, and production-build gates.
+
 ### Debug Log References
+
+- Task 1 red phase failed before implementation because `RESERVED_SLUGS` was not exported. The story's format-first line conflicts with AC #3 for `/`, reserved filenames containing punctuation (`favicon.ico`, `robots.txt`, `sitemap.xml`), and the existing `_astro` route. The format gate therefore admits exact shared-registry matches only; ordinary punctuation still fails format, length remains second, and admitted structural names receive reserved copy third. No availability query was added.
+- Node 24.18.0 was invoked directly from the installed NVM runtime for deterministic checks. The full Vitest gate requires unsandboxed workerd localhost access and Wrangler log writes.
+- Task 2 preserves duplicate-Poll-ID precedence when a replay collides on both constraints. The owner snapshot now carries canonical reference kind so an idempotent retry cannot silently clear or change a Custom Link.
+- Task 3 browser red phase failed on the missing `CUSTOM LINK (OPTIONAL)` control. The existing enhancement was graph-inspected after the field landed: every row operation remains scoped below `[data-option-list]` to `[data-option-row]`; no script change was needed.
+- Task 4 required no route implementation. The graph and source confirm the public lookup has no `kind` predicate and the owner lookup selects `is_canonical = 1`; the authenticated end-to-end proof then created one custom row, rendered the full confirmation URL, and loaded that root path with HTTP 200.
+- Task 5 test placement follows the executable boundaries rather than duplicating an Astro route in the workerd direct-module harness: real D1 custom-row, collision, atomicity, and kind-agnostic reads stay in integration; protected POST/303/422 preservation and root-route resolution run through the live Astro server in authenticated Playwright; the prescribed signed-out redirect remains in `create-poll.spec.ts`. `pnpm types` exposed a pre-existing generated-file delta from local binding discovery; because Story 1.4 changes no bindings, that side effect was restored to the branch baseline after the gate passed.
 
 ### Completion Notes List
 
+- Task 1: `CreatePollDraft` and `ValidatedCreatePoll` now carry Custom Link state; validation trims and lowercase-folds, keeps blank on the generated path, enforces charset and the 63-character boundary, rejects every shared reserved entry (including `/`) with normalized exact copy, and emits stable per-field reason codes. `RESERVED_SLUGS` exposes the existing single registry for data-driven tests. Focused domain tests: 112/112 passed.
+- Task 2: a valid Custom Link now substitutes for the generated reference and persists as the single canonical `kind='custom'` row without drawing randomness. The domain-owned `ReferenceTakenError` translates the D1 reference-PK collision into the normalized Custom Link field error only for custom submissions; generated collisions remain generic. Duplicate-publish matching now includes canonical reference kind/value. Focused workerd adapter tests: 8/8 passed. No migration or manifest file changed.
+- Task 3: `/creator/new` now carries `customLink` through Zod parsing, initial/postback values, no-JS ADD OPTION, and all re-renders. The field sits between Deadline and Description, uses the existing input primitive, connects helper/error text through `aria-describedby`, validates only on submit, preserves the raw submitted value, and never autofocuses or performs an availability check. Authenticated browser coverage proves the normal, reserved, taken, no-JS, and canonical-link paths.
+- Task 4: verified without modifying either route. A mixed-case submission persisted lowercase `team-lunch` as the only canonical custom row, the creator confirmation rendered the complete custom URL and immutable-reference guidance, and `/team-lunch` returned 200 with the created question/options.
+- Task 5: ordered gates passed on Node 24.18.0 — migration guard (5/5 checksummed), Vitest (16 files, 228/228 tests), TypeScript check, Playwright (32/32), Wrangler types, and production build. Light/dark browser screenshots covered the normal and reserved-error field states; the browser had no page exceptions or unexpected console errors (the intentional 422 navigation produced Chromium's expected failed-resource entry).
+
 ### File List
+
+- `CHANGELOG.md`
+- `_bmad-output/implementation-artifacts/1-4-custom-links.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/adapters/d1/index.ts`
+- `src/modules/polls/index.ts`
+- `src/modules/polls/reserved-slugs.ts`
+- `src/pages/creator/new.astro`
+- `tests/e2e/create-poll-authed.spec.mjs`
+- `tests/integration/polls-adapter.integration.test.ts`
+- `tests/unit/polls.test.ts`
+
+### Change Log
+
+- 2026-07-30: Implemented Custom Link validation, canonical persistence, D1 collision mapping, creator-form preservation, route verification, and complete automated/browser proof for Story 1.4.

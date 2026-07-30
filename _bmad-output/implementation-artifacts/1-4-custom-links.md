@@ -4,7 +4,7 @@ baseline_commit: 5fa65b5c5b94416d11fa64838e39af98a03be766
 
 # Story 1.4: Custom Links
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Prerequisite: Story 1.3 is in `review` with its work uncommitted in the working tree. 1.4 builds directly on those files — start only after 1.3's review closes and its work is committed. -->
@@ -38,13 +38,57 @@ so that the URL itself is memorable and shareable.
   - [x] Validate on submit ONLY — never on blur, no debounce, no async availability check, no "available" affirmative state, no URL preview while typing (EXPERIENCE.md hard rule; the `input-code` precedent explicitly rejects pre-submit checks as "a lie" — availability at typing time isn't availability at submit time). Do not autofocus the field
   - [x] No JS enhancement needed: `src/scripts/create-poll-form.ts` untouched unless the field breaks its row-indexing assumptions — verify it doesn't (it targets `[data-option-row]` only)
 - [x] Task 4: Routing already resolves custom slugs — verify, don't build (AC: #1)
-  - [x] `src/pages/[reference].astro` resolves ANY `poll_reference` row kind-agnostically and checks `isReservedSlug` first — confirm a created `/team-lunch` renders the poll page with zero changes to this file
+  - [x] `src/pages/[reference].astro` resolves ANY `poll_reference` row kind-agnostically and checks `isReservedSlug` first — confirm a created `/team-lunch` renders the poll page with zero changes to this file *(true at implementation; the review round later added the case-variant redirect fallback to this file — see Review Findings)*
   - [x] Confirmation page `src/pages/creator/polls/[pollId].astro` renders `canonicalReference` via `findPollForOwner` (`is_canonical = 1` join) — with the custom row canonical, the full custom URL appears with "It never changes." — zero changes expected; verify by test
 - [x] Task 5: Tests + gates (AC: all)
   - [x] Unit (`tests/unit/polls.test.ts`): validation matrix — blank → null; valid `team-lunch`; uppercase `Team-Lunch` folds to valid; invalid chars (space, `/`, `_`, unicode, `.`) → invalid copy; 63/64 boundary; every reserved-registry entry rejected with reserved copy (import the registry, don't hand-copy the list); normalization idempotence; `PollPersistenceRows.kind` values
   - [x] Integration (`tests/integration/` — extend the 1.3 files): POST `/creator/new` with custom link → 303, `poll_reference` row `kind='custom'`, `is_canonical=1`, no generated row; duplicate slug (seed one, submit same) → 422 with exact taken copy, all other fields preserved, zero partial rows from the failed batch; reserved slug (`creator`, `results`) → 422 with exact reserved copy; created slug resolves at `/{slug}` (route test); mixed-case submission persists lowercase
   - [x] E2E (`tests/e2e/create-poll.spec.ts`): form shows the Custom Link field with its label; signed-out redirect still passes (regression)
   - [x] Gates: full Vitest suite, `pnpm check`, `pnpm migrations:guard` (manifest unchanged — no new migration), production build — all green before story-done
+
+### Review Findings
+
+- [x] [Review][Decision] Case-variant public URL 404s an existing custom link — severity: medium. Creation folds to lowercase (`src/modules/polls/index.ts:266`) but the public resolver passes the raw param into a BINARY-collated lookup (`src/pages/[reference].astro:12,23-25` → `src/adapters/d1/index.ts:146`), so a voter visiting `/Team-Lunch` (phone autocapitalize, chat-client case mangling) gets "This Poll doesn't exist." A blanket lowercase on the read is NOT safe: generated references are base64url with uppercase (`src/modules/polls/index.ts:202`). **Resolved (Justin, 2026-07-30): redirect to canonical.** Exact lookup, then a NOCASE lookup restricted to `kind='custom'` (`findCanonicalCustomReference`), 301 to `/{canonical}`; generated references pinned case-sensitive. Covered by adapter integration tests and e2e (`/TEAM-Lunch` → 301, case-mangled generated ref → 404).
+- [x] [Review][Decision] Validation-order re-interpretation favors AC #3 over Task 1's stated format → length → reserved — severity: low. `isReservedSlug` runs first and exact registry matches bypass the charset gate (`src/modules/polls/index.ts:267-291`), because AC #3's reserved set (`/`, `favicon.ico`, `_astro`) can never pass the charset — the spec is internally contradictory. Side effect: the registry now drives error-copy routing, so adding a future reserved entry changes which copy a charset-invalid value receives. **Ratified as-is (Justin, 2026-07-30):** AC #3 wins over Task 1's ordering; behavior and the data-driven test matrix stand.
+- [x] [Review][Decision] Task 5's prescribed integration-test matrix relocated to Playwright e2e — severity: low. POST → 303 + custom-row assertions, duplicate → 422 with ballast/rollback, reserved → 422, `/{slug}` → 200, mixed-case persistence all live in `tests/e2e/create-poll-authed.spec.mjs`; `tests/integration/create-poll-route.integration.test.ts` is untouched despite being in the story's own Files-changed note, and the label assertion landed in the authed spec instead of `create-poll.spec.ts` (forced: signed-out visitors redirect away). **Ratified as-is (Justin, 2026-07-30):** the e2e suite runs in the deploy gate against the real stack; no backfill. The stale "Playwright can't drive the authenticated flow" note in Previous story intelligence is corrected — the seeded-session harness can.
+- [x] [Review][Patch] 63-char cap is a magic number outside `POLL_CAPS` with the literal duplicated in copy and check [src/modules/polls/index.ts:77-78, :279] — fixed: `POLL_CAPS.maxCustomLinkLength`, interpolated into `customLinkTooLong`
+- [x] [Review][Patch] Normalization `(draft.customLink ?? "").trim().toLowerCase()` duplicated between validation and the deadline-past dedupe path — "mirrors exactly" is a promise nothing enforces [src/modules/polls/index.ts:266, :504] — fixed: shared `normalizeCustomLink` helper
+- [x] [Review][Patch] Slug input lacks mobile hints (`autocapitalize="none"`, `spellcheck="false"`, `autocomplete="off"`) on a lowercase-only field — iOS autocapitalize guarantees the raw/normalized mismatch [src/pages/creator/new.astro:332-342, src/components/input.astro] — fixed: pass-through props on the Input primitive, set on the slug field, pinned in e2e
+- [x] [Review][Patch] Error-state `aria-describedby` announces the helper before the error, unlike sibling fields — swap to error-first order [src/pages/creator/new.astro:339-341] — fixed: `custom-link-error custom-link-help`, pinned in e2e
+- [x] [Review][Defer] Taken-collision detection substring-matches D1 driver error text [src/adapters/d1/index.ts:131-138] — deferred, pre-existing: D1 exposes no structured error code, message text is the only signal; same accepted pattern as `DuplicatePollIdError` from Story 1.3
+- [x] [Review][Defer] `poll_reference.kind` has no CHECK constraint; `canonicalReferenceKind` is an unchecked cast — an out-of-union value silently turns D4 retries into "already published" errors [db/migrations/0004_polls.sql, src/adapters/d1/index.ts:166-170] — deferred, pre-existing: schema shipped in 1.3; Story 1.4's no-new-migration constraint forbids the fix here
+- [x] [Review][Defer] Migration 0004's comment permanently describes the superseded "alongside the generated one" design [db/migrations/0004_polls.sql:40-41] — deferred, pre-existing: migrations are immutable by policy (AD-14); substitution design is recorded in this story's decisions table instead
+
+#### Review round 2 (re-review of the patch round)
+
+- [x] [Review][Patch] Redirect hardening: the NOCASE fallback runs on every unknown reference (second D1 round trip on ordinary garbage 404s, full-table scan — the BINARY PK can't serve a COLLATE NOCASE lookup); `canonical` is never checked against the requested reference (self-301 loop if a custom row's poll is unreachable via the JOIN); the DB value flows into `Location` with no read-side charset guard; the query string is dropped; and the bare 301 has no `Cache-Control`, making a wrong redirect effectively irrevocable while the file's own 405 sets `no-store` [src/pages/[reference].astro:30-35] — fixed: case-variant candidate gate, self-hit guard, charset re-check, query preserved, `no-store` on the 301
+- [x] [Review][Patch] `findCanonicalCustomReference` ignores `is_canonical` (named "canonical", sibling `findPollForOwner` filters it), orders NOCASE ties nondeterministically, and its comment overpromises — SQLite NOCASE folds ASCII only, correct here solely because slugs are `[a-z0-9-]` [src/adapters/d1/index.ts:156-170] — fixed: `is_canonical = 1` filter (tested), `ORDER BY reference`, comment corrected
+- [x] [Review][Patch] E2E case-mangle regex flips the first letter of the whole pathname — a lettered path prefix would be mangled instead of the reference, passing the 404 assertion without exercising case-sensitivity (false green) [tests/e2e/create-poll-authed.spec.mjs:136-140] — fixed: regex anchored to the final path segment
+- [x] [Review][Patch] Input pass-through props typed as plain `string` — `spellcheck="banana"` compiles; literal unions make misuse a type error [src/components/input.astro:14-16] — fixed: `autocapitalize`/`spellcheck` literal unions
+- [x] [Review][Patch] Story-file records went stale in the review round: Task 4 and the "Existing code" table still claim zero changes to `src/pages/[reference].astro`; the File List omits `caps.ts`, `input.astro`, `[reference].astro`, `deferred-work.md`; Completion Notes cite pre-patch gate counts (228/228) with no recorded re-run behind the `done` flip [_bmad-output/implementation-artifacts/1-4-custom-links.md] — fixed: Task 4, table, File List, and Completion Notes reconciled with the review-round reality and re-run gate results
+- [x] [Review][Defer] A case-mangled *generated* reference whose lowercase fold collides with a registered custom slug redirects to the wrong poll instead of 404ing — deferred: inherent to the ratified case-insensitive custom-link design; collision needs a 128-bit random fold to equal a chosen slug (~2⁻⁷⁷ per pair), and the all-lowercase short-circuit plus canonical guards bound the reachable surface [src/pages/[reference].astro, src/adapters/d1/index.ts]
+- [x] [Review][Defer] Canonical-resolution composition (exact-then-fold-then-redirect) lives in the page frontmatter — arguably FR-28 domain policy inside an inbound adapter (AD-1) — deferred: the composition is two adapter calls and a branch; the case-fold rule itself is encoded in the port method and its test; extracting a domain function would add a port for one conditional
+- [x] [Review][Defer] CI retry converts a partial e2e failure into a guaranteed one — a retry after the 303 publish re-submits the same slug and dies on "taken" because `cleanupCreator` runs in `afterAll` — deferred, pre-existing: harness design predates this round and applies to the whole authed file
+- [x] [Review][Defer] The 301/404 contract is covered only by the authed e2e, which `test.skip`s without a provisioned `BETTER_AUTH_SECRET` — deferred: the deploy gate provisions the secret, so CI coverage is unconditional; a signed-out seed-based test is a nice-to-have [tests/e2e/create-poll-authed.spec.mjs]
+
+#### Review round 3 (re-review of the round-2 patch)
+
+- [x] [Review][Patch] Candidate gate rebuilt: unbounded length lets `/Wp-Admin`-shape and 500-char mixed-case probes pay the NOCASE scan despite the "only plausible case variants" comment; non-Unicode `/i` legacy-folds `ſ`/`ı`/Kelvin `K` (Unicode mode folds them too — the flag is the wrong tool); and as inlined frontmatter the gate logic can't be unit-tested [src/pages/[reference].astro:30-33] — fixed: `isCustomSlugCaseVariant` domain predicate (fold-first, cap-bounded, charset on the folded form) with a unit matrix
+- [x] [Review][Patch] `ORDER BY reference` + `.first()` + the page-side charset guard compose into a hole: with out-of-band case-duplicate canonical rows, BINARY ordering selects the uppercase row first and the guard then rejects it — 404 despite a valid lowercase canonical match [src/adapters/d1/index.ts:163-170, src/pages/[reference].astro:43] — fixed: `AND reference GLOB '[a-z0-9-]*'` in the SQL, tested with an out-of-band uppercase row
+- [x] [Review][Patch] Change Log says "10 patches" but the Review Findings label exactly 9 `[Review][Patch]` items — the tenth is the `[Review][Decision]` redirect implementation [_bmad-output/implementation-artifacts/1-4-custom-links.md] — fixed: counts now include this round's 3 (12 total)
+- [x] [Review][Defer] A mixed-case request to an orphan reference row (poll deleted out-of-band, bypassing the cascade) 301s into a 404 instead of 404ing directly — deferred: corrupt-state-only reachability (D1 enforces the cascade), the chain terminates correctly, and a reachability re-check would tax every legitimate case-variant hit [src/pages/[reference].astro]
+
+#### Review round 4 (re-review of the round-3 patch)
+
+- [x] [Review][Patch] Round 3's GLOB fix is wrong: `GLOB '[a-z0-9-]*'` constrains only the FIRST character (`*` is a wildcard, not a Kleene star — verified against real SQLite), so an out-of-band row like `tEAM-lunch` passes the filter, wins BINARY ordering, gets rejected by the page guard, and 404s despite the valid `team-lunch` row — the composition hole survives [src/adapters/d1/index.ts:171] — fixed: `AND reference NOT GLOB '*[^a-z0-9-]*'`
+- [x] [Review][Patch] The round-3 GLOB test is a false green: its out-of-band fixture `TEAM-LUNCH` violates the charset at position 0, the only shape the broken pattern excludes [tests/integration/polls-adapter.integration.test.ts:320-353] — fixed: fixture now `tEAM-lunch` (interior uppercase)
+- [x] [Review][Patch] The self-hit guard `canonical !== reference` is provably dead (predicate requires uppercase in the request; correct GLOB restricts canonical to lowercase) and the page comment wrongly credits it with the orphan 404 behavior, which is actually the deferred 301→404 chain [src/pages/[reference].astro:36-42] — fixed: guard removed, comments corrected in code and both ledgers
+- [x] [Review][Patch] The page-side guard re-introduces a literal `63` after round 1 extracted the cap into `POLL_CAPS`; with a correct GLOB the `ORDER BY` is vestigial and its comment overpromises [src/pages/[reference].astro:43, src/adapters/d1/index.ts:156-171] — fixed: `POLL_CAPS.maxCustomLinkLength` in the guard, ORDER BY dropped
+
+#### Review round 5 (re-review of the round-4 patch)
+
+- [x] [Review][Patch] Kelvin-sign gate leak: U+212A folds to ASCII `k` under JS `toLowerCase`, so `\u{212A}team`-shape probes pass the fold-first predicate and pay the full NOCASE scan on every request (always 404 correctly — SQLite NOCASE is ASCII-only — but the scan-bounding the gate exists for is defeated, and the comment claims fold-first excludes Kelvin) [src/modules/polls/index.ts:222-229] — fixed: raw-form ASCII test (`/^[a-zA-Z0-9-]+$/`), no fold semantics consulted; Kelvin/İ pinned in unit tests
+- [x] [Review][Patch] Completion Notes still credit the removed self-hit guard ("canonical/self-hit/charset guards") — round 4 corrected code and both defer ledgers but missed this sentence [_bmad-output/implementation-artifacts/1-4-custom-links.md:208] — fixed: phrase now "canonical/charset guards"
 
 ## Dev Notes
 
@@ -91,7 +135,7 @@ AD-3: `CreatePoll` "commits the Poll, type facts, options or slots, **slug reser
 | `src/modules/polls/reserved-slugs.ts` | `isReservedSlug` — lowercases, rejects empty; app slugs + `results`/`manifest` | Import it. Zero changes | The routing consumer (`[reference].astro`) |
 | `src/adapters/d1/index.ts` | `insertPoll` one `db.batch()`; `findPollByReference` kind-agnostic; `findPollForOwner` joins `is_canonical = 1` | Distinguish the reference-PK constraint failure | Batch atomicity (forced-failure test exists); both read queries unchanged |
 | `src/pages/creator/new.astro` | Form schema/values/422 re-render/ADD OPTION round-trip all preserve fields | Add one field block + schema entry + values plumbing | CSRF hidden field, intent handling, option rows, all existing field blocks |
-| `src/pages/[reference].astro` | Reserved-check then `findPollByReference`; 404 otherwise | Nothing | — |
+| `src/pages/[reference].astro` | Reserved-check then `findPollByReference`; 404 otherwise | Nothing at implementation; the review round added the case-variant → canonical redirect fallback (Review Findings) | — |
 | `src/pages/creator/polls/[pollId].astro` | Renders `canonicalReference` URL | Nothing | Outcome-line focus contract |
 | `db/migrations/0004_polls.sql` | `poll_reference` PK `reference`, `kind`, `is_canonical` | Nothing — NO new migration | Never edit a shipped migration (AD-14) |
 
@@ -115,7 +159,7 @@ Bans that bite: no rounded corners, no spinner, no toast, no live "checking…" 
 - 1.3 is in `review` with all work **uncommitted** on `main`'s working tree — this story starts after that lands. Baseline commit above predates 1.3's merge; re-check `git log` at dev time.
 - The 422 re-render / values-preservation / fieldErrors pattern in `new.astro` is proven end-to-end (20/20 scripted smoke assertions) — extend it, don't restructure.
 - Integration-test harness: D1 storage persists across tests within a file; seed inserts must be idempotent (`INSERT OR IGNORE`) with per-file cleanup (`DELETE FROM poll`). Cascades fire in workerd local D1 without pragmas.
-- Playwright can't drive the authenticated create flow (real OAuth consent) — middleware-level integration tests + the signed-out-redirect e2e stand in; same constraint applies here, so the duplicate/reserved-slug paths are integration-tested, not e2e'd.
+- Playwright can drive the authenticated create flow via the seeded-session harness (`tests/e2e/creator-session.mjs`, session seeded into local D1 and cookie signed with the local `BETTER_AUTH_SECRET`) — 1.3's note that it couldn't is stale; the duplicate/reserved-slug paths are e2e'd there, not integration-tested (review decision, Justin 2026-07-30).
 - `input` primitive gained `describedby` in 1.3 — use it for the error wiring.
 - Env bindings via `env` from `cloudflare:workers`; custom domain NOT yet bound — canonical URLs render from request origin, never hardcode `polls.oddspark.dev`.
 - Review lesson from 1.2: map provider errors to stable codes once, in the command's single envelope — the taken-error mapping belongs there, not in the page.
@@ -166,15 +210,20 @@ Codex (GPT-5)
 - Task 3: `/creator/new` now carries `customLink` through Zod parsing, initial/postback values, no-JS ADD OPTION, and all re-renders. The field sits between Deadline and Description, uses the existing input primitive, connects helper/error text through `aria-describedby`, validates only on submit, preserves the raw submitted value, and never autofocuses or performs an availability check. Authenticated browser coverage proves the normal, reserved, taken, no-JS, and canonical-link paths.
 - Task 4: verified without modifying either route. A mixed-case submission persisted lowercase `team-lunch` as the only canonical custom row, the creator confirmation rendered the complete custom URL and immutable-reference guidance, and `/team-lunch` returned 200 with the created question/options.
 - Task 5: ordered gates passed on Node 24.18.0 — migration guard (5/5 checksummed), Vitest (16 files, 228/228 tests), TypeScript check, Playwright (32/32), Wrangler types, and production build. Light/dark browser screenshots covered the normal and reserved-error field states; the browser had no page exceptions or unexpected console errors (the intentional 422 navigation produced Chromium's expected failed-resource entry).
+- Review round (2026-07-30): case-variant custom links now 301 to the canonical lowercase URL (query string preserved, `cache-control: no-store`, canonical/charset guards, `is_canonical = 1` + GLOB-filtered deterministic NOCASE lookup, `isCustomSlugCaseVariant` domain predicate bounding the fallback to plausible variants); generated references pinned case-sensitive; `POLL_CAPS.maxCustomLinkLength`; shared `normalizeCustomLink`; Input hint pass-throughs (`autocapitalize="none"`, `spellcheck="false"`, `autocomplete="off"`, literal-union types); error-first `aria-describedby`. Gates re-run green on the patched tree: Vitest 238/238 (16 files), `tsc --noEmit`, `migrations:guard` (5/5), Playwright 32/32.
 
 ### File List
 
 - `CHANGELOG.md`
 - `_bmad-output/implementation-artifacts/1-4-custom-links.md`
+- `_bmad-output/implementation-artifacts/deferred-work.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `src/adapters/d1/index.ts`
+- `src/components/input.astro`
+- `src/modules/polls/caps.ts`
 - `src/modules/polls/index.ts`
 - `src/modules/polls/reserved-slugs.ts`
+- `src/pages/[reference].astro`
 - `src/pages/creator/new.astro`
 - `tests/e2e/create-poll-authed.spec.mjs`
 - `tests/integration/polls-adapter.integration.test.ts`
@@ -183,3 +232,4 @@ Codex (GPT-5)
 ### Change Log
 
 - 2026-07-30: Implemented Custom Link validation, canonical persistence, D1 collision mapping, creator-form preservation, route verification, and complete automated/browser proof for Story 1.4.
+- 2026-07-30: Code review — resolved 3 decisions (case-variant 301 to canonical; validation order ratified; e2e test placement ratified), applied 18 patches across five rounds (redirect hardening, candidate-gate predicate, full-charset GLOB filter, caps, shared normalization, input hints, aria order, record reconciliation), deferred 8 items to `deferred-work.md`. Status → done.

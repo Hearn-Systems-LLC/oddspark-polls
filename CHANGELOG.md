@@ -43,4 +43,6 @@ production on every merge, but no version has been cut or tagged.
   the resolved closing time in UTC.
 - Public poll page at the root path (`/{reference}`) rendering the question and options
   server-side; unknown or application-reserved references return a plain 404.
+- Case variants of a Custom Link (e.g. `/Team-Lunch`) permanently redirect to the canonical
+  lowercase URL; generated random links remain case-sensitive.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

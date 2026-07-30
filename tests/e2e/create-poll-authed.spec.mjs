@@ -126,6 +126,24 @@ test.describe("authenticated create flow (seeded session)", () => {
     await page.goto(page.url().replace("?created", ""));
     await expect(page.getByText("Your Poll is live.")).toHaveCount(0);
     await expect(page).toHaveTitle("Where should we eat? — Oddspark Polls");
+
+    // Generated references are case-sensitive base64url — a case-mangled
+    // variant must NOT resolve or redirect (only custom links fold case).
+    const canonical =
+      (await page.locator(".canonical-url").textContent())?.trim() ?? "";
+    const generatedPath = new URL(canonical).pathname;
+    // Anchored to the final path segment: a lettered prefix (base, marker)
+    // must never be what gets mangled.
+    const mangledPath = generatedPath.replace(/[a-zA-Z](?=[^/]*$)/, (char) =>
+      char === char.toUpperCase()
+        ? char.toLowerCase()
+        : char.toUpperCase(),
+    );
+    expect(mangledPath).not.toBe(generatedPath);
+    const mangledResponse = await page.request.get(mangledPath, {
+      maxRedirects: 0,
+    });
+    expect(mangledResponse.status()).toBe(404);
   });
 
   test("publishes a mixed-case Custom Link as the only canonical reference and resolves it", async ({
@@ -168,6 +186,19 @@ test.describe("authenticated create flow (seeded session)", () => {
     ).toBeVisible();
     await expect(page.getByText("Pizza")).toBeVisible();
     await expect(page.getByText("Tacos")).toBeVisible();
+
+    // A case variant of the custom link redirects to the canonical form
+    // instead of 404ing (Story 1.4 review decision) — query string kept,
+    // caching suppressed so a wrong redirect is never permanent.
+    const variantResponse = await page.request.get(
+      "/TEAM-Lunch?ref=newsletter",
+      { maxRedirects: 0 },
+    );
+    expect(variantResponse.status()).toBe(301);
+    expect(variantResponse.headers()["location"]).toBe(
+      "/team-lunch?ref=newsletter",
+    );
+    expect(variantResponse.headers()["cache-control"]).toContain("no-store");
   });
 
   test("re-renders an invalid submission as 422 with the Voice copy and values preserved", async ({
@@ -234,10 +265,15 @@ test.describe("authenticated create flow (seeded session)", () => {
 
     await expect(customLink).toHaveValue("  Creator  ");
     await expect(customLink).toHaveAttribute("aria-invalid", "true");
+    // Error-first reading order: the failure announces before the hint.
     await expect(customLink).toHaveAttribute(
       "aria-describedby",
-      "custom-link-help custom-link-error",
+      "custom-link-error custom-link-help",
     );
+    // Lowercase-only field: no mobile autocapitalize/spellcheck interference.
+    await expect(customLink).toHaveAttribute("autocapitalize", "none");
+    await expect(customLink).toHaveAttribute("spellcheck", "false");
+    await expect(customLink).toHaveAttribute("autocomplete", "off");
     await expect(page.locator("#custom-link-error")).toHaveText(
       "`creator` is reserved by the application itself. Pick something less structural.",
     );

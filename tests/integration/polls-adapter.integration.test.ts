@@ -241,3 +241,115 @@ describe("createPollPersistence reads", () => {
     ).toBeNull();
   });
 });
+
+describe("createPollPersistence.findCanonicalCustomReference", () => {
+  it("resolves a case variant of a custom reference to its canonical form", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+
+    expect(
+      await persistence.findCanonicalCustomReference("TEAM-Lunch"),
+    ).toBe("team-lunch");
+    expect(await persistence.findCanonicalCustomReference("team-lunch")).toBe(
+      "team-lunch",
+    );
+  });
+
+  it("never case-folds a generated reference", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "aB3-xY_9qWmZvK2pL0dEfG",
+          pollId: POLL_1,
+          kind: "generated",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+
+    expect(
+      await persistence.findCanonicalCustomReference(
+        "ab3-xy_9qwmzvk2pl0defg",
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores non-canonical custom rows", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+    await testEnv.DB.prepare(
+      "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('old-lunch', ?1, 'custom', 0, ?2)",
+    )
+      .bind(POLL_1, NOW)
+      .run();
+
+    expect(
+      await persistence.findCanonicalCustomReference("OLD-Lunch"),
+    ).toBeNull();
+    expect(await persistence.findCanonicalCustomReference("TEAM-Lunch")).toBe(
+      "team-lunch",
+    );
+  });
+
+  it("returns null for an unknown reference", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    expect(
+      await persistence.findCanonicalCustomReference("nope"),
+    ).toBeNull();
+  });
+
+  it("skips an out-of-band charset-violating row instead of selecting it", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+    // Out-of-band write the app would never make: a BINARY primary key
+    // physically permits a mixed-case canonical row on another poll — with
+    // the uppercase byte AFTER position 0, so only a true full-charset
+    // filter excludes it (a first-character filter would not).
+    const outOfBand = rows();
+    outOfBand.poll = { ...outOfBand.poll, id: POLL_2 };
+    outOfBand.options = outOfBand.options.map((option, index) => ({
+      ...option,
+      id: `opt-upper-${index}` as PollOptionId,
+      pollId: POLL_2,
+    }));
+    outOfBand.reference = {
+      reference: "tEAM-lunch",
+      pollId: POLL_2,
+      kind: "custom",
+      createdAtMs: NOW,
+    };
+    await persistence.insertPoll(outOfBand);
+
+    expect(await persistence.findCanonicalCustomReference("TEAM-LUNCH")).toBe(
+      "team-lunch",
+    );
+  });
+});

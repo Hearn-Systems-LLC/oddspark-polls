@@ -153,6 +153,27 @@ export function createPollPersistence(db: D1Database) {
       return toPollPage(row, await loadOptions(db, row.id));
     },
 
+    // Case-variant resolution for custom links only (Story 1.4 review):
+    // custom slugs are stored lowercase-folded ([a-z0-9-] by validation), so
+    // an ASCII-only NOCASE match restricted to canonical kind='custom' rows
+    // finds the canonical row for `/Team-Lunch`-style hits without ever
+    // folding a case-sensitive base64url generated reference. The NOCASE
+    // comparison can't use the BINARY primary key (a scan, tolerable on the
+    // case-variant path only). The negated GLOB skips any out-of-band row
+    // containing a non-slug byte; at most one all-lowercase form of a string
+    // can exist under the BINARY primary key, so no ordering is needed.
+    async findCanonicalCustomReference(
+      reference: string,
+    ): Promise<string | null> {
+      const row = await db
+        .prepare(
+          "SELECT reference FROM poll_reference WHERE reference = ?1 COLLATE NOCASE AND kind = 'custom' AND is_canonical = 1 AND reference NOT GLOB '*[^a-z0-9-]*'",
+        )
+        .bind(reference)
+        .first<{ reference: string }>();
+      return row?.reference ?? null;
+    },
+
     async findPollForOwner(
       pollId: PollId,
       ownerUserId: UserId,

@@ -336,8 +336,11 @@ while (values.options.length < 2) {
           label="CUSTOM LINK (OPTIONAL)"
           value={values.customLink}
           error={Boolean(fieldErrors.customLink)}
+          autocapitalize="none"
+          spellcheck="false"
+          autocomplete="off"
           describedby={fieldErrors.customLink
-            ? "custom-link-help custom-link-error"
+            ? "custom-link-error custom-link-help"
             : "custom-link-help"}
         />
         {fieldErrors.customLink && (

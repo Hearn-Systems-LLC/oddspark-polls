@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import BaseLayout from "../layouts/base-layout.astro";
 import { createPollPersistence } from "../adapters/d1/index";
 import { isReservedSlug } from "../modules/polls/reserved-slugs";
+import { isCustomSlugCaseVariant, POLL_CAPS } from "../modules/polls/index";
 
 // Root-path poll page (AD-13): the canonical reference resolves here.
 // Story 1.3 delivers the reachable, open Poll — question and options
@@ -20,9 +21,39 @@ if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") {
 }
 
 // Routing and slug validation share one reserved-slug registry (AD-13).
-const poll = isReservedSlug(reference)
-  ? null
-  : await createPollPersistence(env.DB).findPollByReference(reference);
+const reserved = isReservedSlug(reference);
+const persistence = createPollPersistence(env.DB);
+const poll = reserved ? null : await persistence.findPollByReference(reference);
+
+// A missed exact lookup may be a case variant of a custom link (hand-typed,
+// autocapitalized): redirect to the canonical lowercase form (FR-28 — one
+// canonical URL). Generated references stay case-sensitive by construction.
+// The domain predicate bounds the fallback to plausible case variants, so
+// all-lowercase and oversized garbage 404s in one read (the NOCASE scan
+// can't use the BINARY primary key).
+if (!poll && !reserved && isCustomSlugCaseVariant(reference)) {
+  const canonical = await persistence.findCanonicalCustomReference(reference);
+  // Defense-in-depth re-check before the value crosses into a Location
+  // header (the SQL already excludes charset-violating rows; the predicate
+  // guarantees canonical !== reference, since an all-lowercase candidate
+  // never reaches this branch). An orphan reference row surfaces only in
+  // corrupt state — its 301 lands on the designed 404 (deferred).
+  if (
+    canonical &&
+    canonical.length <= POLL_CAPS.maxCustomLinkLength &&
+    /^[a-z0-9-]+$/.test(canonical)
+  ) {
+    return new Response(null, {
+      status: 301,
+      headers: {
+        location: `/${canonical}${Astro.url.search}`,
+        // A bare 301 is cached heuristically and effectively forever — a
+        // wrong redirect the app could never revoke. Match the 405 above.
+        "cache-control": "no-store",
+      },
+    });
+  }
+}
 
 if (!poll) {
   Astro.response.status = 404;

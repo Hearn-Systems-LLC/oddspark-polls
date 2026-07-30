@@ -10,6 +10,10 @@ interface Props {
   error?: boolean;
   /** id of the inline error message element, wired to aria-describedby. */
   describedby?: string;
+  /** Mobile/browser hint pass-throughs for machine-shaped values (slugs, codes). */
+  autocapitalize?: "none" | "sentences" | "words" | "characters" | "off" | "on";
+  spellcheck?: "true" | "false";
+  autocomplete?: string;
   class?: string;
 }
 
@@ -23,6 +27,9 @@ const {
   required = false,
   error = false,
   describedby,
+  autocapitalize,
+  spellcheck,
+  autocomplete,
   class: className = "",
 } = Astro.props;
 ---
@@ -37,6 +44,9 @@ const {
     value={value}
     placeholder={placeholder}
     required={required}
+    autocapitalize={autocapitalize}
+    spellcheck={spellcheck}
+    autocomplete={autocomplete}
     aria-invalid={error ? "true" : undefined}
     aria-describedby={describedby}
   />

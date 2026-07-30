@@ -74,8 +74,7 @@ export const CREATE_POLL_COPY = {
     "That Deadline never happens — the clock skips right over it.",
   customLinkInvalid:
     "A Custom Link uses lowercase letters, digits, and hyphens. Nothing else.",
-  customLinkTooLong:
-    "That Custom Link is too long. Keep it to 63 characters.",
+  customLinkTooLong: `That Custom Link is too long. Keep it to ${POLL_CAPS.maxCustomLinkLength} characters.`,
   customLinkReserved:
     "`{slug}` is reserved by the application itself. Pick something less structural.",
   customLinkTaken: "`{slug}` is taken. Pick another.",
@@ -206,6 +205,31 @@ function isResultVisibility(value: string): value is ResultVisibility {
   return (RESULT_VISIBILITIES as readonly string[]).includes(value);
 }
 
+// The one Custom Link normalization: trim + lowercase-fold, blank folds to
+// null (the generated-reference path). Validation and the deadline-past
+// dedupe compare share it so the two can never drift. The string fallback
+// keeps the command safe if an older/non-TypeScript client omits the newly
+// introduced field.
+function normalizeCustomLink(value: string | undefined): string | null {
+  return (value ?? "").trim().toLowerCase() || null;
+}
+
+// Is a root-path URL param a plausible case variant of a custom slug? The
+// public resolver pays a NOCASE scan only when this holds (Story 1.4
+// review). The raw form must be ASCII: stored slugs are [a-z0-9-] and only
+// ASCII letters have case, so a non-ASCII byte can never be a case variant
+// — testing the raw form keeps Unicode fold quirks (ſ, ı, Kelvin K) out by
+// construction, with no `/i` or fold semantics consulted at all. Bounded by
+// the slug cap so oversized probes skip the scan too. Pure domain policy
+// (AD-1); the route decides what to do with the answer.
+export function isCustomSlugCaseVariant(reference: string): boolean {
+  return (
+    reference.length <= POLL_CAPS.maxCustomLinkLength &&
+    /^[a-zA-Z0-9-]+$/.test(reference) &&
+    reference !== reference.toLowerCase()
+  );
+}
+
 export function validateCreatePoll(
   draft: CreatePollDraft,
   nowMs: number,
@@ -261,10 +285,8 @@ export function validateCreatePoll(
     fail("visibility", "visibility_invalid", CREATE_POLL_COPY.visibilityInvalid);
   }
 
-  // The delivery type requires a string; the fallback keeps the command safe
-  // if an older/non-TypeScript client omits the newly introduced field.
-  const customLink = (draft.customLink ?? "").trim().toLowerCase();
-  if (customLink.length > 0) {
+  const customLink = normalizeCustomLink(draft.customLink);
+  if (customLink !== null) {
     // AC #3 requires structural names such as `/`, `_astro`, and dotted
     // filenames to receive reserved-path copy. Treat an exact registry match
     // as admitted by the format gate, then retain format -> length -> reserved
@@ -276,7 +298,7 @@ export function validateCreatePoll(
         "custom_link_invalid",
         CREATE_POLL_COPY.customLinkInvalid,
       );
-    } else if (customLink.length > 63) {
+    } else if (customLink.length > POLL_CAPS.maxCustomLinkLength) {
       fail(
         "customLink",
         "custom_link_too_long",
@@ -335,7 +357,7 @@ export function validateCreatePoll(
       options: facts.value.options,
       resultVisibility: draft.resultVisibility as ResultVisibility,
       deadlineMs,
-      customLink: customLink.length > 0 ? customLink : null,
+      customLink,
     },
   };
 }
@@ -474,8 +496,8 @@ function isOnlyDeadlinePastError(error: ApplicationError): boolean {
 }
 
 // Rebuilds the validated content shape for a draft whose only failure is a
-// past deadline — every other field is known clean, so the normalization
-// here mirrors validateCreatePoll exactly.
+// past deadline — every other field is known clean, and normalization comes
+// from the same helpers validation uses (normalizeCustomLink, trim/filter).
 function draftContentForCompare(
   draft: CreatePollDraft,
 ): ValidatedCreatePoll | null {
@@ -501,7 +523,7 @@ function draftContentForCompare(
       .map((label, position) => ({ label, position })),
     resultVisibility: draft.resultVisibility as ResultVisibility,
     deadlineMs,
-    customLink: (draft.customLink ?? "").trim().toLowerCase() || null,
+    customLink: normalizeCustomLink(draft.customLink),
   };
 }
 

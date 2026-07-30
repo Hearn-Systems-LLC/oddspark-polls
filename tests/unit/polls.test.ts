@@ -9,6 +9,7 @@ import {
   civilToUtcMs,
   createPoll,
   generatePollReference,
+  isCustomSlugCaseVariant,
   validateCreatePoll,
   type CreatePollDraft,
   type ExistingPollSnapshot,
@@ -537,6 +538,42 @@ describe("reserved-slug registry (AD-13)", () => {
   it("does not reserve ordinary slugs", () => {
     expect(isReservedSlug("team-lunch")).toBe(false);
     expect(isReservedSlug("abc123")).toBe(false);
+  });
+});
+
+describe("isCustomSlugCaseVariant", () => {
+  it("accepts case variants of a legal custom slug", () => {
+    expect(isCustomSlugCaseVariant("Team-Lunch")).toBe(true);
+    expect(isCustomSlugCaseVariant("TEAM-LUNCH")).toBe(true);
+    expect(isCustomSlugCaseVariant("A".repeat(POLL_CAPS.maxCustomLinkLength))).toBe(
+      true,
+    );
+  });
+
+  it("rejects an already-lowercase reference — no variant, no fallback query", () => {
+    expect(isCustomSlugCaseVariant("team-lunch")).toBe(false);
+  });
+
+  it("rejects mixed-case values longer than the slug cap", () => {
+    expect(
+      isCustomSlugCaseVariant("A".repeat(POLL_CAPS.maxCustomLinkLength + 1)),
+    ).toBe(false);
+  });
+
+  it("rejects mixed-case values outside the slug alphabet", () => {
+    expect(isCustomSlugCaseVariant("Team_Lunch")).toBe(false);
+    expect(isCustomSlugCaseVariant("Team Lunch")).toBe(false);
+    expect(isCustomSlugCaseVariant("Team.Lunch")).toBe(false);
+  });
+
+  it("rejects non-ASCII requests — fold quirks never reach the gate", () => {
+    // `ſ` and `İ` don't fold to slug chars; Kelvin K (U+212A) folds to
+    // ASCII `k` under JS toLowerCase, but the raw-form ASCII test excludes
+    // it regardless — no fold semantics are consulted.
+    expect(isCustomSlugCaseVariant("ſA")).toBe(false);
+    expect(isCustomSlugCaseVariant("TÉAM")).toBe(false);
+    expect(isCustomSlugCaseVariant("\u{212A}team")).toBe(false);
+    expect(isCustomSlugCaseVariant("İteam")).toBe(false);
   });
 });
 

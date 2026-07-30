@@ -30,6 +30,7 @@ export type CreatePollDraft = {
   resultVisibility: string;
   deadlineLocal: string;
   timeZone: string;
+  customLink: string;
   // No-JS duplicate-POST dedupe (D4, decision 2026-07-29): the form renders
   // with a pre-minted poll UUID; a retried publish carrying the same ID
   // collides on the poll PRIMARY KEY instead of minting a second Poll.
@@ -51,6 +52,7 @@ export type ValidatedCreatePoll = {
   options: { label: string; position: number }[];
   resultVisibility: ResultVisibility;
   deadlineMs: number | null;
+  customLink: string | null;
 };
 
 // Voice-and-Tone catalog for creation failures. The three epic-specified
@@ -70,6 +72,13 @@ export const CREATE_POLL_COPY = {
   deadlineUnparseable: "That Deadline didn't parse. Check the date and time.",
   deadlineNonexistent:
     "That Deadline never happens — the clock skips right over it.",
+  customLinkInvalid:
+    "A Custom Link uses lowercase letters, digits, and hyphens. Nothing else.",
+  customLinkTooLong:
+    "That Custom Link is too long. Keep it to 63 characters.",
+  customLinkReserved:
+    "`{slug}` is reserved by the application itself. Pick something less structural.",
+  customLinkTaken: "`{slug}` is taken. Pick another.",
   createFailed: "That didn't publish. Nothing was created — try again.",
   duplicateDivergent: "That Poll already published. Start a new one.",
   dedupeUnconfirmable:
@@ -252,6 +261,36 @@ export function validateCreatePoll(
     fail("visibility", "visibility_invalid", CREATE_POLL_COPY.visibilityInvalid);
   }
 
+  // The delivery type requires a string; the fallback keeps the command safe
+  // if an older/non-TypeScript client omits the newly introduced field.
+  const customLink = (draft.customLink ?? "").trim().toLowerCase();
+  if (customLink.length > 0) {
+    // AC #3 requires structural names such as `/`, `_astro`, and dotted
+    // filenames to receive reserved-path copy. Treat an exact registry match
+    // as admitted by the format gate, then retain format -> length -> reserved
+    // ordering for every other value.
+    const customLinkReserved = isReservedSlug(customLink);
+    if (!/^[a-z0-9-]+$/.test(customLink) && !customLinkReserved) {
+      fail(
+        "customLink",
+        "custom_link_invalid",
+        CREATE_POLL_COPY.customLinkInvalid,
+      );
+    } else if (customLink.length > 63) {
+      fail(
+        "customLink",
+        "custom_link_too_long",
+        CREATE_POLL_COPY.customLinkTooLong,
+      );
+    } else if (customLinkReserved) {
+      fail(
+        "customLink",
+        "custom_link_reserved",
+        CREATE_POLL_COPY.customLinkReserved.replace("{slug}", customLink),
+      );
+    }
+  }
+
   let deadlineMs: number | null = null;
   const deadlineLocal = draft.deadlineLocal.trim();
   if (deadlineLocal.length > 0) {
@@ -296,6 +335,7 @@ export function validateCreatePoll(
       options: facts.value.options,
       resultVisibility: draft.resultVisibility as ResultVisibility,
       deadlineMs,
+      customLink: customLink.length > 0 ? customLink : null,
     },
   };
 }
@@ -326,7 +366,7 @@ export type PollPersistenceRows = {
   reference: {
     reference: string;
     pollId: PollId;
-    kind: "generated";
+    kind: "generated" | "custom";
     createdAtMs: number;
   };
 };
@@ -341,6 +381,17 @@ export class DuplicatePollIdError extends Error {
   }
 }
 
+// Thrown by the persistence adapter when the reference PRIMARY KEY collides.
+// The command maps it to a Custom Link field error only when the submitted
+// draft actually used a custom link; generated-reference collisions remain
+// generic failures.
+export class ReferenceTakenError extends Error {
+  constructor(message = "poll reference taken") {
+    super(message);
+    this.name = "ReferenceTakenError";
+  }
+}
+
 // The read port the dedupe policy needs: the already-published Poll behind a
 // colliding ID, scoped to its owner. Structurally satisfied by the D1
 // adapter's `findPollForOwner`; the module stays provider-free (AD-1).
@@ -351,6 +402,7 @@ export type ExistingPollSnapshot = {
   deadlineMs: number | null;
   options: { label: string; position: number }[];
   canonicalReference: string;
+  canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
   createdAtMs: number;
 };
 
@@ -381,7 +433,8 @@ export type CreatePollOutcome = {
 
 // A retried publish is the same Poll only when every persisted field matches
 // — question, description, ordered trimmed option labels, visibility,
-// deadline. Anything else is a divergent resubmission (back-button edit).
+// deadline, and canonical reference. Anything else is a divergent
+// resubmission (back-button edit).
 // The deadline compares as resolved UTC instants: a retry from a different
 // browser zone recomputes deadlineMs from the same civil value, so a
 // zone-shifted retry is intentionally adjudicated divergent.
@@ -389,7 +442,13 @@ function matchesExistingPoll(
   validated: ValidatedCreatePoll,
   existing: ExistingPollSnapshot,
 ): boolean {
+  const referenceMatches =
+    validated.customLink === null
+      ? existing.canonicalReferenceKind === "generated"
+      : existing.canonicalReferenceKind === "custom" &&
+        validated.customLink === existing.canonicalReference;
   return (
+    referenceMatches &&
     validated.question === existing.question &&
     validated.description === existing.description &&
     validated.resultVisibility === existing.resultVisibility &&
@@ -442,6 +501,7 @@ function draftContentForCompare(
       .map((label, position) => ({ label, position })),
     resultVisibility: draft.resultVisibility as ResultVisibility,
     deadlineMs,
+    customLink: (draft.customLink ?? "").trim().toLowerCase() || null,
   };
 }
 
@@ -529,18 +589,32 @@ export async function createPoll(
     return { ok: false, error };
   };
 
-  // Generated references are checked against the reserved-slug registry
-  // (AD-13): a collision is practically impossible, the check still applies.
-  // Bounded — a generator that keeps returning reserved slugs is broken, so
-  // fail the create rather than loop forever.
-  let reference = deps.generateReference();
-  for (let attempt = 0; attempt < 2 && isReservedSlug(reference); attempt += 1) {
+  let reference: string;
+  let referenceKind: PollPersistenceRows["reference"]["kind"];
+  if (validated.value.customLink !== null) {
+    // A Custom Link substitutes for the random reference. One canonical row,
+    // one public URL, and no generated-reference draw (FR-3, AD-13).
+    reference = validated.value.customLink;
+    referenceKind = "custom";
+  } else {
+    // Generated references are checked against the reserved-slug registry
+    // (AD-13): a collision is practically impossible, the check still applies.
+    // Bounded — a generator that keeps returning reserved slugs is broken, so
+    // fail the create rather than loop forever.
     reference = deps.generateReference();
-  }
-  if (isReservedSlug(reference)) {
-    return createFailed(
-      new Error("reference generator returned reserved slugs after 3 draws"),
-    );
+    for (
+      let attempt = 0;
+      attempt < 2 && isReservedSlug(reference);
+      attempt += 1
+    ) {
+      reference = deps.generateReference();
+    }
+    if (isReservedSlug(reference)) {
+      return createFailed(
+        new Error("reference generator returned reserved slugs after 3 draws"),
+      );
+    }
+    referenceKind = "generated";
   }
   const rows: PollPersistenceRows = {
     poll: {
@@ -566,7 +640,7 @@ export async function createPoll(
     reference: {
       reference,
       pollId,
-      kind: "generated",
+      kind: referenceKind,
       createdAtMs: nowMs,
     },
   };
@@ -601,6 +675,23 @@ export async function createPoll(
       // lookup failed, or it belongs to someone else): "nothing was
       // created" may be a lie here, so the copy says so instead.
       return createFailed(cause, CREATE_POLL_COPY.dedupeUnconfirmable);
+    }
+    if (
+      cause instanceof ReferenceTakenError &&
+      validated.value.customLink !== null
+    ) {
+      const error: ApplicationError = {
+        code: "poll_validation_failed",
+        message: "Fix the fields below.",
+        fieldErrors: {
+          customLink: CREATE_POLL_COPY.customLinkTaken.replace(
+            "{slug}",
+            validated.value.customLink,
+          ),
+        },
+        reasonCodes: { customLink: "custom_link_taken" },
+      };
+      return { ok: false, error };
     }
     return createFailed(cause);
   }

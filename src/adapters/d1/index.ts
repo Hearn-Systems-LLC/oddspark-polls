@@ -5,6 +5,7 @@
 
 import {
   DuplicatePollIdError,
+  ReferenceTakenError,
   type PollPersistenceRows,
 } from "../../modules/polls/index";
 import type {
@@ -28,6 +29,7 @@ export type PollPage = {
 
 export type OwnedPoll = PollPage & {
   canonicalReference: string;
+  canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
   createdAtMs: number;
 };
 
@@ -117,13 +119,22 @@ export function createPollPersistence(db: D1Database) {
             ),
         ]);
       } catch (error) {
-        // Translate the one collision the domain has policy for (D4 dedupe);
-        // everything else propagates to the generic failure mapping.
+        // Poll-ID precedence preserves D4 dedupe when a replay collides on
+        // both the Poll and reference rows. Reference uniqueness is the
+        // authoritative Custom Link availability decision (AD-16).
         if (
           error instanceof Error &&
           /UNIQUE constraint failed: poll\.id/.test(error.message)
         ) {
           throw new DuplicatePollIdError(error.message);
+        }
+        if (
+          error instanceof Error &&
+          /UNIQUE constraint failed: poll_reference\.reference/.test(
+            error.message,
+          )
+        ) {
+          throw new ReferenceTakenError(error.message);
         }
         throw error;
       }
@@ -148,11 +159,15 @@ export function createPollPersistence(db: D1Database) {
     ): Promise<OwnedPoll | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
         )
         .bind(pollId, ownerUserId)
         .first<
-          PollRow & { canonical_reference: string; created_at_ms: number }
+          PollRow & {
+            canonical_reference: string;
+            canonical_reference_kind: PollPersistenceRows["reference"]["kind"];
+            created_at_ms: number;
+          }
         >();
       if (!row) {
         return null;
@@ -160,6 +175,7 @@ export function createPollPersistence(db: D1Database) {
       return {
         ...toPollPage(row, await loadOptions(db, row.id)),
         canonicalReference: row.canonical_reference,
+        canonicalReferenceKind: row.canonical_reference_kind,
         createdAtMs: row.created_at_ms,
       };
     },

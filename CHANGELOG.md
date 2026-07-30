@@ -37,6 +37,8 @@ production on every merge, but no version has been cut or tagged.
 - Multiple-choice poll creation at `/creator/new`: question, two to thirty options, a
   results-visibility setting, and an optional deadline interpreted in the creator's local
   timezone — fully usable without JavaScript.
+- Optional Custom Links at poll creation, with normalized root-path URLs, shared
+  application-route reservations, collision-safe inline errors, and no second random URL.
 - Create-confirmation page showing the poll's canonical link and, when a deadline was set,
   the resolved closing time in UTC.
 - Public poll page at the root path (`/{reference}`) rendering the question and options

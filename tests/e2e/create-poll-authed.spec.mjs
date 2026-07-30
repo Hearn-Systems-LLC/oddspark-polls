@@ -60,6 +60,22 @@ test.describe("authenticated create flow (seeded session)", () => {
       page.getByRole("heading", { name: "Create a Poll" }),
     ).toBeVisible();
     await expect(page.locator("[data-option-row]")).toHaveCount(4);
+    const customLink = page.getByLabel("CUSTOM LINK (OPTIONAL)");
+    await expect(customLink).toBeVisible();
+    await expect(customLink).toHaveValue("");
+    await expect(
+      page.getByText(
+        "Lowercase letters, digits, and hyphens. Leave blank for a random link.",
+      ),
+    ).toBeVisible();
+    expect(
+      await page
+        .locator("#deadline, #custom-link, #description")
+        .evaluateAll((fields) => fields.map((field) => field.id)),
+    ).toEqual(["deadline", "custom-link", "description"]);
+    expect(await page.evaluate(() => document.activeElement?.id)).not.toBe(
+      "custom-link",
+    );
     await expect(
       page.getByRole("button", { name: "PUBLISH POLL" }),
     ).toBeVisible();
@@ -112,6 +128,48 @@ test.describe("authenticated create flow (seeded session)", () => {
     await expect(page).toHaveTitle("Where should we eat? — Oddspark Polls");
   });
 
+  test("publishes a mixed-case Custom Link as the only canonical reference and resolves it", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const seeded = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Team lunch?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("  Team-Lunch  ");
+
+    const [publishResponse] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes("/creator/new") &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+    expect(publishResponse.status()).toBe(303);
+
+    const canonicalUrl = `${requireBaseUrl(baseURL)}/team-lunch`;
+    await expect(page.locator(".canonical-url")).toHaveText(canonicalUrl);
+    await expect(page.getByText("Its reference never changes.")).toBeVisible();
+    expect(
+      d1Query(
+        `SELECT r.reference, r.kind, r.is_canonical FROM poll_reference r JOIN poll p ON p.id = r.poll_id WHERE p.owner_user_id = '${seeded.userId}'`,
+      ),
+    ).toEqual([
+      { reference: "team-lunch", kind: "custom", is_canonical: 1 },
+    ]);
+
+    const publicResponse = await page.goto("/team-lunch");
+    expect(publicResponse?.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", { name: "Team lunch?" }),
+    ).toBeVisible();
+    await expect(page.getByText("Pizza")).toBeVisible();
+    await expect(page.getByText("Tacos")).toBeVisible();
+  });
+
   test("re-renders an invalid submission as 422 with the Voice copy and values preserved", async ({
     page,
     context,
@@ -121,6 +179,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     await page.goto("/creator/new");
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("team-lunch");
 
     const [response] = await Promise.all([
       page.waitForResponse(
@@ -138,6 +197,154 @@ test.describe("authenticated create flow (seeded session)", () => {
     ).toBeVisible();
     await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue("Pizza");
     await expect(page.getByRole("textbox", { name: "OPTION 2" })).toHaveValue("Tacos");
+    await expect(page.getByLabel("CUSTOM LINK (OPTIONAL)")).toHaveValue(
+      "team-lunch",
+    );
+  });
+
+  test("validates a reserved Custom Link on submit with accessible inline copy and all values preserved", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Where should the team eat?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
+    await page.locator("label.poll-option", { hasText: "AFTER CLOSE" }).click();
+    await page.getByLabel("DESCRIPTION (OPTIONAL)").fill("Friday lunch.");
+    const customLink = page.getByLabel("CUSTOM LINK (OPTIONAL)");
+    await customLink.fill("  Creator  ");
+    await customLink.blur();
+
+    // Submit-only validation: no blur check, availability state, or preview.
+    await expect(customLink).not.toHaveAttribute("aria-invalid");
+    await expect(page.locator("#custom-link-error")).toHaveCount(0);
+
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes("/creator/new") &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+    expect(response.status()).toBe(422);
+
+    await expect(customLink).toHaveValue("  Creator  ");
+    await expect(customLink).toHaveAttribute("aria-invalid", "true");
+    await expect(customLink).toHaveAttribute(
+      "aria-describedby",
+      "custom-link-help custom-link-error",
+    );
+    await expect(page.locator("#custom-link-error")).toHaveText(
+      "`creator` is reserved by the application itself. Pick something less structural.",
+    );
+    await expect(page.getByLabel("QUESTION")).toHaveValue(
+      "Where should the team eat?",
+    );
+    await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue(
+      "Pizza",
+    );
+    await expect(page.getByRole("textbox", { name: "OPTION 2" })).toHaveValue(
+      "Tacos",
+    );
+    await expect(
+      page.locator('input[name="visibility"][value="after_close"]'),
+    ).toBeChecked();
+    await expect(page.getByLabel("DESCRIPTION (OPTIONAL)")).toHaveValue(
+      "Friday lunch.",
+    );
+
+    await customLink.fill("results");
+    const [resultsResponse] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes("/creator/new") &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+    expect(resultsResponse.status()).toBe(422);
+    await expect(page.locator("#custom-link-error")).toHaveText(
+      "`results` is reserved by the application itself. Pick something less structural.",
+    );
+  });
+
+  test("maps a duplicate Custom Link to a preserved 422 and rolls the failed batch back", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const seeded = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Original lunch?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("duplicate-lunch");
+    await page.getByRole("button", { name: "PUBLISH POLL" }).click();
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Second lunch?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Soup");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Salad");
+    await page.locator("label.poll-option", { hasText: "AFTER CLOSE" }).click();
+    await page.getByLabel("DEADLINE (OPTIONAL)").fill("2030-01-15T10:30");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("  Duplicate-Lunch  ");
+    await page.getByLabel("DESCRIPTION (OPTIONAL)").fill("Keep this ballast.");
+
+    const [duplicateResponse] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes("/creator/new") &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+    expect(duplicateResponse.status()).toBe(422);
+
+    const customLink = page.getByLabel("CUSTOM LINK (OPTIONAL)");
+    await expect(customLink).toHaveValue("  Duplicate-Lunch  ");
+    await expect(customLink).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("#custom-link-error")).toHaveText(
+      "`duplicate-lunch` is taken. Pick another.",
+    );
+    await expect(page.getByLabel("QUESTION")).toHaveValue("Second lunch?");
+    await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue(
+      "Soup",
+    );
+    await expect(page.getByRole("textbox", { name: "OPTION 2" })).toHaveValue(
+      "Salad",
+    );
+    await expect(
+      page.locator('input[name="visibility"][value="after_close"]'),
+    ).toBeChecked();
+    await expect(page.getByLabel("DEADLINE (OPTIONAL)")).toHaveValue(
+      "2030-01-15T10:30",
+    );
+    await expect(page.getByLabel("DESCRIPTION (OPTIONAL)")).toHaveValue(
+      "Keep this ballast.",
+    );
+
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM poll_option o JOIN poll p ON p.id = o.poll_id WHERE p.owner_user_id = '${seeded.userId}'`,
+      ),
+    ).toEqual([{ n: 2 }]);
+    expect(
+      d1Query(
+        `SELECT r.reference, r.kind, r.is_canonical FROM poll_reference r JOIN poll p ON p.id = r.poll_id WHERE p.owner_user_id = '${seeded.userId}'`,
+      ),
+    ).toEqual([
+      { reference: "duplicate-lunch", kind: "custom", is_canonical: 1 },
+    ]);
   });
 
   test("echoes an unparseable deadline the datetime input would blank out", async ({
@@ -290,6 +497,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     await page.getByLabel("QUESTION").fill("No-JS round-trip?");
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("Team-Lunch");
 
     await page.getByRole("button", { name: "ADD OPTION" }).click();
     await expect(page).toHaveURL(/\/creator\/new$/);
@@ -297,6 +505,9 @@ test.describe("authenticated create flow (seeded session)", () => {
     await expect(page.getByLabel("QUESTION")).toHaveValue("No-JS round-trip?");
     await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue("Alpha");
     await expect(page.getByRole("textbox", { name: "OPTION 2" })).toHaveValue("Beta");
+    await expect(page.getByLabel("CUSTOM LINK (OPTIONAL)")).toHaveValue(
+      "Team-Lunch",
+    );
 
     // The regression being pinned: ADD OPTION must never create a poll.
     const polls = d1Query(

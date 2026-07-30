@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createPollPersistence } from "../../src/adapters/d1/index";
 import {
   DuplicatePollIdError,
+  ReferenceTakenError,
   type PollPersistenceRows,
 } from "../../src/modules/polls/index";
 import type {
@@ -92,6 +93,29 @@ describe("createPollPersistence.insertPoll", () => {
     expect(optionCount?.n).toBe(2);
   });
 
+  it("persists a custom reference as the one canonical row", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+
+    const references = await testEnv.DB.prepare(
+      "SELECT reference, kind, is_canonical FROM poll_reference WHERE poll_id = ?1",
+    )
+      .bind(POLL_1)
+      .all();
+    expect(references.results).toEqual([
+      { reference: "team-lunch", kind: "custom", is_canonical: 1 },
+    ]);
+  });
+
   it("leaves no reachable Poll when any statement in the batch fails", async () => {
     const persistence = createPollPersistence(testEnv.DB);
     await persistence.insertPoll(rows());
@@ -107,7 +131,9 @@ describe("createPollPersistence.insertPoll", () => {
     }));
     conflicting.reference = { ...conflicting.reference, pollId: POLL_2 };
 
-    await expect(persistence.insertPoll(conflicting)).rejects.toThrow();
+    await expect(persistence.insertPoll(conflicting)).rejects.toBeInstanceOf(
+      ReferenceTakenError,
+    );
 
     const polls = await testEnv.DB.prepare(
       "SELECT COUNT(*) AS n FROM poll",
@@ -136,14 +162,38 @@ describe("createPollPersistence.insertPoll", () => {
       DuplicatePollIdError,
     );
   });
+
+  it("keeps duplicate poll-ID precedence when the reference also collides", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(rows());
+
+    const conflicting = rows();
+    conflicting.options = conflicting.options.map((option, index) => ({
+      ...option,
+      id: `opt-both-${index}` as PollOptionId,
+    }));
+
+    await expect(persistence.insertPoll(conflicting)).rejects.toBeInstanceOf(
+      DuplicatePollIdError,
+    );
+  });
 });
 
 describe("createPollPersistence reads", () => {
   it("finds a poll page by reference with ordered options", async () => {
     const persistence = createPollPersistence(testEnv.DB);
-    await persistence.insertPoll(rows());
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
 
-    const page = await persistence.findPollByReference("ref-abc-123");
+    const page = await persistence.findPollByReference("team-lunch");
     expect(page).toEqual({
       pollId: "poll-1",
       question: "Where should we eat?",
@@ -166,13 +216,23 @@ describe("createPollPersistence reads", () => {
 
   it("finds a poll for its owner only", async () => {
     const persistence = createPollPersistence(testEnv.DB);
-    await persistence.insertPoll(rows());
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
 
     const owned = await persistence.findPollForOwner(POLL_1, OWNER_1);
     expect(owned).toMatchObject({
       pollId: "poll-1",
       question: "Where should we eat?",
-      canonicalReference: "ref-abc-123",
+      canonicalReference: "team-lunch",
+      canonicalReferenceKind: "custom",
       createdAtMs: NOW,
     });
 

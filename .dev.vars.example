@@ -4,6 +4,7 @@
 # Generate independently for local use: openssl rand -base64 32
 BETTER_AUTH_SECRET=
 BETTER_AUTH_URL=http://localhost:4321
+VOTE_DIGEST_SECRET=
 
 # Use the dedicated local OAuth registrations documented in README.md.
 GOOGLE_CLIENT_ID=

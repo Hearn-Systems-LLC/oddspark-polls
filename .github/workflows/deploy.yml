@@ -71,6 +71,7 @@ jobs:
           {
             echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)"
             echo "BETTER_AUTH_URL=http://127.0.0.1:4391"
+            echo "VOTE_DIGEST_SECRET=$(openssl rand -base64 32)"
             echo "GOOGLE_CLIENT_ID=ci-placeholder"
             echo "GOOGLE_CLIENT_SECRET=ci-placeholder"
             echo "GITHUB_CLIENT_ID=ci-placeholder"

@@ -10,6 +10,8 @@ export type RequestContext = {
   startedAtMs: number;
   principal: CreatorPrincipal | null;
   csrfToken: SessionCsrfToken | null;
+  /** Internal Poll ID for AD-15 correlation; never a public reference. */
+  pollId: string | null;
   sessionExpired: boolean;
   /** Set when the Better Auth session lookup itself failed (D1 error, missing
    * binding). The request degrades to signed-out; telemetry marks the record. */

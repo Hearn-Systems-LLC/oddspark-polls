@@ -13,6 +13,7 @@ This is a **public demonstration build**: the product is real, the repo is prese
 | Database | Cloudflare D1 (forward-only SQL migrations) |
 | Object storage | Cloudflare R2 (poll images; later stories) |
 | Auth | Better Auth + Google/GitHub OAuth (Story 1.2) |
+| Abuse floor | Cloudflare Workers Rate Limiting (30 vote submissions/client/Poll/minute) |
 | Tests | Vitest (unit + workerd integration) · Playwright e2e |
 | Package manager | pnpm 11.17.0 · Node 24.18.0 |
 
@@ -20,11 +21,15 @@ Binding truth lives in `wrangler.jsonc`. Secrets never do.
 
 ## Environments
 
-| Env | Worker name | D1 | R2 |
-| --- | --- | --- | --- |
-| local | `oddspark-polls-local` (`wrangler dev`) | local D1 | local R2 |
-| staging | `oddspark-polls-staging` | `oddspark-polls-staging` | `oddspark-polls-staging` |
-| production | `oddspark-polls` | `oddspark-polls` | `oddspark-polls` |
+| Env | Worker name | D1 | R2 | Vote rate-limit namespace |
+| --- | --- | --- | --- | --- |
+| local | `oddspark-polls-local` (`wrangler dev`) | local D1 | local R2 | local-only |
+| staging | `oddspark-polls-staging` | `oddspark-polls-staging` | `oddspark-polls-staging` | staging-only |
+| production | `oddspark-polls` | `oddspark-polls` | `oddspark-polls` | production-only |
+
+The `VOTE_RATE_LIMITER` binding is configured independently in every
+environment. It is a permissive abuse throttle, not an exactly-once boundary;
+D1 vote constraints remain authoritative.
 
 ### OAuth applications and secrets
 
@@ -43,28 +48,37 @@ and `Oddspark Polls — Production` in each provider. Set each application's
 homepage/origin to the matching base URL and its callback to the exact URI
 above. Do not add the future custom domain until it is actually bound.
 
-Every environment requires all six bindings:
+Every environment requires all seven bindings:
 
 - `BETTER_AUTH_SECRET`
 - `BETTER_AUTH_URL`
+- `VOTE_DIGEST_SECRET`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
 
-Initialize local auth once with the masked provisioning helper. It generates an
-independent Better Auth master secret, accepts provider credentials through
-hidden prompts, and never places them in command arguments or shell history:
+Initialize local auth and voting privacy once with the masked provisioning
+helper. It generates independent Better Auth and vote-digest master secrets,
+accepts provider credentials through hidden prompts, and never places them in
+command arguments or shell history:
 
 ```zsh
 ./scripts/provision-auth-secrets.zsh local initialize
 ```
 
+For a local checkout initialized before Story 1.5, add only the missing vote
+digest secret without replacing auth or provider credentials:
+
+```zsh
+./scripts/provision-auth-secrets.zsh local initialize-voting
+```
+
 Cloudflare secret writes are upserts, not create-only operations, so the helper
 intentionally refuses remote master-secret initialization. Bootstrap
-`BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` once in each target Worker's
-dashboard, verifying the environment before saving. Then provision or rotate
-only the Google and GitHub credentials with:
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `VOTE_DIGEST_SECRET` once in each
+target Worker's dashboard, verifying the environment before saving. Then
+provision or rotate only the Google and GitHub credentials with:
 
 ```zsh
 ./scripts/provision-auth-secrets.zsh local rotate-providers
@@ -77,14 +91,20 @@ a mode-`600` temporary file on the same filesystem. Remote provider
 provisioning sends dotenv over stdin to one `wrangler secret bulk` request, so
 each operation creates one Worker version rather than one per secret.
 Cloudflare preserves secrets omitted from a bulk update, so provider rotation
-never replaces `BETTER_AUTH_SECRET` or `BETTER_AUTH_URL`. Wrangler disk logs and
-metrics are disabled for this operation. Never paste a credential into chat, a
-command argument, `wrangler.jsonc`, CI logs, or Git.
+never replaces `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, or
+`VOTE_DIGEST_SECRET`. Wrangler disk logs and metrics are disabled for this
+operation. Never paste a credential into chat, a command argument,
+`wrangler.jsonc`, CI logs, or Git.
 
 Rotating `BETTER_AUTH_SECRET` is intentionally outside this helper because it
 invalidates active sessions and makes previously encrypted OAuth access and
 refresh tokens unreadable. Treat any such rotation as a planned incident with
 session cleanup and provider reauthentication.
+
+Rotating `VOTE_DIGEST_SECRET` is also outside the helper: existing
+duplicate-vote claims were keyed with the prior secret, so a replacement can
+allow a browser to vote again. Treat rotation as a planned integrity incident,
+not routine credential maintenance.
 
 Verify remote names without returning their values:
 

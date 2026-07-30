@@ -20,7 +20,7 @@ export type TelemetryResultCode =
   | "error";
 
 /**
- * Exactly five fields. The type is intentionally narrow so forbidden
+ * Exactly six fields. The type is intentionally narrow so forbidden
  * fields cannot be added without a deliberate type change.
  */
 export type TelemetryRecord = {
@@ -29,6 +29,8 @@ export type TelemetryRecord = {
   result: TelemetryResultCode;
   durationMs: number;
   providerOutcome: ProviderOutcome;
+  /** Internal ID only; public references and ballot data stay out of logs. */
+  pollId: string | null;
 };
 
 const FORBIDDEN_KEYS = [
@@ -94,6 +96,7 @@ export function emitTelemetry(record: TelemetryRecord): void {
     result: record.result,
     durationMs: record.durationMs,
     providerOutcome: record.providerOutcome,
+    pollId: record.pollId,
   };
   console.log(JSON.stringify(payload));
 }

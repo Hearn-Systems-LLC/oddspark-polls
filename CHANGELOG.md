@@ -45,4 +45,7 @@ production on every merge, but no version has been cut or tagged.
   server-side; unknown or application-reserved references return a plain 404.
 - Case variants of a Custom Link (e.g. `/Team-Lunch`) permanently redirect to the canonical
   lowercase URL; generated random links remain case-sensitive.
+- Signed-out multiple-choice voting with exactly-once D1 persistence, accessible
+  counted/already-voted/closed/retry states, first-party duplicate checks, and a
+  permissive per-client abuse throttle.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

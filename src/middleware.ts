@@ -96,6 +96,7 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     startedAtMs,
     principal: null,
     csrfToken: null,
+    pollId: null,
     sessionExpired: false,
     sessionLookupFailed: false,
   };
@@ -291,6 +292,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
           status,
           response.headers.get("location"),
         ),
+        pollId: rc.pollId,
       });
 
       return finalResponse;
@@ -305,6 +307,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
         result: "error",
         durationMs: Date.now() - rc.startedAtMs,
         providerOutcome: classifyAuthProviderOutcome(pathname, 500, null),
+        pollId: rc.pollId,
       });
     }
     throw error;

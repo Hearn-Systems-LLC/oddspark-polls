@@ -135,14 +135,27 @@ export async function seedCreatorSession() {
 
 export function cleanupCreator(userId) {
   assertUuid(userId);
-  // Clean all three poll tables explicitly rather than trusting ON DELETE
-  // CASCADE (the cascade has its own schema test).
+  // Clean vote and Poll facts explicitly so test failures remain inspectable
+  // and retries do not inherit accepted submissions.
   d1Execute(
+    `DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
+      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}'));` +
+      `DELETE FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
     `DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM poll_reference WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM poll WHERE owner_user_id = '${userId}';` +
       `DELETE FROM session WHERE user_id = '${userId}';` +
       `DELETE FROM user WHERE id = '${userId}';`,
+  );
+}
+
+export function closePoll(pollId, closedAtMs) {
+  assertUuid(pollId);
+  if (!Number.isInteger(closedAtMs) || closedAtMs < 0) {
+    throw new Error("closedAtMs must be a non-negative integer");
+  }
+  d1Execute(
+    `UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = '${pollId}';`,
   );
 }
 

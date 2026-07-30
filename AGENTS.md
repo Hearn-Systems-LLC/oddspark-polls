@@ -8,7 +8,7 @@
 **Purpose:** Trustworthy casual polls — multiple-choice, ranked, image, and meeting polls with vote security and no subscription wall.
 **Live:** Cloudflare Workers, `oddspark-polls` — production ships from `main` via `.github/workflows/deploy.yml`. Custom domain `polls.oddspark.dev` is not bound yet.
 **Preview:** Cloudflare Workers, `oddspark-polls-staging` — every production deploy passes through staging first; there is no separate staging branch.
-**Last updated:** 2026-07-29
+**Last updated:** 2026-07-30
 
 This is a **public demonstration build**. The product is real, the repo is presentable, and
 nothing secret belongs in history — not in code, not in `wrangler.jsonc`, not in a commit
@@ -32,6 +32,7 @@ Binding truth lives in `wrangler.jsonc`. Secrets never do.
 | `MEDIA` | R2 bucket for poll images (named `MEDIA`, not `IMAGES`, to avoid clashing with Cloudflare Images) |
 | `SESSION` | KV namespace for Astro sessions (adapter default name) |
 | `ASSETS` | Static assets from `./dist` |
+| `VOTE_RATE_LIMITER` | Best-effort per-Poll/client vote admission throttle |
 
 | Env | Worker | D1 / R2 name |
 |---|---|---|
@@ -65,8 +66,9 @@ pnpm test
 
 ### Secrets
 
-Six bindings are required in **every** environment: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
+Seven bindings are required in **every** environment: `BETTER_AUTH_SECRET`,
+`BETTER_AUTH_URL`, `VOTE_DIGEST_SECRET`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
 Each environment has its own OAuth registrations — six in total — so a local or staging
 callback can never share production credentials.
 
@@ -75,6 +77,7 @@ and shell history:
 
 ```zsh
 ./scripts/provision-auth-secrets.zsh local initialize
+./scripts/provision-auth-secrets.zsh local initialize-voting
 ./scripts/provision-auth-secrets.zsh staging rotate-providers
 ```
 
@@ -84,6 +87,9 @@ and shell history:
   hand in each Worker's dashboard.
 - Rotating `BETTER_AUTH_SECRET` invalidates active sessions and makes stored OAuth tokens
   unreadable. Treat it as a planned incident, never a routine step.
+- Rotating `VOTE_DIGEST_SECRET` makes existing duplicate-vote claims
+  incomparable and can allow repeat voting. Treat it as a planned integrity
+  incident, never a routine step.
 
 See `README.md` for the full provider-registration table.
 

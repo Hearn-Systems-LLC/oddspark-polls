@@ -1,29 +1,64 @@
 ---
 import { env } from "cloudflare:workers";
+import { z } from "zod";
+import ButtonPrimary from "../components/button-primary.astro";
+import PollOption from "../components/poll-option.astro";
 import BaseLayout from "../layouts/base-layout.astro";
-import { createPollPersistence } from "../adapters/d1/index";
+import {
+  createPollPersistence,
+  createVotePersistence,
+  type PollPage,
+} from "../adapters/d1/index";
+import {
+  VOTER_COOKIE_MAX_AGE_SECONDS,
+  VOTER_COOKIE_NAME,
+  createVoteDigest,
+  createVoterToken,
+  sha256Hex,
+} from "../adapters/digest/index";
+import { allowVoteSubmission } from "../adapters/rate-limit/index";
 import { isReservedSlug } from "../modules/polls/reserved-slugs";
-import { isCustomSlugCaseVariant, POLL_CAPS } from "../modules/polls/index";
+import {
+  isCustomSlugCaseVariant,
+  isUuidShape,
+  POLL_CAPS,
+} from "../modules/polls/index";
+import { multipleChoiceStrategy } from "../modules/polls/types/multiple-choice";
+import {
+  VOTE_COPY,
+  castVote,
+  type VoteApplicationError,
+  type VotingPollTypeStrategy,
+} from "../modules/voting/index";
+import { effectivePollStatus } from "../shared/domain/index";
 
 // Root-path poll page (AD-13): the canonical reference resolves here.
-// Story 1.3 delivers the reachable, open Poll — question and options
-// server-rendered with zero client framework payload. The vote form and
-// its transaction arrive with Story 1.5.
+// Story 1.5 keeps the public surface SSR/progressive-enhancement only: native
+// radios submit to this same route and D1 decides exactly-once acceptance.
 
 const reference = Astro.params.reference ?? "";
+const method = Astro.request.method;
+const FLASH_COOKIE_NAME = "oddspark.vote_flash";
 
-// Only GET/HEAD are meaningful on the public poll page.
-if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") {
+Astro.response.headers.set("cache-control", "private, no-store");
+
+if (method !== "GET" && method !== "HEAD" && method !== "POST") {
   return new Response("Method not allowed.", {
     status: 405,
-    headers: { allow: "GET, HEAD", "cache-control": "no-store" },
+    headers: {
+      allow: "GET, HEAD, POST",
+      "cache-control": "private, no-store",
+    },
   });
 }
 
 // Routing and slug validation share one reserved-slug registry (AD-13).
 const reserved = isReservedSlug(reference);
-const persistence = createPollPersistence(env.DB);
-const poll = reserved ? null : await persistence.findPollByReference(reference);
+const pollPersistence = createPollPersistence(env.DB);
+const votePersistence = createVotePersistence(env.DB);
+let poll: PollPage | null = reserved
+  ? null
+  : await pollPersistence.findPollByReference(reference);
 
 // A missed exact lookup may be a case variant of a custom link (hand-typed,
 // autocapitalized): redirect to the canonical lowercase form (FR-28 — one
@@ -32,7 +67,8 @@ const poll = reserved ? null : await persistence.findPollByReference(reference);
 // all-lowercase and oversized garbage 404s in one read (the NOCASE scan
 // can't use the BINARY primary key).
 if (!poll && !reserved && isCustomSlugCaseVariant(reference)) {
-  const canonical = await persistence.findCanonicalCustomReference(reference);
+  const canonical =
+    await pollPersistence.findCanonicalCustomReference(reference);
   // Defense-in-depth re-check before the value crosses into a Location
   // header (the SQL already excludes charset-violating rows; the predicate
   // guarantees canonical !== reference, since an all-lowercase candidate
@@ -49,9 +85,246 @@ if (!poll && !reserved && isCustomSlugCaseVariant(reference)) {
         location: `/${canonical}${Astro.url.search}`,
         // A bare 301 is cached heuristically and effectively forever — a
         // wrong redirect the app could never revoke. Match the 405 above.
-        "cache-control": "no-store",
+        "cache-control": "private, no-store",
       },
     });
+  }
+}
+
+if (poll && Astro.locals.requestContext) {
+  Astro.locals.requestContext.pollId = poll.pollId;
+}
+
+type VoteOutcomeView = {
+  body: string;
+  code: string;
+  heading: string;
+  titlePrefix: string;
+  tone: "confirmation" | "rejection";
+};
+
+const formatUtc = (timestampMs: number): string =>
+  new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(timestampMs);
+
+const countedBody = (currentPoll: PollPage): string => {
+  if (currentPoll.resultVisibility === "live") {
+    return VOTE_COPY.countedLive;
+  }
+  if (currentPoll.resultVisibility === "creator_only") {
+    return VOTE_COPY.countedCreatorOnly;
+  }
+  return VOTE_COPY.countedAfterClose.replace(
+    "{deadline}",
+    currentPoll.deadlineMs === null
+      ? "the Poll closes"
+      : formatUtc(currentPoll.deadlineMs),
+  );
+};
+
+const outcomeFromError = (
+  error: VoteApplicationError,
+): VoteOutcomeView => {
+  switch (error.code) {
+    case "already_voted":
+      return {
+        code: error.code,
+        heading: "You've already voted here.",
+        body: "Enthusiasm noted; the Tally is unchanged.",
+        titlePrefix: "Already voted",
+        tone: "rejection",
+      };
+    case "poll_closed": {
+      const when = formatUtc(error.closedAtMs ?? Date.now());
+      return {
+        code: error.code,
+        heading: "This Poll closed while you were deciding",
+        body: `— ${when}. Your Vote wasn't recorded.`,
+        titlePrefix: "Poll closed",
+        tone: "rejection",
+      };
+    }
+    case "selection_required":
+      return {
+        code: error.code,
+        heading: "Nothing's selected.",
+        body: "Pick an option, then vote.",
+        titlePrefix: "Nothing selected",
+        tone: "rejection",
+      };
+    default:
+      return {
+        code: error.code,
+        heading: "That didn't land.",
+        body:
+          "The Vote wasn't recorded and your ballot is still here, exactly as you left it. Try again — and if it keeps failing, the Poll will still be here in a minute.",
+        titlePrefix: "Vote not counted",
+        tone: "rejection",
+      };
+  }
+};
+
+const formSchema = z.object({
+  submissionId: z.string().refine(isUuidShape),
+  selectedOptionIds: z.array(z.string()),
+});
+
+let voterToken = Astro.cookies.get(VOTER_COOKIE_NAME)?.value ?? null;
+let submissionId = crypto.randomUUID();
+let selectedOptionIds: string[] = [];
+let outcome: VoteOutcomeView | null = null;
+let readOnly = false;
+let actionDisabled = false;
+
+if (poll && method === "POST") {
+  try {
+    const formData = await Astro.request.formData();
+    const text = (entry: FormDataEntryValue | null): string =>
+      typeof entry === "string" ? entry : "";
+    const parsed = formSchema.parse({
+      submissionId: text(formData.get("submission_id")),
+      selectedOptionIds: formData.getAll("option_id").map(text),
+    });
+    submissionId = parsed.submissionId;
+    selectedOptionIds = parsed.selectedOptionIds;
+
+    const admitted = await allowVoteSubmission(
+      env.VOTE_RATE_LIMITER,
+      Astro.request.headers.get("cf-connecting-ip"),
+      poll.pollId,
+    );
+    if (!admitted) {
+      outcome = {
+        code: "rate_limited",
+        heading: "Too many Votes from here, too quickly.",
+        body:
+          "Give it a minute. If you're a person, this shouldn't have happened, and we're sorry it did.",
+        titlePrefix: "Too many Votes",
+        tone: "rejection",
+      };
+      actionDisabled = true;
+      Astro.response.status = 429;
+    } else {
+      const strategyFor = (): VotingPollTypeStrategy | null => {
+        const { validateSubmission, persistFacts } = multipleChoiceStrategy;
+        return validateSubmission && persistFacts
+          ? { validateSubmission, persistFacts }
+          : null;
+      };
+      const result = await castVote(
+        {
+          findPoll: votePersistence.findPoll,
+          findVoteBySubmission: votePersistence.findVoteBySubmission,
+          strategyFor,
+          createDigest: (input) =>
+            createVoteDigest(env.VOTE_DIGEST_SECRET ?? "", input),
+          hashPayload: sha256Hex,
+          persistVote: votePersistence.insertVote,
+          generateId: () => crypto.randomUUID(),
+          nowMs: () => Date.now(),
+        },
+        {
+          pollId: poll.pollId,
+          submissionId,
+          selectedOptionIds,
+          browserToken: voterToken,
+        },
+      );
+
+      if (result.ok) {
+        Astro.cookies.set(FLASH_COOKIE_NAME, poll.pollId, {
+          httpOnly: true,
+          maxAge: 60,
+          path: "/",
+          sameSite: "lax",
+          secure: Astro.url.protocol === "https:",
+        });
+        return new Response(null, {
+          status: 303,
+          headers: {
+            location: `/${reference}`,
+            "cache-control": "private, no-store",
+          },
+        });
+      }
+      if (result.error.code === "poll_deleted") {
+        poll = null;
+        Astro.response.status = 404;
+      } else {
+        outcome = outcomeFromError(result.error);
+        readOnly =
+          result.error.code === "already_voted" ||
+          result.error.code === "poll_closed";
+        Astro.response.status = 422;
+      }
+    }
+  } catch {
+    outcome = outcomeFromError({
+      code: "vote_failed",
+      message: VOTE_COPY.retry,
+    });
+    Astro.response.status = 422;
+  }
+} else if (poll && (method === "GET" || method === "HEAD")) {
+  if (method === "GET" && voterToken === null) {
+    voterToken = createVoterToken();
+    Astro.cookies.set(VOTER_COOKIE_NAME, voterToken, {
+      httpOnly: true,
+      maxAge: VOTER_COOKIE_MAX_AGE_SECONDS,
+      path: "/",
+      sameSite: "lax",
+      secure: Astro.url.protocol === "https:",
+    });
+  }
+
+  const flash = Astro.cookies.get(FLASH_COOKIE_NAME)?.value;
+  if (flash === poll.pollId) {
+    Astro.cookies.delete(FLASH_COOKIE_NAME, { path: "/" });
+    outcome = {
+      code: "counted",
+      heading: VOTE_COPY.counted,
+      body: countedBody(poll),
+      titlePrefix: "Counted",
+      tone: "confirmation",
+    };
+    readOnly = true;
+  } else if (effectivePollStatus(poll, Date.now()) === "closed") {
+    const closedAtMs = poll.closedAtMs ?? poll.deadlineMs ?? Date.now();
+    outcome = {
+      code: "poll_closed_get",
+      heading: `This Poll closed ${formatUtc(closedAtMs)}.`,
+      body: "",
+      titlePrefix: "Poll closed",
+      tone: "rejection",
+    };
+    readOnly = true;
+  } else if (voterToken !== null) {
+    try {
+      const digest = await createVoteDigest(env.VOTE_DIGEST_SECRET ?? "", {
+        pollId: poll.pollId,
+        checkKind: "session",
+        token: voterToken,
+      });
+      if (
+        await votePersistence.findClaim(poll.pollId, "session", digest)
+      ) {
+        outcome = outcomeFromError({
+          code: "already_voted",
+          message: VOTE_COPY.alreadyVoted,
+        });
+        readOnly = true;
+      }
+    } catch {
+      // The Poll stays readable; a submission will surface the retry outcome
+      // until the missing/misconfigured secret is restored.
+    }
   }
 }
 
@@ -59,9 +332,12 @@ if (!poll) {
   Astro.response.status = 404;
 }
 
-const title = poll
-  ? `${poll.question} — Oddspark Polls`
-  : "Not found — Oddspark Polls";
+const selected = new Set(selectedOptionIds);
+const title = !poll
+  ? "Not found — Oddspark Polls"
+  : outcome
+    ? `${outcome.titlePrefix} — ${poll.question}`
+    : `${poll.question} — Oddspark Polls`;
 ---
 
 <BaseLayout title={title}>
@@ -69,23 +345,80 @@ const title = poll
     {
       poll ? (
         <>
+          {outcome && (
+            <p
+              class:list={[
+                "vote-outcome",
+                outcome.tone === "rejection" && "is-rejection",
+              ]}
+              data-vote-outcome
+              data-outcome-code={outcome.code}
+              tabindex="-1"
+              autofocus
+            >
+              <strong>{outcome.heading}</strong>
+              {outcome.body && <> {" "}{outcome.body}</>}
+            </p>
+          )}
           <h1 class="poll-question">{poll.question}</h1>
           {poll.description && <p class="poll-description">{poll.description}</p>}
-          <ul class="poll-options" aria-label="Options">
-            {poll.options.map((option) => (
-              <li class="poll-option-row">
-                <span class="poll-option-marker" aria-hidden="true">·</span>
-                <span>{option.label}</span>
-              </li>
-            ))}
-          </ul>
-          <p class="helper-note">Voting opens in a coming release.</p>
+          {readOnly ? (
+            <div class="poll-options" aria-label="Options">
+              {poll.options.map((option) => (
+                <PollOption
+                  id={`option-${option.id}`}
+                  name="option_id"
+                  value={option.id}
+                  label={option.label}
+                  readOnly
+                />
+              ))}
+            </div>
+          ) : (
+            <form
+              method="post"
+              action={`/${reference}`}
+              data-vote-form
+              data-vote-locked={actionDisabled ? "true" : "false"}
+            >
+              <input
+                type="hidden"
+                name="submission_id"
+                value={submissionId}
+              />
+              <fieldset class="poll-options">
+                <legend class="visually-hidden">Options</legend>
+                {poll.options.map((option) => (
+                  <PollOption
+                    id={`option-${option.id}`}
+                    name="option_id"
+                    value={option.id}
+                    label={option.label}
+                    checked={selected.has(option.id)}
+                  />
+                ))}
+              </fieldset>
+              <div class="vote-action">
+                <p class="vote-hint" data-vote-hint hidden={actionDisabled}>
+                  SELECT AN OPTION TO UNLOCK VOTE
+                </p>
+                <ButtonPrimary
+                  type="submit"
+                  class="vote-button"
+                  disabled={actionDisabled}
+                >
+                  VOTE
+                </ButtonPrimary>
+              </div>
+            </form>
+          )}
         </>
       ) : (
         <h1 class="not-found" tabindex="-1" autofocus>This Poll doesn't exist.</h1>
       )
     }
   </main>
+  {poll && !readOnly && <script src="../scripts/vote-form.ts"></script>}
 </BaseLayout>
 
 <style>
@@ -114,26 +447,46 @@ const title = poll
   .poll-options {
     margin: 0;
     padding: 0;
-    list-style: none;
+    border: 0;
   }
 
-  .poll-option-row {
-    display: flex;
-    align-items: center;
+  .vote-outcome {
+    margin: 0 0 var(--space-6);
+    color: var(--color-text);
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
+  }
+
+  .vote-outcome:focus {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .vote-outcome.is-rejection strong {
+    color: var(--color-alarm);
+  }
+
+  .vote-action {
+    display: grid;
     gap: var(--space-3);
-    min-height: 48px;
-    padding: var(--space-3) var(--space-4);
-    border-bottom: var(--space-hairline) solid var(--color-rule);
+    justify-items: start;
+    margin-top: var(--space-6);
+  }
+
+  .vote-hint {
+    margin: 0;
+    color: var(--color-dim);
     font-family: var(--font-machine);
-    font-size: var(--type-body-size);
-    line-height: var(--type-body-lh);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
   }
 
-  .poll-option-marker {
-    color: var(--color-faint);
+  .vote-hint[hidden] {
+    display: none;
   }
 
-  .helper-note,
   .not-found {
     margin: var(--space-4) 0 0;
     color: var(--color-dim);

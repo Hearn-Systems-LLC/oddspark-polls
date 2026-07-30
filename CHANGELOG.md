@@ -34,4 +34,11 @@ production on every merge, but no version has been cut or tagged.
   committed migrations or out-of-order numbering.
 - Masked secret-provisioning helper for Better Auth and OAuth credentials that keeps values
   out of command arguments, shell history, and Wrangler logs.
+- Multiple-choice poll creation at `/creator/new`: question, two to thirty options, a
+  results-visibility setting, and an optional deadline interpreted in the creator's local
+  timezone — fully usable without JavaScript.
+- Create-confirmation page showing the poll's canonical link and, when a deadline was set,
+  the resolved closing time in UTC.
+- Public poll page at the root path (`/{reference}`) rendering the question and options
+  server-side; unknown or application-reserved references return a plain 404.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

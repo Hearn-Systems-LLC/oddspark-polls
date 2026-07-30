@@ -100,12 +100,12 @@ How to *prove* a change is good, and which layer to run for which change.
 | `pnpm test` | Both Vitest projects (unit + integration) | no |
 | `pnpm check` | `tsc --noEmit` type check | no |
 | `pnpm migrations:guard` | Migration ordering + immutability of committed migrations | no |
-| `pnpm test:e2e` | Playwright against a dev server it starts itself | no |
+| `pnpm test:e2e` | Playwright against a dev server it starts itself — in the deploy gate (CI provisions browsers, local D1 migrations, and a throwaway `.dev.vars`) | no |
 | `pnpm build:production` | The artifact that actually ships | — |
 | `pnpm smoke:staging` | Deployed staging returns 200 and serves the token marker | yes, deployed |
 
 The CI gate (`.github/workflows/deploy.yml`) runs, in order: migration guard → `pnpm test`
-→ `pnpm check` → `pnpm types` → `pnpm build:production`. Match that locally before pushing.
+→ `pnpm check` → `pnpm test:e2e` → `pnpm types` → `pnpm build:production`. Match that locally before pushing.
 
 ### What the automated checks *don't* catch
 

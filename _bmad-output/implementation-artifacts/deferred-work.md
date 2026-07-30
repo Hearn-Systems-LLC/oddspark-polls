@@ -7,7 +7,6 @@
 - Mode-toggle label goes stale on OS theme change — no `matchMedia("prefers-color-scheme")` change listener [src/scripts/mode-override.ts:52-69].
 - `…Light` exception tokens `availability-yes-glyph-light` / `solar-ink-on-wash-light` defined but unconsumed — canonical DESIGN.md tokens consumed by Epic 7 availability-cell [src/styles/tokens.css:41,48-50].
 - Structural Seed deviation — `src/lib/`, `src/layouts/`, `src/styles/` not in the seed tree; update ARCHITECTURE-SPINE seed to match the real layout.
-- poll-option uses a real `<span>` marker instead of decorative `::before` on the row — visually equivalent [src/components/poll-option.astro].
 - results-bar `NaN`/`Infinity` percent unhandled — clamp gives false input-safety; latent until live data arrives [src/components/results-bar.astro:23].
 
 ## Deferred from: code review round 2 of 1-1-project-foundation-deployable-skeleton (2026-07-29)
@@ -28,8 +27,6 @@
 ## Deferred from: code review of 1-3-create-a-multiple-choice-poll (2026-07-29)
 
 - Public poll page does a per-request D1 read with no caching decision — every bot scan and link preview of `/{anything}` hits `findPollByReference`; the page sets no `cache-control` (AD-21 governs creator surfaces only). Deferred: caching the public surface is a product/perf decision outside Story 1.3's ACs [src/pages/[reference].astro].
-- Closed/expired poll renders identically to open on the public page — `findPollByReference` fetches `deadline_ms`/`closed_at_ms` but the page never calls `effectivePollStatus`. Deferred: closed-state rendering belongs to the Story 1.5 vote-path scope [src/pages/[reference].astro:15-47].
-- Public poll page hand-rolls option-row markup instead of consuming the `poll-option` primitive (Task 6 said "as `poll-option` rows"). Accepted for 1.3: the rows are read-only until voting arrives; Story 1.5 must build its votable rows on the `poll-option` primitive rather than restyle it (decision, Justin 2026-07-29) [src/pages/[reference].astro:35-42].
 
 ## Deferred from: code review round 2 of 1-3-create-a-multiple-choice-poll (2026-07-29)
 

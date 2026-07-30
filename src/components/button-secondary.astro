@@ -3,6 +3,8 @@ interface Props {
   type?: "button" | "submit" | "reset";
   disabled?: boolean;
   href?: string;
+  name?: string;
+  value?: string;
   class?: string;
 }
 
@@ -10,6 +12,8 @@ const {
   type = "button",
   disabled = false,
   href,
+  name,
+  value,
   class: className = "",
 } = Astro.props;
 
@@ -24,7 +28,7 @@ const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
       <slot />
     </a>
   ) : (
-    <button class={classes} type={type} disabled={disabled}>
+    <button class={classes} type={type} disabled={disabled} name={name} value={value}>
       <slot />
     </button>
   )

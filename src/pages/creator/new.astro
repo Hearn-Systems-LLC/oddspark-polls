@@ -1,0 +1,485 @@
+---
+import { env } from "cloudflare:workers";
+import { z } from "zod";
+import ButtonPrimary from "../../components/button-primary.astro";
+import ButtonSecondary from "../../components/button-secondary.astro";
+import Input from "../../components/input.astro";
+import PollOption from "../../components/poll-option.astro";
+import BaseLayout from "../../layouts/base-layout.astro";
+import { createPollPersistence } from "../../adapters/d1/index";
+import {
+  createPoll,
+  generatePollReference,
+  isUuidShape,
+  CREATE_POLL_COPY,
+  RECENTLY_CREATED_WINDOW_MS,
+  type CreatePollDraft,
+} from "../../modules/polls/index";
+import {
+  POLL_CAPS,
+  RENDER_OPTION_CEILING,
+} from "../../modules/polls/caps";
+import type { PollId, UserId } from "../../shared/domain/index";
+
+// Creator responses are never cached (AD-21).
+Astro.response.headers.set("cache-control", "private, no-store");
+
+// The middleware chain guards origin and auth but not method: only GET/HEAD
+// (render) and POST (handle) are meaningful here.
+if (
+  Astro.request.method !== "GET" &&
+  Astro.request.method !== "HEAD" &&
+  Astro.request.method !== "POST"
+) {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: { allow: "GET, HEAD, POST", "cache-control": "private, no-store" },
+  });
+}
+
+const requestContext = Astro.locals.requestContext;
+const principal = requestContext?.principal ?? null;
+if (!principal) {
+  // The creator guard middleware already redirects; this is defense in
+  // depth. Built manually so the no-store header rides along — an early
+  // Astro.redirect return doesn't compose Astro.response.headers.
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/sign-in?return=${encodeURIComponent("/creator/new")}`,
+      "cache-control": "private, no-store",
+    },
+  });
+}
+const csrfToken = requestContext?.csrfToken?.value ?? "";
+
+const VISIBILITY_CHOICES = [
+  { value: "live", label: "LIVE", description: "anyone with the link watches the count move" },
+  { value: "after_close", label: "AFTER CLOSE", description: "Voters see a confirmation until the Poll closes" },
+  { value: "creator_only", label: "CREATOR-ONLY", description: "only you ever see the Tally" },
+] as const;
+
+const INITIAL_OPTION_ROWS = 4;
+
+const formSchema = z.object({
+  question: z.string().default(""),
+  description: z.string().default(""),
+  options: z.array(z.string()).default([]),
+  visibility: z.string().default(""),
+  deadline: z.string().default(""),
+  timezone: z.string().default(""),
+  intent: z.string().default(""),
+  pollId: z.string().default(""),
+});
+
+// No-JS duplicate-POST dedupe (D4): every render mints a poll UUID carried
+// in a hidden field; a retried publish with the same ID collides on the poll
+// PRIMARY KEY instead of minting a second Poll.
+let formPollId = crypto.randomUUID() as PollId;
+
+let values: CreatePollDraft = {
+  question: "",
+  description: "",
+  options: Array.from({ length: INITIAL_OPTION_ROWS }, () => ""),
+  resultVisibility: "live",
+  deadlineLocal: "",
+  timeZone: "",
+  idempotencyId: formPollId,
+};
+let fieldErrors: Record<string, string> = {};
+let formError: string | null = null;
+// Informational guidance for a declined no-JS ADD OPTION — not a validation
+// failure, so it renders as a note on a 200, not as an error on a 422.
+let optionNote: string | null = null;
+
+if (Astro.request.method === "POST") {
+  let parsed: z.infer<typeof formSchema>;
+  try {
+    const formData = await Astro.request.formData();
+    // Multipart bodies can carry File parts in any field — keep strings
+    // only so a File can never throw the parse or persist as "[object File]".
+    const text = (entry: FormDataEntryValue | null): string =>
+      typeof entry === "string" ? entry : "";
+    parsed = formSchema.parse({
+      question: text(formData.get("question")),
+      description: text(formData.get("description")),
+      options: formData
+        .getAll("option")
+        .filter((entry): entry is string => typeof entry === "string"),
+      // Missing or tampered visibility must fail domain validation with the
+      // visibilityInvalid copy — never silently default to live.
+      visibility: text(formData.get("visibility")),
+      deadline: text(formData.get("deadline")),
+      timezone: text(formData.get("timezone")),
+      // Anything other than exactly "add-option" is a publish.
+      intent: text(formData.get("intent")),
+      pollId: text(formData.get("poll_id")),
+    });
+  } catch {
+    return new Response("Unreadable form submission.", {
+      status: 422,
+      // Creator responses are never cached (AD-21) — early returns too.
+      headers: { "cache-control": "private, no-store" },
+    });
+  }
+
+  // A republished form keeps its nonce; anything else falls back to fresh.
+  if (isUuidShape(parsed.pollId)) {
+    formPollId = parsed.pollId as PollId;
+  }
+
+  values = {
+    question: parsed.question,
+    description: parsed.description,
+    options: parsed.options,
+    resultVisibility: parsed.visibility,
+    deadlineLocal: parsed.deadline,
+    timeZone: parsed.timezone,
+    idempotencyId: formPollId,
+  };
+
+  if (parsed.intent === "add-option") {
+    // No-JS ADD OPTION round-trip: one more row, everything preserved,
+    // nothing validated yet. The cap counts non-blank rows (blank = removed);
+    // a decline is guidance on a 200, not a validation error on a 422.
+    const nonBlank = values.options.filter(
+      (option) => option.trim().length > 0,
+    ).length;
+    if (
+      nonBlank < POLL_CAPS.maxOptions &&
+      values.options.length < RENDER_OPTION_CEILING
+    ) {
+      values.options = [...values.options, ""];
+    } else {
+      optionNote =
+        nonBlank >= POLL_CAPS.maxOptions
+          ? CREATE_POLL_COPY.optionsTooMany
+          : CREATE_POLL_COPY.rowsTooMany;
+    }
+  } else {
+    const persistence = createPollPersistence(env.DB);
+    const result = await createPoll(
+      {
+        persist: (rows) => persistence.insertPoll(rows),
+        generateId: () => crypto.randomUUID(),
+        generateReference: generatePollReference,
+        nowMs: () => Date.now(),
+        findExistingPoll: (pollId, ownerUserId) =>
+          persistence.findPollForOwner(pollId, ownerUserId),
+      },
+      principal.userId as UserId,
+      values,
+    );
+    if (result.ok) {
+      // A fresh create always lands on the just-created outcome; a deduped
+      // retry only while the Poll is still inside the freshness window.
+      const suffix =
+        !result.value.existing ||
+        Date.now() - result.value.createdAtMs < RECENTLY_CREATED_WINDOW_MS
+          ? "?created"
+          : "";
+      // Built manually so the no-store header rides along — an early
+      // Astro.redirect return doesn't compose Astro.response.headers.
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: `/creator/polls/${result.value.pollId}${suffix}`,
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (result.error.fieldErrors) {
+      fieldErrors = result.error.fieldErrors;
+      Astro.response.status = 422;
+    } else if (result.error.code === "poll_duplicate_divergent") {
+      // Back-button edit against an already-published nonce: show the error
+      // and mint a fresh nonce so the next publish succeeds as a new Poll.
+      formError = result.error.message;
+      formPollId = crypto.randomUUID() as PollId;
+      values.idempotencyId = formPollId;
+      Astro.response.status = 422;
+    } else {
+      // Server-side persistence failure — not a client input problem
+      // (AD-22: ≥500 registers as an error in telemetry).
+      formError = result.error.message;
+      Astro.response.status = 500;
+    }
+  }
+}
+
+// Always render at least two option rows — the floor a Poll needs.
+while (values.options.length < 2) {
+  values.options = [...values.options, ""];
+}
+---
+
+<BaseLayout title="Create a Poll — Oddspark Polls">
+  <main class="create-shell">
+    <h1>Create a Poll</h1>
+
+    {formError && <p class="form-error" tabindex="-1" autofocus>{formError}</p>}
+
+    <form method="post" action="/creator/new" data-create-poll-form>
+      <input type="hidden" name="csrf_token" value={csrfToken} />
+      <input type="hidden" name="timezone" value={values.timeZone} />
+      <input type="hidden" name="poll_id" value={formPollId} />
+      {
+        // PUBLISH is the first submit button in DOM order, so it is the
+        // implicit Enter-key default; CSS order puts it back at the bottom.
+      }
+      <div class="publish-block">
+        <ButtonPrimary type="submit" name="intent" value="publish">
+          PUBLISH POLL
+        </ButtonPrimary>
+        <p class="helper-note">
+          Your Poll is live the moment you publish — there is no draft.
+        </p>
+      </div>
+
+      <div class="field-block">
+        <Input
+          id="question"
+          name="question"
+          label="QUESTION"
+          value={values.question}
+          error={Boolean(fieldErrors.question)}
+          describedby={fieldErrors.question ? "question-error" : undefined}
+        />
+        {fieldErrors.question && (
+          <p class="field-error" id="question-error">{fieldErrors.question}</p>
+        )}
+      </div>
+
+      <fieldset
+        class="field-block options-block"
+        aria-describedby={fieldErrors.options ? "options-error" : undefined}
+      >
+        <legend class="group-label">OPTIONS</legend>
+        <div data-option-list>
+          {values.options.slice(0, RENDER_OPTION_CEILING).map((option, index) => (
+            <div class="option-row" data-option-row>
+              <Input
+                id={`option-${index + 1}`}
+                name="option"
+                label={`OPTION ${index + 1}`}
+                value={option}
+              />
+            </div>
+          ))}
+        </div>
+        {fieldErrors.options && (
+          <p class="field-error" id="options-error">{fieldErrors.options}</p>
+        )}
+        <div class="add-option">
+          <ButtonSecondary type="submit" name="intent" value="add-option">
+            ADD OPTION
+          </ButtonSecondary>
+          {optionNote && <p class="helper-note">{optionNote}</p>}
+          <p class="helper-note">Blank options are dropped when you publish.</p>
+        </div>
+      </fieldset>
+
+      <fieldset
+        class="field-block"
+        aria-describedby={fieldErrors.visibility ? "visibility-error" : undefined}
+      >
+        <legend class="group-label">WHO SEES THE RESULTS</legend>
+        <div class="visibility-choices">
+          {VISIBILITY_CHOICES.map((choice) => (
+            <PollOption
+              id={`visibility-${choice.value}`}
+              name="visibility"
+              value={choice.value}
+              label={choice.label}
+              description={choice.description}
+              checked={values.resultVisibility === choice.value}
+            />
+          ))}
+        </div>
+        {fieldErrors.visibility && (
+          <p class="field-error" id="visibility-error">{fieldErrors.visibility}</p>
+        )}
+      </fieldset>
+
+      <div class="field-block">
+        <Input
+          id="deadline"
+          name="deadline"
+          label="DEADLINE (OPTIONAL)"
+          type="datetime-local"
+          value={values.deadlineLocal}
+          error={Boolean(fieldErrors.deadline)}
+          describedby={fieldErrors.deadline ? "deadline-error" : undefined}
+        />
+        {fieldErrors.deadline && (
+          <p class="field-error" id="deadline-error">
+            {fieldErrors.deadline}
+            {
+              // A datetime-local input browser-sanitizes an invalid value to
+              // blank — echo what was typed so it isn't lost.
+              values.deadlineLocal.length > 0 && (
+                <span> (You entered: {values.deadlineLocal})</span>
+              )
+            }
+          </p>
+        )}
+      </div>
+
+      <div class="field-block">
+        <label class="group-label" for="description">DESCRIPTION (OPTIONAL)</label>
+        <textarea
+          class:list={["description-input", fieldErrors.description && "is-error"]}
+          id="description"
+          name="description"
+          rows="4"
+          aria-invalid={fieldErrors.description ? "true" : undefined}
+          aria-describedby={fieldErrors.description ? "description-error" : undefined}
+        >{values.description}</textarea>
+        {fieldErrors.description && (
+          <p class="field-error" id="description-error">{fieldErrors.description}</p>
+        )}
+      </div>
+    </form>
+  </main>
+  <script src="../../scripts/create-poll-form.ts"></script>
+</BaseLayout>
+
+<style>
+  .create-shell {
+    width: min(100%, var(--space-measure));
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  h1 {
+    margin: 0 0 var(--space-8);
+    font-family: var(--font-human);
+    font-size: var(--type-heading-lg-size);
+    font-weight: 400;
+    line-height: var(--type-heading-lg-lh);
+  }
+
+  form {
+    display: grid;
+    gap: var(--space-8);
+  }
+
+  fieldset {
+    margin: 0;
+    padding: 0;
+    border: none;
+  }
+
+  .field-block {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .group-label {
+    display: block;
+    padding: 0;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .options-block [data-option-list] {
+    display: grid;
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+  }
+
+  .option-row {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .option-row :global(.option-remove) {
+    justify-self: start;
+    padding: var(--space-1) 0;
+    border: none;
+    background: transparent;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .option-row :global(.option-remove:focus-visible) {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .add-option {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+    justify-items: start;
+  }
+
+  .visibility-choices {
+    margin-top: var(--space-3);
+  }
+
+  .description-input {
+    width: 100%;
+    padding: var(--space-2) 0;
+    border: none;
+    border-bottom: var(--input-border-bottom);
+    border-radius: var(--rounded-default);
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    resize: vertical;
+  }
+
+  .description-input:focus {
+    outline: none;
+    border-bottom: var(--input-border-bottom-focus);
+  }
+
+  .description-input:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .description-input.is-error {
+    border-bottom: var(--input-border-bottom-error);
+  }
+
+  .field-error,
+  .form-error {
+    margin: 0;
+    color: var(--color-alarm);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  .helper-note {
+    margin: 0;
+    color: var(--color-dim);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  .publish-block {
+    display: grid;
+    gap: var(--space-3);
+    justify-items: start;
+    /* First in DOM order (the implicit-submit default), last visually. */
+    order: 10;
+  }
+
+  @media (min-width: 640px) {
+    .create-shell {
+      padding-inline: var(--space-margin-desktop);
+    }
+  }
+</style>

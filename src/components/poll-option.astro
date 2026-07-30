@@ -4,6 +4,9 @@ interface Props {
   name: string;
   value: string;
   label: string;
+  /** Consequence line beneath the label (DESIGN.md: the Visibility chooser
+   * rows on the creator surface each carry one). */
+  description?: string;
   checked?: boolean;
   type?: "radio" | "checkbox";
   class?: string;
@@ -14,6 +17,7 @@ const {
   name,
   value,
   label,
+  description,
   checked = false,
   type = "radio",
   class: className = "",
@@ -30,7 +34,10 @@ const {
     checked={checked}
   />
   <span class="poll-option-marker" aria-hidden="true"></span>
-  <span class="poll-option-label">{label}</span>
+  <span class="poll-option-text">
+    <span class="poll-option-label">{label}</span>
+    {description && <span class="poll-option-description">{description}</span>}
+  </span>
 </label>
 
 <style>
@@ -56,6 +63,16 @@ const {
   .poll-option:focus-within {
     outline: var(--focus-outline);
     outline-offset: var(--focus-outline-offset);
+  }
+
+  .poll-option-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .poll-option-description {
+    color: var(--color-dim);
   }
 
   .poll-option-marker {

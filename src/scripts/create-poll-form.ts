@@ -75,6 +75,9 @@ function enhance(): void {
   // Mirror the domain's integer floor and option-count ceiling without
   // making browser constraint UI authoritative. The form is `novalidate`, so
   // publish still reaches the server and receives the designed inline 422.
+  // Track option count so we clamp bounds only when options shrink — not on
+  // every keystroke into min/max (that would hide the server 422 path).
+  let lastOptionCountForBounds = Math.max(1, nonBlankRows());
   function syncMultiSelectBounds(): void {
     if (!bounds) {
       return;
@@ -98,18 +101,23 @@ function enhance(): void {
     bounds.hidden = shouldHide;
 
     const optionCount = Math.max(1, nonBlankRows());
+    const optionsShrank = optionCount < lastOptionCountForBounds;
+    lastOptionCountForBounds = optionCount;
     for (const input of [minSelections, maxSelections]) {
       if (input) {
         input.min = "1";
         input.max = String(optionCount);
         input.step = "1";
-        // Clamp an oversized typed value when options shrink so the field
-        // stays within the domain ceiling before submit (novalidate form).
-        const raw = input.value.trim();
-        if (raw.length > 0) {
-          const parsed = Number(raw);
-          if (Number.isInteger(parsed) && parsed > optionCount) {
-            input.value = String(optionCount);
+        // Only when options shrink: an oversized typed max would otherwise
+        // linger until 422. Typing an oversize max while the count is stable
+        // must still reach the server so invalid bounds preserve on 422.
+        if (optionsShrank) {
+          const raw = input.value.trim();
+          if (raw.length > 0) {
+            const parsed = Number(raw);
+            if (Number.isInteger(parsed) && parsed > optionCount) {
+              input.value = String(optionCount);
+            }
           }
         }
       }

@@ -4,6 +4,8 @@
 # Generate independently for local use: openssl rand -base64 32
 BETTER_AUTH_SECRET=
 BETTER_AUTH_URL=http://localhost:4321
+# Keys duplicate-vote claim digests — generate independently of the auth
+# secret: openssl rand -base64 32
 VOTE_DIGEST_SECRET=
 
 # Use the dedicated local OAuth registrations documented in README.md.

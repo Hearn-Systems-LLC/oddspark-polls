@@ -205,6 +205,7 @@ describe("masked auth secret provisioning", () => {
     expect(initialized.stderr).toContain(
       "Remote master-secret initialization is not automated",
     );
+    expect(initialized.stderr).toContain("openssl rand -base64 32");
     expect(existsSync(sandbox.opensslTrace)).toBe(false);
   });
 
@@ -243,12 +244,12 @@ describe("masked auth secret provisioning", () => {
     expect(existsSync(sandbox.opensslTrace)).toBe(false);
   });
 
-  it("validates the last effective local binding and rejects whitespace-only duplicates", () => {
+  it("honors the first effective local binding the way wrangler/dotenv does", () => {
     const sandbox = createSandbox();
     const destination = join(sandbox.projectRoot, ".dev.vars");
-    const incomplete = [
-      "BETTER_AUTH_SECRET=valid-master-before-duplicate",
+    const whitespaceFirst = [
       "BETTER_AUTH_SECRET=   ",
+      "BETTER_AUTH_SECRET=valid-master-after-duplicate",
       "VOTE_DIGEST_SECRET=test-vote-digest-secret",
       "BETTER_AUTH_URL=http://localhost:4321",
       "GOOGLE_CLIENT_ID=old-google-client-id",
@@ -257,7 +258,7 @@ describe("masked auth secret provisioning", () => {
       "GITHUB_CLIENT_SECRET=old-github-client-secret",
       "",
     ].join("\n");
-    writeFileSync(destination, incomplete, { mode: 0o600 });
+    writeFileSync(destination, whitespaceFirst, { mode: 0o600 });
 
     const rotated = runProvision(
       sandbox,
@@ -275,8 +276,146 @@ describe("masked auth secret provisioning", () => {
     expect(rotated.stderr).toContain(
       "nonempty BETTER_AUTH_SECRET, BETTER_AUTH_URL, and VOTE_DIGEST_SECRET",
     );
-    expect(readFileSync(destination, "utf8")).toBe(incomplete);
+    expect(readFileSync(destination, "utf8")).toBe(whitespaceFirst);
     expect(existsSync(sandbox.opensslTrace)).toBe(false);
+  });
+
+  it("accepts a valid first binding over a whitespace-only duplicate", () => {
+    const sandbox = createSandbox();
+    const destination = join(sandbox.projectRoot, ".dev.vars");
+    const validFirst = [
+      "BETTER_AUTH_SECRET=valid-master-before-duplicate",
+      "BETTER_AUTH_SECRET=   ",
+      "VOTE_DIGEST_SECRET=test-vote-digest-secret",
+      "BETTER_AUTH_URL=http://localhost:4321",
+      "GOOGLE_CLIENT_ID=old-google-client-id",
+      "GOOGLE_CLIENT_SECRET=old-google-client-secret",
+      "GITHUB_CLIENT_ID=old-github-client-id",
+      "GITHUB_CLIENT_SECRET=old-github-client-secret",
+      "",
+    ].join("\n");
+    writeFileSync(destination, validFirst, { mode: 0o600 });
+
+    const rotated = runProvision(
+      sandbox,
+      ["local", "rotate-providers"],
+      [
+        "new-google-client-id",
+        "new-google-client-secret",
+        "new-github-client-id",
+        "new-github-client-secret",
+        "",
+      ].join("\n"),
+    );
+
+    expect(rotated.status).toBe(0);
+    expect(readFileSync(destination, "utf8")).toContain(
+      "GOOGLE_CLIENT_ID=new-google-client-id",
+    );
+    expect(existsSync(sandbox.opensslTrace)).toBe(false);
+  });
+
+  it("detects export-prefixed and whitespace-indented vote digest bindings", () => {
+    const sandbox = createSandbox();
+    const destination = join(sandbox.projectRoot, ".dev.vars");
+    const exported = [
+      "BETTER_AUTH_SECRET=existing-auth-master",
+      "BETTER_AUTH_URL=http://localhost:4321",
+      "export VOTE_DIGEST_SECRET=already-provisioned-digest",
+      "GOOGLE_CLIENT_ID=existing-google-id",
+      "GOOGLE_CLIENT_SECRET=existing-google-secret",
+      "GITHUB_CLIENT_ID=existing-github-id",
+      "GITHUB_CLIENT_SECRET=existing-github-secret",
+      "",
+    ].join("\n");
+    writeFileSync(destination, exported, { mode: 0o600 });
+
+    const initialized = runProvision(
+      sandbox,
+      ["local", "initialize-voting"],
+      "",
+    );
+
+    expect(initialized.status).toBe(1);
+    expect(initialized.stderr).toContain("already initialized");
+    expect(readFileSync(destination, "utf8")).toBe(exported);
+    expect(existsSync(sandbox.opensslTrace)).toBe(false);
+  });
+
+  it("dedups stale export-prefixed vote digest lines during initialize-voting", () => {
+    const sandbox = createSandbox();
+    const destination = join(sandbox.projectRoot, ".dev.vars");
+    const staleExport = [
+      "BETTER_AUTH_SECRET=existing-auth-master",
+      "BETTER_AUTH_URL=http://localhost:4321",
+      "export VOTE_DIGEST_SECRET=",
+      "GOOGLE_CLIENT_ID=existing-google-id",
+      "GOOGLE_CLIENT_SECRET=existing-google-secret",
+      "GITHUB_CLIENT_ID=existing-github-id",
+      "GITHUB_CLIENT_SECRET=existing-github-secret",
+      "",
+    ].join("\n");
+    writeFileSync(destination, staleExport, { mode: 0o600 });
+
+    const initialized = runProvision(
+      sandbox,
+      ["local", "initialize-voting"],
+      "",
+    );
+
+    expect(initialized.status).toBe(0);
+    const bindings = readFileSync(destination, "utf8");
+    expect(bindings).not.toContain("export VOTE_DIGEST_SECRET");
+    const digestLines = bindings
+      .split("\n")
+      .filter((line) => line.includes("VOTE_DIGEST_SECRET"));
+    expect(digestLines).toEqual([
+      "VOTE_DIGEST_SECRET=test-master-secret-that-is-long-enough",
+    ]);
+  });
+
+  it("rotates export-prefixed provider credentials in place without leaving stale duplicates", () => {
+    const sandbox = createSandbox();
+    const destination = join(sandbox.projectRoot, ".dev.vars");
+    const exportedProviders = [
+      "BETTER_AUTH_SECRET=existing-auth-master",
+      "BETTER_AUTH_URL=http://localhost:4321",
+      "VOTE_DIGEST_SECRET=existing-digest",
+      "export GOOGLE_CLIENT_ID=old-google-client-id",
+      "  GOOGLE_CLIENT_SECRET=old-google-client-secret",
+      "GITHUB_CLIENT_ID=old-github-client-id",
+      "GITHUB_CLIENT_SECRET=old-github-client-secret",
+      "",
+    ].join("\n");
+    writeFileSync(destination, exportedProviders, { mode: 0o600 });
+
+    const rotated = runProvision(
+      sandbox,
+      ["local", "rotate-providers"],
+      [
+        "new-google-client-id",
+        "new-google-client-secret",
+        "new-github-client-id",
+        "new-github-client-secret",
+        "",
+      ].join("\n"),
+    );
+
+    expect(rotated.status).toBe(0);
+    const bindings = readFileSync(destination, "utf8");
+    expect(bindings).not.toContain("old-google-client-id");
+    expect(bindings).not.toContain("old-google-client-secret");
+    const idLines = bindings
+      .split("\n")
+      .filter((line) => line.includes("GOOGLE_CLIENT_ID"));
+    expect(idLines).toEqual(["GOOGLE_CLIENT_ID=new-google-client-id"]);
+    const secretLines = bindings
+      .split("\n")
+      .filter((line) => line.includes("GOOGLE_CLIENT_SECRET"));
+    expect(secretLines).toEqual([
+      "GOOGLE_CLIENT_SECRET=new-google-client-secret",
+    ]);
+    expect(bindings).toContain("VOTE_DIGEST_SECRET=existing-digest");
   });
 
   it("refuses provider rotation when the vote digest secret is missing", () => {
@@ -307,6 +446,7 @@ describe("masked auth secret provisioning", () => {
 
     expect(rotated.status).toBe(1);
     expect(rotated.stderr).toContain("VOTE_DIGEST_SECRET");
+    expect(rotated.stderr).toContain("initialize-voting");
     expect(readFileSync(destination, "utf8")).toBe(incomplete);
     expect(existsSync(sandbox.opensslTrace)).toBe(false);
   });

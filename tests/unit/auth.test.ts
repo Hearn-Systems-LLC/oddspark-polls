@@ -40,6 +40,8 @@ function createTestEnv(): Env {
     DB: createSchemaOnlyD1(),
     MEDIA: {} as R2Bucket,
     ASSETS: {} as Fetcher,
+    SESSION: {} as KVNamespace,
+    VOTE_RATE_LIMITER: {} as RateLimit,
     BETTER_AUTH_SECRET: "test-secret-that-is-at-least-32-characters",
     BETTER_AUTH_URL: "https://polls.example.test",
     VOTE_DIGEST_SECRET: "test-vote-digest-secret",

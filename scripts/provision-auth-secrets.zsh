@@ -64,22 +64,35 @@ remote_secret_names() {
   )
 }
 
+# Extract the normalized binding key from a .dev.vars line, covering the
+# forms wrangler/dotenv also treat as the same key: optional leading
+# whitespace and an optional shell-style `export ` prefix. Prints nothing and
+# returns nonzero for comments, blank lines, and other non-bindings.
+binding_key() {
+  local line="$1"
+  if [[ "$line" =~ '^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=' ]]; then
+    print -r -- "${match[2]}"
+    return 0
+  fi
+  return 1
+}
+
 has_nonempty_local_binding() {
   local expected="$1"
   local line key
-  local effective_value=""
 
+  # wrangler/dotenv honor the FIRST occurrence of a duplicated key, so the
+  # effective binding is the first matching line, never the last.
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" != *"="* ]]; then
-      continue
-    fi
-    key="${line%%=*}"
+    key="$(binding_key "$line")" || continue
     if [[ "$key" == "$expected" ]]; then
-      effective_value="${line#*=}"
+      local effective_value="${line#*=}"
+      [[ -n "${effective_value//[[:space:]]/}" ]]
+      return
     fi
   done < "$destination"
 
-  [[ -n "${effective_value//[[:space:]]/}" ]]
+  return 1
 }
 
 read_provider_credentials() {
@@ -116,7 +129,7 @@ emit_initial_bindings() {
 if [[ "$operation" == "initialize-voting" ]]; then
   if [[ "$target" != "local" ]]; then
     print -u2 "Remote vote-digest initialization is not automated because Cloudflare secret writes are not create-only."
-    print -u2 "Bootstrap VOTE_DIGEST_SECRET in the target Worker dashboard."
+    print -u2 "Bootstrap VOTE_DIGEST_SECRET in the target Worker dashboard (generate it with: openssl rand -base64 32)."
     exit 1
   fi
   if [[ ! -f "$destination" ]]; then
@@ -136,8 +149,12 @@ if [[ "$operation" == "initialize-voting" ]]; then
   vote_digest_secret="$(openssl rand -base64 32)"
   temporary_file="$(mktemp "$project_root/.dev.vars.tmp.XXXXXX")"
   trap 'rm -f -- "$temporary_file"' EXIT HUP INT TERM
+  # Drop every stale VOTE_DIGEST_SECRET line — including `export `-prefixed
+  # and leading-whitespace forms — so no duplicate survives next to the
+  # fresh binding appended below (wrangler/dotenv would honor the first).
   while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == VOTE_DIGEST_SECRET=* ]]; then
+    local_key="$(binding_key "$line")" || local_key=""
+    if [[ "$local_key" == VOTE_DIGEST_SECRET ]]; then
       continue
     fi
     printf '%s\n' "$line" >> "$temporary_file"
@@ -154,6 +171,7 @@ if [[ "$operation" == "initialize" ]]; then
   if [[ "$target" != "local" ]]; then
     print -u2 "Remote master-secret initialization is not automated because Cloudflare secret writes are not create-only."
     print -u2 "Bootstrap BETTER_AUTH_SECRET, BETTER_AUTH_URL, and VOTE_DIGEST_SECRET in the target Worker dashboard, then run rotate-providers."
+    print -u2 "Generate each secret with: openssl rand -base64 32"
     exit 1
   fi
   if [[ -e "$destination" ]]; then
@@ -184,6 +202,7 @@ if [[ "$target" == "local" ]]; then
      ! has_nonempty_local_binding BETTER_AUTH_URL ||
      ! has_nonempty_local_binding VOTE_DIGEST_SECRET; then
     print -u2 "Local provider rotation requires nonempty BETTER_AUTH_SECRET, BETTER_AUTH_URL, and VOTE_DIGEST_SECRET bindings."
+    print -u2 "If only the vote digest secret is missing, run initialize-voting to add it."
     exit 1
   fi
 else
@@ -192,6 +211,7 @@ else
         "$existing_secret_names" != *'"BETTER_AUTH_URL"'* ||
         "$existing_secret_names" != *'"VOTE_DIGEST_SECRET"'* ]]; then
     print -u2 "$target auth and voting privacy are not fully initialized; bootstrap both master secrets and the base URL in the Worker dashboard first."
+    print -u2 "Generate each secret with: openssl rand -base64 32"
     exit 1
   fi
 fi
@@ -212,8 +232,8 @@ if [[ "$target" == "local" ]]; then
   )
 
   while IFS= read -r line || [[ -n "$line" ]]; do
-    key="${line%%=*}"
-    if [[ "$line" == *"="* ]] && (( ${+replacement_values[$key]} )); then
+    key="$(binding_key "$line")" || key=""
+    if [[ -n "$key" ]] && (( ${+replacement_values[$key]} )); then
       printf '%s=%s\n' "$key" "$replacement_values[$key]" >> "$temporary_file"
       replaced_keys[$key]=1
     else
@@ -235,5 +255,10 @@ if [[ "$target" == "local" ]]; then
 fi
 
 cd "$project_root"
+# Load-bearing assumption: `wrangler secret bulk` preserves secrets omitted
+# from a bulk update. rotate-providers relies on this to replace only the
+# four provider credentials without clobbering BETTER_AUTH_SECRET or
+# VOTE_DIGEST_SECRET; if Cloudflare ever changes bulk semantics to replace
+# the full secret set, this command must change with it.
 emit_provider_bindings | wrangler secret bulk --env "$target"
 print "Rotated $target provider credentials without changing BETTER_AUTH_SECRET, BETTER_AUTH_URL, or VOTE_DIGEST_SECRET."

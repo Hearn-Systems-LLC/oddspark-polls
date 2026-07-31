@@ -13,7 +13,7 @@ This is a **public demonstration build**: the product is real, the repo is prese
 | Database | Cloudflare D1 (forward-only SQL migrations) |
 | Object storage | Cloudflare R2 (poll images; later stories) |
 | Auth | Better Auth + Google/GitHub OAuth (Story 1.2) |
-| Abuse floor | Cloudflare Workers Rate Limiting (30 vote submissions/client/Poll/minute) |
+| Abuse floor | Cloudflare Workers Rate Limiting (30 vote submissions/source IP/Poll/minute; shared IPs share the budget) |
 | Tests | Vitest (unit + workerd integration) · Playwright e2e |
 | Package manager | pnpm 11.17.0 · Node 24.18.0 |
 
@@ -28,8 +28,11 @@ Binding truth lives in `wrangler.jsonc`. Secrets never do.
 | production | `oddspark-polls` | `oddspark-polls` | `oddspark-polls` | production-only |
 
 The `VOTE_RATE_LIMITER` binding is configured independently in every
-environment. It is a permissive abuse throttle, not an exactly-once boundary;
-D1 vote constraints remain authoritative.
+environment. It keys on the connecting source IP (`cf-connecting-ip`) per
+edge location, so CGNAT networks and offices share one budget, and the
+platform limiter is only eventually consistent. It is a permissive abuse
+throttle, not an exactly-once boundary; D1 vote constraints remain
+authoritative.
 
 ### OAuth applications and secrets
 
@@ -77,7 +80,9 @@ digest secret without replacing auth or provider credentials:
 Cloudflare secret writes are upserts, not create-only operations, so the helper
 intentionally refuses remote master-secret initialization. Bootstrap
 `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `VOTE_DIGEST_SECRET` once in each
-target Worker's dashboard, verifying the environment before saving. Then
+target Worker's dashboard, verifying the environment before saving. Generate
+each secret with `openssl rand -base64 32` — this is the one secret humans
+type by hand. Then
 provision or rotate only the Google and GitHub credentials with:
 
 ```zsh
@@ -101,10 +106,11 @@ invalidates active sessions and makes previously encrypted OAuth access and
 refresh tokens unreadable. Treat any such rotation as a planned incident with
 session cleanup and provider reauthentication.
 
-Rotating `VOTE_DIGEST_SECRET` is also outside the helper: existing
-duplicate-vote claims were keyed with the prior secret, so a replacement can
-allow a browser to vote again. Treat rotation as a planned integrity incident,
-not routine credential maintenance.
+Rotating `VOTE_DIGEST_SECRET` is also outside the helper: duplicate-vote claim
+digests are keyed on it, so a replacement resets duplicate-vote protection
+outright — every prior claim becomes incomparable and a browser can vote
+again. Treat rotation as a planned integrity incident in the same class as
+`BETTER_AUTH_SECRET` rotation, never a routine step.
 
 Verify remote names without returning their values:
 

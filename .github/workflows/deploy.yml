@@ -67,15 +67,19 @@ jobs:
         run: pnpm migrate:local
 
       - name: Write throwaway local auth env
+        # `wrangler types` emits .dev.vars keys in file order. Keep this order
+        # identical to what `initialize-voting` produces (VOTE_DIGEST_SECRET
+        # appended last) so the regenerated worker-configuration.d.ts matches
+        # the committed file and the drift check below stays meaningful.
         run: |
           {
             echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)"
             echo "BETTER_AUTH_URL=http://127.0.0.1:4391"
-            echo "VOTE_DIGEST_SECRET=$(openssl rand -base64 32)"
             echo "GOOGLE_CLIENT_ID=ci-placeholder"
             echo "GOOGLE_CLIENT_SECRET=ci-placeholder"
             echo "GITHUB_CLIENT_ID=ci-placeholder"
             echo "GITHUB_CLIENT_SECRET=ci-placeholder"
+            echo "VOTE_DIGEST_SECRET=$(openssl rand -base64 32)"
           } > .dev.vars
 
       - name: E2E tests
@@ -83,6 +87,12 @@ jobs:
 
       - name: Refresh binding types
         run: pnpm types
+
+      # Fail the gate when the committed worker-configuration.d.ts is stale
+      # relative to what `wrangler types` generates from wrangler.jsonc plus
+      # the throwaway .dev.vars above (key order matters — see its comment).
+      - name: Binding types drift check
+        run: git diff --exit-code worker-configuration.d.ts
 
       # Build the production-flavored artifact — the same CLOUDFLARE_ENV the
       # deploy jobs rebuild with — so the gate tests what actually ships.

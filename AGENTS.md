@@ -32,7 +32,7 @@ Binding truth lives in `wrangler.jsonc`. Secrets never do.
 | `MEDIA` | R2 bucket for poll images (named `MEDIA`, not `IMAGES`, to avoid clashing with Cloudflare Images) |
 | `SESSION` | KV namespace for Astro sessions (adapter default name) |
 | `ASSETS` | Static assets from `./dist` |
-| `VOTE_RATE_LIMITER` | Best-effort per-Poll/client vote admission throttle |
+| `VOTE_RATE_LIMITER` | Best-effort per-source-IP per-Poll vote admission throttle (shared IPs share one budget) |
 
 | Env | Worker | D1 / R2 name |
 |---|---|---|
@@ -83,8 +83,8 @@ and shell history:
 
 - **Never** paste a credential into chat, a command argument, `wrangler.jsonc`, CI logs, or Git.
 - The helper deliberately refuses remote master-secret initialization — Cloudflare secret
-  writes are upserts, so `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` are bootstrapped once by
-  hand in each Worker's dashboard.
+  writes are upserts, so `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` / `VOTE_DIGEST_SECRET`
+  are bootstrapped once by hand in each Worker's dashboard.
 - Rotating `BETTER_AUTH_SECRET` invalidates active sessions and makes stored OAuth tokens
   unreadable. Treat it as a planned incident, never a routine step.
 - Rotating `VOTE_DIGEST_SECRET` makes existing duplicate-vote claims

@@ -38,6 +38,7 @@
   "ratelimits": [
     {
       "name": "VOTE_RATE_LIMITER",
+      // Arbitrary account-unique ID chosen at Story 1.5 provisioning; must stay distinct per environment.
       "namespace_id": "79071158",
       "simple": {
         "limit": 30,
@@ -71,6 +72,7 @@
       "ratelimits": [
         {
           "name": "VOTE_RATE_LIMITER",
+          // Arbitrary account-unique ID chosen at Story 1.5 provisioning; must stay distinct per environment.
           "namespace_id": "259051630",
           "simple": {
             "limit": 30,
@@ -104,6 +106,7 @@
       "ratelimits": [
         {
           "name": "VOTE_RATE_LIMITER",
+          // Arbitrary account-unique ID chosen at Story 1.5 provisioning; must stay distinct per environment.
           "namespace_id": "197005227",
           "simple": {
             "limit": 30,

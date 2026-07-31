@@ -33,11 +33,13 @@ declare global {
     DB: D1Database;
     MEDIA: R2Bucket;
     ASSETS: Fetcher;
-    /** Optional only for test/local runtimes that cannot emulate this binding. */
-    VOTE_RATE_LIMITER?: RateLimit;
     /** Cloudflare Images binding (adapter default); not R2. */
     IMAGES?: ImagesBinding;
-    SESSION?: KVNamespace;
+    // SESSION and VOTE_RATE_LIMITER are declared required by
+    // worker-configuration.d.ts (`wrangler types`); redeclaring them optional
+    // here would be a TS2430 conflict in the merged global Env. Test/local
+    // runtimes that cannot emulate them keep the optionality at the
+    // consumption sites instead.
   }
 }
 

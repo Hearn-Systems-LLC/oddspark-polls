@@ -3,6 +3,7 @@
 
 // First path segments owned by the application itself.
 const RESERVED_APPLICATION_SLUGS = [
+  "/",
   "creator",
   "discover",
   "sign-in",
@@ -21,10 +22,12 @@ const RESERVED_APPLICATION_SLUGS = [
 // reserved as first segments too — a reference may not claim them.
 const RESERVED_POLL_SUBPATHS = ["results", "manifest"] as const;
 
-const RESERVED = new Set<string>([
+export const RESERVED_SLUGS = [
   ...RESERVED_APPLICATION_SLUGS,
   ...RESERVED_POLL_SUBPATHS,
-]);
+] as const;
+
+const RESERVED = new Set<string>(RESERVED_SLUGS);
 
 export function isReservedSlug(slug: string): boolean {
   return slug.length === 0 || RESERVED.has(slug.toLowerCase());

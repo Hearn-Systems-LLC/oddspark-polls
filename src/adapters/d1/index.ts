@@ -5,6 +5,7 @@
 
 import {
   DuplicatePollIdError,
+  ReferenceTakenError,
   type PollPersistenceRows,
 } from "../../modules/polls/index";
 import type {
@@ -28,6 +29,7 @@ export type PollPage = {
 
 export type OwnedPoll = PollPage & {
   canonicalReference: string;
+  canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
   createdAtMs: number;
 };
 
@@ -117,13 +119,22 @@ export function createPollPersistence(db: D1Database) {
             ),
         ]);
       } catch (error) {
-        // Translate the one collision the domain has policy for (D4 dedupe);
-        // everything else propagates to the generic failure mapping.
+        // Poll-ID precedence preserves D4 dedupe when a replay collides on
+        // both the Poll and reference rows. Reference uniqueness is the
+        // authoritative Custom Link availability decision (AD-16).
         if (
           error instanceof Error &&
           /UNIQUE constraint failed: poll\.id/.test(error.message)
         ) {
           throw new DuplicatePollIdError(error.message);
+        }
+        if (
+          error instanceof Error &&
+          /UNIQUE constraint failed: poll_reference\.reference/.test(
+            error.message,
+          )
+        ) {
+          throw new ReferenceTakenError(error.message);
         }
         throw error;
       }
@@ -142,17 +153,42 @@ export function createPollPersistence(db: D1Database) {
       return toPollPage(row, await loadOptions(db, row.id));
     },
 
+    // Case-variant resolution for custom links only (Story 1.4 review):
+    // custom slugs are stored lowercase-folded ([a-z0-9-] by validation), so
+    // an ASCII-only NOCASE match restricted to canonical kind='custom' rows
+    // finds the canonical row for `/Team-Lunch`-style hits without ever
+    // folding a case-sensitive base64url generated reference. The NOCASE
+    // comparison can't use the BINARY primary key (a scan, tolerable on the
+    // case-variant path only). The negated GLOB skips any out-of-band row
+    // containing a non-slug byte; at most one all-lowercase form of a string
+    // can exist under the BINARY primary key, so no ordering is needed.
+    async findCanonicalCustomReference(
+      reference: string,
+    ): Promise<string | null> {
+      const row = await db
+        .prepare(
+          "SELECT reference FROM poll_reference WHERE reference = ?1 COLLATE NOCASE AND kind = 'custom' AND is_canonical = 1 AND reference NOT GLOB '*[^a-z0-9-]*'",
+        )
+        .bind(reference)
+        .first<{ reference: string }>();
+      return row?.reference ?? null;
+    },
+
     async findPollForOwner(
       pollId: PollId,
       ownerUserId: UserId,
     ): Promise<OwnedPoll | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
         )
         .bind(pollId, ownerUserId)
         .first<
-          PollRow & { canonical_reference: string; created_at_ms: number }
+          PollRow & {
+            canonical_reference: string;
+            canonical_reference_kind: PollPersistenceRows["reference"]["kind"];
+            created_at_ms: number;
+          }
         >();
       if (!row) {
         return null;
@@ -160,6 +196,7 @@ export function createPollPersistence(db: D1Database) {
       return {
         ...toPollPage(row, await loadOptions(db, row.id)),
         canonicalReference: row.canonical_reference,
+        canonicalReferenceKind: row.canonical_reference_kind,
         createdAtMs: row.created_at_ms,
       };
     },

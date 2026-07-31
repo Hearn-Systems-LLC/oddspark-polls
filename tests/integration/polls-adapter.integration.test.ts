@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createPollPersistence } from "../../src/adapters/d1/index";
 import {
   DuplicatePollIdError,
+  ReferenceTakenError,
   type PollPersistenceRows,
 } from "../../src/modules/polls/index";
 import type {
@@ -92,6 +93,29 @@ describe("createPollPersistence.insertPoll", () => {
     expect(optionCount?.n).toBe(2);
   });
 
+  it("persists a custom reference as the one canonical row", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+
+    const references = await testEnv.DB.prepare(
+      "SELECT reference, kind, is_canonical FROM poll_reference WHERE poll_id = ?1",
+    )
+      .bind(POLL_1)
+      .all();
+    expect(references.results).toEqual([
+      { reference: "team-lunch", kind: "custom", is_canonical: 1 },
+    ]);
+  });
+
   it("leaves no reachable Poll when any statement in the batch fails", async () => {
     const persistence = createPollPersistence(testEnv.DB);
     await persistence.insertPoll(rows());
@@ -107,7 +131,9 @@ describe("createPollPersistence.insertPoll", () => {
     }));
     conflicting.reference = { ...conflicting.reference, pollId: POLL_2 };
 
-    await expect(persistence.insertPoll(conflicting)).rejects.toThrow();
+    await expect(persistence.insertPoll(conflicting)).rejects.toBeInstanceOf(
+      ReferenceTakenError,
+    );
 
     const polls = await testEnv.DB.prepare(
       "SELECT COUNT(*) AS n FROM poll",
@@ -136,14 +162,38 @@ describe("createPollPersistence.insertPoll", () => {
       DuplicatePollIdError,
     );
   });
+
+  it("keeps duplicate poll-ID precedence when the reference also collides", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(rows());
+
+    const conflicting = rows();
+    conflicting.options = conflicting.options.map((option, index) => ({
+      ...option,
+      id: `opt-both-${index}` as PollOptionId,
+    }));
+
+    await expect(persistence.insertPoll(conflicting)).rejects.toBeInstanceOf(
+      DuplicatePollIdError,
+    );
+  });
 });
 
 describe("createPollPersistence reads", () => {
   it("finds a poll page by reference with ordered options", async () => {
     const persistence = createPollPersistence(testEnv.DB);
-    await persistence.insertPoll(rows());
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
 
-    const page = await persistence.findPollByReference("ref-abc-123");
+    const page = await persistence.findPollByReference("team-lunch");
     expect(page).toEqual({
       pollId: "poll-1",
       question: "Where should we eat?",
@@ -166,18 +216,140 @@ describe("createPollPersistence reads", () => {
 
   it("finds a poll for its owner only", async () => {
     const persistence = createPollPersistence(testEnv.DB);
-    await persistence.insertPoll(rows());
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
 
     const owned = await persistence.findPollForOwner(POLL_1, OWNER_1);
     expect(owned).toMatchObject({
       pollId: "poll-1",
       question: "Where should we eat?",
-      canonicalReference: "ref-abc-123",
+      canonicalReference: "team-lunch",
+      canonicalReferenceKind: "custom",
       createdAtMs: NOW,
     });
 
     expect(
       await persistence.findPollForOwner(POLL_1, "someone-else" as UserId),
     ).toBeNull();
+  });
+});
+
+describe("createPollPersistence.findCanonicalCustomReference", () => {
+  it("resolves a case variant of a custom reference to its canonical form", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+
+    expect(
+      await persistence.findCanonicalCustomReference("TEAM-Lunch"),
+    ).toBe("team-lunch");
+    expect(await persistence.findCanonicalCustomReference("team-lunch")).toBe(
+      "team-lunch",
+    );
+  });
+
+  it("never case-folds a generated reference", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "aB3-xY_9qWmZvK2pL0dEfG",
+          pollId: POLL_1,
+          kind: "generated",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+
+    expect(
+      await persistence.findCanonicalCustomReference(
+        "ab3-xy_9qwmzvk2pl0defg",
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores non-canonical custom rows", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+    await testEnv.DB.prepare(
+      "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('old-lunch', ?1, 'custom', 0, ?2)",
+    )
+      .bind(POLL_1, NOW)
+      .run();
+
+    expect(
+      await persistence.findCanonicalCustomReference("OLD-Lunch"),
+    ).toBeNull();
+    expect(await persistence.findCanonicalCustomReference("TEAM-Lunch")).toBe(
+      "team-lunch",
+    );
+  });
+
+  it("returns null for an unknown reference", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    expect(
+      await persistence.findCanonicalCustomReference("nope"),
+    ).toBeNull();
+  });
+
+  it("skips an out-of-band charset-violating row instead of selecting it", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+    // Out-of-band write the app would never make: a BINARY primary key
+    // physically permits a mixed-case canonical row on another poll — with
+    // the uppercase byte AFTER position 0, so only a true full-charset
+    // filter excludes it (a first-character filter would not).
+    const outOfBand = rows();
+    outOfBand.poll = { ...outOfBand.poll, id: POLL_2 };
+    outOfBand.options = outOfBand.options.map((option, index) => ({
+      ...option,
+      id: `opt-upper-${index}` as PollOptionId,
+      pollId: POLL_2,
+    }));
+    outOfBand.reference = {
+      reference: "tEAM-lunch",
+      pollId: POLL_2,
+      kind: "custom",
+      createdAtMs: NOW,
+    };
+    await persistence.insertPoll(outOfBand);
+
+    expect(await persistence.findCanonicalCustomReference("TEAM-LUNCH")).toBe(
+      "team-lunch",
+    );
   });
 });

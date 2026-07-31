@@ -5,15 +5,20 @@ import {
   CREATE_POLL_COPY,
   DuplicatePollIdError,
   POLL_CAPS,
+  ReferenceTakenError,
   civilToUtcMs,
   createPoll,
   generatePollReference,
+  isCustomSlugCaseVariant,
   validateCreatePoll,
   type CreatePollDraft,
   type ExistingPollSnapshot,
   type PollPersistenceRows,
 } from "../../src/modules/polls/index";
-import { isReservedSlug } from "../../src/modules/polls/reserved-slugs";
+import {
+  RESERVED_SLUGS,
+  isReservedSlug,
+} from "../../src/modules/polls/reserved-slugs";
 import { multipleChoiceStrategy } from "../../src/modules/polls/types/multiple-choice";
 import type { UserId } from "../../src/shared/domain/index";
 
@@ -32,6 +37,7 @@ function draft(overrides: Partial<CreatePollDraft> = {}): CreatePollDraft {
     resultVisibility: "live",
     deadlineLocal: "",
     timeZone: "",
+    customLink: "",
     ...overrides,
   };
 }
@@ -64,6 +70,7 @@ describe("validateCreatePoll", () => {
         ],
         resultVisibility: "live",
         deadlineMs: null,
+        customLink: null,
       });
     }
   });
@@ -92,6 +99,133 @@ describe("validateCreatePoll", () => {
       expect(result.value.question).toBe("Q?");
       expect(result.value.options[0]?.label).toBe("A");
       expect(result.value.description).toBe("d");
+    }
+  });
+
+  it("normalizes a Custom Link by trimming and lowercasing it", () => {
+    const normalized = validateCreatePoll(
+      draft({ customLink: "  Team-Lunch  " }),
+      NOW,
+    );
+    expect(normalized.ok).toBe(true);
+    if (normalized.ok) {
+      expect(normalized.value.customLink).toBe("team-lunch");
+      const normalizedAgain = validateCreatePoll(
+        draft({ customLink: normalized.value.customLink ?? "" }),
+        NOW,
+      );
+      expect(normalizedAgain.ok).toBe(true);
+      if (normalizedAgain.ok) {
+        expect(normalizedAgain.value.customLink).toBe(
+          normalized.value.customLink,
+        );
+      }
+    }
+  });
+
+  it("keeps a blank Custom Link on the generated-reference path", () => {
+    for (const customLink of ["", "   "]) {
+      const result = validateCreatePoll(draft({ customLink }), NOW);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.customLink).toBeNull();
+      }
+    }
+  });
+
+  it("accepts lowercase letters, digits, and hyphens in a Custom Link", () => {
+    const result = validateCreatePoll(
+      draft({ customLink: "team-lunch-2026" }),
+      NOW,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.customLink).toBe("team-lunch-2026");
+    }
+  });
+
+  it.each([
+    "team lunch",
+    "team/lunch",
+    "team_lunch",
+    "téam-lunch",
+    "team.lunch",
+  ])("rejects invalid Custom Link characters in %j", (customLink) => {
+    const result = validateCreatePoll(draft({ customLink }), NOW);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.fieldErrors?.customLink).toBe(
+        CREATE_POLL_COPY.customLinkInvalid,
+      );
+      expect(result.error.reasonCodes?.customLink).toBe("custom_link_invalid");
+    }
+  });
+
+  it("enforces the 63-character Custom Link boundary", () => {
+    const valid = validateCreatePoll(
+      draft({ customLink: "a".repeat(63) }),
+      NOW,
+    );
+    expect(valid.ok).toBe(true);
+    if (valid.ok) {
+      expect(valid.value.customLink).toBe("a".repeat(63));
+    }
+
+    const tooLong = validateCreatePoll(
+      draft({ customLink: "a".repeat(64) }),
+      NOW,
+    );
+    expect(tooLong.ok).toBe(false);
+    if (!tooLong.ok) {
+      expect(tooLong.error.fieldErrors?.customLink).toBe(
+        CREATE_POLL_COPY.customLinkTooLong,
+      );
+      expect(tooLong.error.reasonCodes?.customLink).toBe(
+        "custom_link_too_long",
+      );
+    }
+  });
+
+  it("validates Custom Link format before length", () => {
+    const result = validateCreatePoll(
+      draft({ customLink: "_".repeat(64) }),
+      NOW,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.fieldErrors?.customLink).toBe(
+        CREATE_POLL_COPY.customLinkInvalid,
+      );
+      expect(result.error.reasonCodes?.customLink).toBe("custom_link_invalid");
+    }
+  });
+
+  it.each(RESERVED_SLUGS)(
+    "rejects reserved Custom Link %j through the shared registry",
+    (customLink) => {
+      const result = validateCreatePoll(draft({ customLink }), NOW);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.fieldErrors?.customLink).toBe(
+          `\`${customLink}\` is reserved by the application itself. Pick something less structural.`,
+        );
+        expect(result.error.reasonCodes?.customLink).toBe(
+          "custom_link_reserved",
+        );
+      }
+    },
+  );
+
+  it("interpolates the normalized slug into the reserved copy", () => {
+    const result = validateCreatePoll(
+      draft({ customLink: "  RESULTS  " }),
+      NOW,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.fieldErrors?.customLink).toBe(
+        "`results` is reserved by the application itself. Pick something less structural.",
+      );
     }
   });
 
@@ -264,6 +398,21 @@ describe("validateCreatePoll", () => {
     ["description_too_long", "description", draft({ description: "d".repeat(5001) })],
     ["visibility_invalid", "visibility", draft({ resultVisibility: "everyone" })],
     [
+      "custom_link_invalid",
+      "customLink",
+      draft({ customLink: "team_lunch" }),
+    ],
+    [
+      "custom_link_too_long",
+      "customLink",
+      draft({ customLink: "a".repeat(64) }),
+    ],
+    [
+      "custom_link_reserved",
+      "customLink",
+      draft({ customLink: "creator" }),
+    ],
+    [
       "deadline_past",
       "deadline",
       draft({ deadlineLocal: "2026-07-28T12:00", timeZone: "UTC" }),
@@ -382,28 +531,58 @@ describe("generatePollReference (AD-13)", () => {
 });
 
 describe("reserved-slug registry (AD-13)", () => {
-  it.each([
-    "creator",
-    "discover",
-    "sign-in",
-    "assets",
-    "api",
-    "_astro",
-    "favicon.ico",
-    "favicon.svg",
-    "fonts",
-    "robots.txt",
-    "sitemap.xml",
-    "results",
-    "manifest",
-    "",
-  ])("reserves %j", (slug) => {
+  it.each([...RESERVED_SLUGS, ""])("reserves %j", (slug) => {
     expect(isReservedSlug(slug)).toBe(true);
   });
 
   it("does not reserve ordinary slugs", () => {
     expect(isReservedSlug("team-lunch")).toBe(false);
     expect(isReservedSlug("abc123")).toBe(false);
+  });
+});
+
+describe("isCustomSlugCaseVariant", () => {
+  it("accepts case variants of a legal custom slug", () => {
+    expect(isCustomSlugCaseVariant("Team-Lunch")).toBe(true);
+    expect(isCustomSlugCaseVariant("TEAM-LUNCH")).toBe(true);
+    expect(isCustomSlugCaseVariant("A".repeat(POLL_CAPS.maxCustomLinkLength))).toBe(
+      true,
+    );
+  });
+
+  it("rejects an already-lowercase reference — no variant, no fallback query", () => {
+    expect(isCustomSlugCaseVariant("team-lunch")).toBe(false);
+  });
+
+  it("rejects mixed-case values longer than the slug cap", () => {
+    expect(
+      isCustomSlugCaseVariant("A".repeat(POLL_CAPS.maxCustomLinkLength + 1)),
+    ).toBe(false);
+  });
+
+  it("rejects mixed-case values outside the slug alphabet", () => {
+    expect(isCustomSlugCaseVariant("Team_Lunch")).toBe(false);
+    expect(isCustomSlugCaseVariant("Team Lunch")).toBe(false);
+    expect(isCustomSlugCaseVariant("Team.Lunch")).toBe(false);
+  });
+
+  it("rejects non-ASCII requests — fold quirks never reach the gate", () => {
+    // `ſ` and `İ` don't fold to slug chars; Kelvin K (U+212A) folds to
+    // ASCII `k` under JS toLowerCase, but the raw-form ASCII test excludes
+    // it regardless — no fold semantics are consulted.
+    expect(isCustomSlugCaseVariant("ſA")).toBe(false);
+    expect(isCustomSlugCaseVariant("TÉAM")).toBe(false);
+    expect(isCustomSlugCaseVariant("\u{212A}team")).toBe(false);
+    expect(isCustomSlugCaseVariant("İteam")).toBe(false);
+  });
+});
+
+describe("PollPersistenceRows reference kinds", () => {
+  it("supports generated and custom canonical references", () => {
+    const kinds = ["generated", "custom"] satisfies Array<
+      PollPersistenceRows["reference"]["kind"]
+    >;
+    expect(kinds).toEqual(["generated", "custom"]);
   });
 });
 
@@ -474,6 +653,29 @@ describe("createPoll command", () => {
       reference: "ref-abc123",
       pollId: "id-1",
       kind: "generated",
+      createdAtMs: NOW,
+    });
+  });
+
+  it("substitutes a normalized Custom Link for the generated reference", async () => {
+    const persisted: PollPersistenceRows[] = [];
+    const generateReference = vi.fn(() => "must-not-be-used");
+    const result = await createPoll(
+      { ...deps(persisted), generateReference },
+      USER_1,
+      draft({ customLink: "  Team-Lunch  " }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.reference).toBe("team-lunch");
+    }
+    expect(generateReference).not.toHaveBeenCalled();
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]?.reference).toEqual({
+      reference: "team-lunch",
+      pollId: "id-1",
+      kind: "custom",
       createdAtMs: NOW,
     });
   });
@@ -586,6 +788,69 @@ describe("createPoll command", () => {
       cause: "D1_ERROR: UNIQUE constraint failed: poll_reference.reference",
     });
   });
+
+  it("maps a typed custom-reference collision to the Custom Link field", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await createPoll(
+      {
+        persist: async () => {
+          throw new ReferenceTakenError(
+            "D1_ERROR: UNIQUE constraint failed: poll_reference.reference",
+          );
+        },
+        generateId: () => "id-1",
+        generateReference: () => {
+          throw new Error("custom links must not draw a generated reference");
+        },
+        nowMs: () => NOW,
+      },
+      USER_1,
+      draft({ customLink: "  Team-Lunch  " }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual({
+        code: "poll_validation_failed",
+        message: "Fix the fields below.",
+        fieldErrors: {
+          customLink: "`team-lunch` is taken. Pick another.",
+        },
+        reasonCodes: {
+          customLink: "custom_link_taken",
+        },
+      });
+    }
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a generated-reference collision on the generic failure path", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await createPoll(
+      {
+        persist: async () => {
+          throw new ReferenceTakenError(
+            "D1_ERROR: UNIQUE constraint failed: poll_reference.reference",
+          );
+        },
+        generateId: () => "id-1",
+        generateReference: () => "ref-collision",
+        nowMs: () => NOW,
+      },
+      USER_1,
+      draft(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("poll_create_failed");
+      expect(result.error.fieldErrors).toBeUndefined();
+    }
+    expect(errorSpy).toHaveBeenCalledWith("poll_create_failed", {
+      pollId: "id-1",
+      cause: "D1_ERROR: UNIQUE constraint failed: poll_reference.reference",
+    });
+  });
 });
 
 describe("createPoll duplicate-ID dedupe (D4)", () => {
@@ -602,6 +867,7 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
         { label: "Tacos", position: 1 },
       ],
       canonicalReference: "ref-abc123",
+      canonicalReferenceKind: "generated",
       createdAtMs: NOW - 60_000,
       ...overrides,
     };
@@ -648,6 +914,42 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
     if (!result.ok) {
       expect(result.error.code).toBe("poll_duplicate_divergent");
       expect(result.error.message).toBe(CREATE_POLL_COPY.duplicateDivergent);
+    }
+  });
+
+  it("dedupes an identical normalized Custom Link retry", async () => {
+    const result = await createPoll(
+      duplicateDeps(
+        snapshot({
+          canonicalReference: "team-lunch",
+          canonicalReferenceKind: "custom",
+        }),
+      ),
+      USER_1,
+      draft({ idempotencyId: NONCE, customLink: " Team-Lunch " }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.reference).toBe("team-lunch");
+      expect(result.value.existing).toBe(true);
+    }
+  });
+
+  it("treats changing or clearing a Custom Link on a retry as divergent", async () => {
+    const existing = snapshot({
+      canonicalReference: "team-lunch",
+      canonicalReferenceKind: "custom",
+    });
+    for (const customLink of ["team-dinner", ""]) {
+      const result = await createPoll(
+        duplicateDeps(existing),
+        USER_1,
+        draft({ idempotencyId: NONCE, customLink }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe("poll_duplicate_divergent");
+      }
     }
   });
 
@@ -769,6 +1071,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
         { label: "Tacos", position: 1 },
       ],
       canonicalReference: "ref-abc123",
+      canonicalReferenceKind: "generated",
       createdAtMs: NOW,
     };
     const result = await createPoll(
@@ -798,6 +1101,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
         { label: "Tacos", position: 1 },
       ],
       canonicalReference: "ref-abc123",
+      canonicalReferenceKind: "generated",
       createdAtMs: NOW,
     };
     const result = await createPoll(

@@ -7,6 +7,10 @@ export const POLL_CAPS = {
   maxQuestionLength: 280,
   maxOptionLength: 100,
   maxDescriptionLength: 5000,
+  // Custom Link ceiling (Story 1.4): DNS-label convention, well under the
+  // input's practical width. Referenced by validation AND the Voice copy so
+  // a cap change can't make the message lie.
+  maxCustomLinkLength: 63,
 } as const;
 
 // Re-render ceiling for option rows on the create form — far above the

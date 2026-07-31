@@ -68,6 +68,7 @@ const formSchema = z.object({
   visibility: z.string().default(""),
   deadline: z.string().default(""),
   timezone: z.string().default(""),
+  customLink: z.string().default(""),
   intent: z.string().default(""),
   pollId: z.string().default(""),
 });
@@ -84,6 +85,7 @@ let values: CreatePollDraft = {
   resultVisibility: "live",
   deadlineLocal: "",
   timeZone: "",
+  customLink: "",
   idempotencyId: formPollId,
 };
 let fieldErrors: Record<string, string> = {};
@@ -111,6 +113,7 @@ if (Astro.request.method === "POST") {
       visibility: text(formData.get("visibility")),
       deadline: text(formData.get("deadline")),
       timezone: text(formData.get("timezone")),
+      customLink: text(formData.get("customLink")),
       // Anything other than exactly "add-option" is a publish.
       intent: text(formData.get("intent")),
       pollId: text(formData.get("poll_id")),
@@ -135,6 +138,7 @@ if (Astro.request.method === "POST") {
     resultVisibility: parsed.visibility,
     deadlineLocal: parsed.deadline,
     timeZone: parsed.timezone,
+    customLink: parsed.customLink,
     idempotencyId: formPollId,
   };
 
@@ -323,6 +327,30 @@ while (values.options.length < 2) {
             }
           </p>
         )}
+      </div>
+
+      <div class="field-block">
+        <Input
+          id="custom-link"
+          name="customLink"
+          label="CUSTOM LINK (OPTIONAL)"
+          value={values.customLink}
+          error={Boolean(fieldErrors.customLink)}
+          autocapitalize="none"
+          spellcheck="false"
+          autocomplete="off"
+          describedby={fieldErrors.customLink
+            ? "custom-link-error custom-link-help"
+            : "custom-link-help"}
+        />
+        {fieldErrors.customLink && (
+          <p class="field-error" id="custom-link-error">
+            {fieldErrors.customLink}
+          </p>
+        )}
+        <p class="helper-note" id="custom-link-help">
+          Lowercase letters, digits, and hyphens. Leave blank for a random link.
+        </p>
       </div>
 
       <div class="field-block">

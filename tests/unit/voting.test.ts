@@ -710,6 +710,8 @@ describe("VOTE_COPY", () => {
         "That didn't land. The Vote wasn't recorded and your ballot is still here, exactly as you left it. Try again — and if it keeps failing, the Poll will still be here in a minute.",
       rateLimited:
         "Too many Votes from here, too quickly. Give it a minute. If you're a person, this shouldn't have happened, and we're sorry it did.",
+      offline:
+        "No connection. Your ballot is safe on this page; nothing has been sent yet.",
       selectionRequired: "Nothing's selected. Pick an option, then vote.",
       pollDeleted: "This Poll no longer exists.",
       idempotencyConflict:

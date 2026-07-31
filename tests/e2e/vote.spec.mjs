@@ -34,7 +34,17 @@ test.describe("public voting flow", () => {
         /^Failed to load resource: the server responded with a status of (422|429) \(/u.test(
           text,
         ) && message.location().url === page.url();
-      if (message.type() === "error" && !expectedFormResponse) {
+      // Tests deliberately abort the favicon connectivity probe to simulate
+      // a dead uplink with navigator.onLine still true — Chromium logs that
+      // as a resource error scoped to the probe URL only.
+      const expectedProbeAbort =
+        text.includes("ERR_FAILED") &&
+        message.location().url.endsWith("/favicon.svg");
+      if (
+        message.type() === "error" &&
+        !expectedFormResponse &&
+        !expectedProbeAbort
+      ) {
         errors.push(text);
       }
     });
@@ -53,6 +63,45 @@ test.describe("public voting flow", () => {
       "sec-fetch-site": "same-origin",
       ...extra,
     };
+  }
+
+  async function formatDeadlineLocally(page, deadlineMs) {
+    return page.evaluate((timestampMs) => {
+      const timestamp = new Date(timestampMs);
+      const now = new Date();
+      const options = {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      };
+      if (timestamp.getFullYear() !== now.getFullYear()) {
+        options.year = "numeric";
+      }
+      return new Intl.DateTimeFormat(undefined, options).format(timestamp);
+    }, deadlineMs);
+  }
+
+  async function readOptionPresentation(page) {
+    return page.evaluate(() =>
+      Array.from(document.querySelectorAll("label.poll-option")).map(
+        (option) => {
+          const styles = getComputedStyle(option);
+          const bounds = option.getBoundingClientRect();
+          return {
+            color: styles.color,
+            display: styles.display,
+            opacity: styles.opacity,
+            visibility: styles.visibility,
+            visible:
+              bounds.width > 0 &&
+              bounds.height > 0 &&
+              styles.display !== "none" &&
+              styles.visibility !== "hidden",
+          };
+        },
+      ),
+    );
   }
 
   async function publishPoll(page, context, baseURL, question = "Pick one") {
@@ -152,6 +201,54 @@ test.describe("public voting flow", () => {
     });
   });
 
+  test("renders deadlines locally and adds a countdown only inside 24 hours", async ({
+    browser,
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "When does this close?");
+
+    await page.goto(created.path);
+    await expect(page.locator("time[data-deadline]")).toHaveCount(0);
+
+    const farDeadline = Date.now() + 48 * 60 * 60 * 1000;
+    setPollDeadline(created.pollId, farDeadline);
+
+    const noJsContext = await browser.newContext({ javaScriptEnabled: false });
+    const noJsPage = await noJsContext.newPage();
+    await noJsPage.goto(`${requireBaseUrl(baseURL)}${created.path}`);
+    await expect(noJsPage.locator("time[data-deadline]")).toContainText("UTC");
+    await expect(noJsPage.locator("[data-deadline-countdown]")).toBeHidden();
+    await noJsContext.close();
+
+    await page.goto(created.path);
+    const farTime = page.locator("time[data-deadline]");
+    const farLocal = await formatDeadlineLocally(page, farDeadline);
+    await expect(farTime).toHaveText(farLocal);
+    await expect(farTime).toHaveAttribute(
+      "datetime",
+      new Date(farDeadline).toISOString(),
+    );
+    await expect(page.locator("[data-deadline-countdown]")).toBeHidden();
+
+    const nearDeadline = Date.now() + 90 * 60 * 1000;
+    setPollDeadline(created.pollId, nearDeadline);
+    await page.reload();
+    const nearTime = page.locator("time[data-deadline]");
+    await expect(nearTime).toHaveText(
+      await formatDeadlineLocally(page, nearDeadline),
+    );
+    await expect(nearTime).toHaveAttribute(
+      "datetime",
+      new Date(nearDeadline).toISOString(),
+    );
+    await expect(page.locator("[data-deadline-countdown]")).toHaveText(
+      "CLOSES IN 1H",
+    );
+    await expect(page.locator("[data-deadline-countdown]")).toBeVisible();
+  });
+
   test("counts one Vote, focuses confirmation, then renders already-voted read-only state", async ({
     page,
     context,
@@ -235,6 +332,11 @@ test.describe("public voting flow", () => {
     const question = "Token retry?";
     const created = await publishPoll(page, context, baseURL, question);
     await page.goto(created.path);
+    const submissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(submissionId);
     await page.locator("label.poll-option", { hasText: "Alpha" }).click();
     await context.clearCookies();
 
@@ -258,12 +360,19 @@ test.describe("public voting flow", () => {
       "That didn't land. The Vote wasn't recorded and your ballot is still here, exactly as you left it. Try again — and if it keeps failing, the Poll will still be here in a minute.",
     );
     await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
     // The error re-render re-issues the voter cookie the retry needs and
     // mints a fresh submission id.
     const reissued = (await context.cookies()).find(
       ({ name }) => name === "oddspark.voter",
     );
     expect(reissued?.value ?? "").toMatch(/^[a-f0-9]{32}$/u);
+    const retrySubmissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(retrySubmissionId);
+    expect(retrySubmissionId).not.toBe(submissionId);
     expect(
       d1Query(
         `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
@@ -283,6 +392,11 @@ test.describe("public voting flow", () => {
     const noJsPage = await noJsContext.newPage();
     await noJsPage.goto(`${requireBaseUrl(baseURL)}${created.path}`);
     await expect(noJsPage.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    const submissionId =
+      (await noJsPage
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(submissionId);
 
     const [postResponse] = await Promise.all([
       noJsPage.waitForResponse(
@@ -299,6 +413,12 @@ test.describe("public voting flow", () => {
       "Nothing's selected. Pick an option, then vote.",
     );
     await expect(noJsPage.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    const retrySubmissionId =
+      (await noJsPage
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(retrySubmissionId);
+    expect(retrySubmissionId).not.toBe(submissionId);
     await noJsContext.close();
   });
 
@@ -333,6 +453,382 @@ test.describe("public voting flow", () => {
       ),
     ).toEqual([{ n: 1 }]);
     await noJsContext.close();
+  });
+
+  test("locks one in-flight submission without dimming or disabling its options", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "One POST?");
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+    const beforeSubmitOptions = await readOptionPresentation(page);
+    expect(beforeSubmitOptions).toHaveLength(2);
+    expect(beforeSubmitOptions.every(({ visible }) => visible)).toBe(true);
+
+    let postCount = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === created.path
+      ) {
+        postCount += 1;
+      }
+    });
+
+    const voteButton = page.getByRole("button", { name: "VOTE" });
+    // The script preventDefaults every JS submit and only calls
+    // form.submit() after the connectivity probe resolves — holding the
+    // probe keeps the form in flight without any POST leaving.
+    let releaseProbe;
+    const heldProbe = new Promise((resolve) => {
+      releaseProbe = resolve;
+    });
+    await page.route("**/favicon.svg", async (route) => {
+      await heldProbe;
+      await route.continue();
+    });
+    await voteButton.focus();
+    await voteButton.press("Enter");
+
+    const inFlight = await page.evaluate(() => {
+      const button = document.querySelector('button[type="submit"]');
+      const fieldset = document.querySelector("fieldset.poll-options");
+      const radios = Array.from(
+        document.querySelectorAll('input[name="option_id"]'),
+      );
+      const buttonStyles = button ? getComputedStyle(button) : null;
+      return {
+        buttonBusy: button?.getAttribute("aria-busy"),
+        buttonDisabled: button?.disabled,
+        buttonLabel: button?.textContent?.trim(),
+        focusOutline: buttonStyles
+          ? `${buttonStyles.outlineStyle} ${buttonStyles.outlineWidth}`
+          : null,
+        pointerEvents: fieldset
+          ? getComputedStyle(fieldset).pointerEvents
+          : null,
+        radiosDisabled: radios.map((radio) => radio.disabled),
+      };
+    });
+    expect(inFlight).toEqual({
+      buttonBusy: "true",
+      buttonDisabled: true,
+      buttonLabel: "COUNTING…",
+      focusOutline: "solid 2px",
+      pointerEvents: "none",
+      radiosDisabled: [false, false],
+    });
+    expect(await readOptionPresentation(page)).toEqual(beforeSubmitOptions);
+
+    const heldSelection = await page.evaluate(() => {
+      const radios = Array.from(
+        document.querySelectorAll('input[name="option_id"]'),
+      );
+      radios[1].checked = true;
+      radios[1].dispatchEvent(new Event("change", { bubbles: true }));
+      return radios.map((radio) => radio.checked);
+    });
+    expect(heldSelection).toEqual([true, false]);
+
+    const secondSubmitPrevented = await page.evaluate(() => {
+      const form = document.querySelector("form[data-vote-form]");
+      if (!(form instanceof HTMLFormElement)) return false;
+      let prevented = false;
+      form.addEventListener(
+        "submit",
+        (event) => {
+          prevented = event.defaultPrevented;
+        },
+        { once: true },
+      );
+      form.requestSubmit();
+      return prevented;
+    });
+    expect(secondSubmitPrevented).toBe(true);
+    expect(postCount).toBe(0);
+
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+    });
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
+    await expect(page.locator("form[data-vote-form]")).not.toHaveAttribute(
+      "data-vote-inflight",
+      "true",
+    );
+
+    // Releasing the held probe resolves it against a form that is no longer
+    // in flight — the probe callback's guard must refuse the late submit.
+    const probeSettled = page.waitForResponse(
+      (candidate) =>
+        candidate.url().endsWith("/favicon.svg") &&
+        candidate.request().method() === "HEAD",
+    );
+    releaseProbe?.();
+    await probeSettled;
+    await page.unroute("**/favicon.svg");
+    expect(postCount).toBe(0);
+
+    let markGuardProbe;
+    const guardProbe = new Promise((resolve) => {
+      markGuardProbe = resolve;
+    });
+    await page.exposeFunction("story16GuardProbe", (probe) => {
+      markGuardProbe?.(probe);
+    });
+    await page.evaluate(() => {
+      const form = document.querySelector("form[data-vote-form]");
+      if (!(form instanceof HTMLFormElement)) return;
+      form.addEventListener(
+        "submit",
+        () => {
+          queueMicrotask(() => {
+            const button = document.querySelector('button[type="submit"]');
+            form.requestSubmit();
+            window.story16GuardProbe({
+              buttonDisabled: button?.disabled,
+              buttonLabel: button?.textContent?.trim(),
+            });
+          });
+        },
+        { once: true },
+      );
+    });
+    let releasePost;
+    const heldPost = new Promise((resolve) => {
+      releasePost = resolve;
+    });
+    let markPostSeen;
+    const postSeen = new Promise((resolve) => {
+      markPostSeen = resolve;
+    });
+    await page.route(`**${created.path}`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      markPostSeen?.();
+      await heldPost;
+      await route.continue();
+    });
+
+    const postResponse = page.waitForResponse(
+      (candidate) =>
+        candidate.url().endsWith(created.path) &&
+        candidate.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "VOTE" }).click({
+      noWaitAfter: true,
+    });
+    try {
+      const [, guardedSecondSubmit] = await Promise.all([
+        postSeen,
+        guardProbe,
+      ]);
+      expect(guardedSecondSubmit).toEqual({
+        buttonDisabled: true,
+        buttonLabel: "COUNTING…",
+      });
+      expect(postCount).toBe(1);
+    } finally {
+      releasePost?.();
+    }
+    expect((await postResponse).status()).toBe(303);
+    await expect(page).toHaveTitle("Counted — One POST?");
+    expect(postCount).toBe(1);
+  });
+
+  test("keeps the ballot safe offline and submits after the connection returns", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Offline ballot?");
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    let postCount = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === created.path
+      ) {
+        postCount += 1;
+      }
+    });
+
+    const offlineOutcome = page.locator("[data-offline-outcome]");
+    await context.setOffline(true);
+    await expect(offlineOutcome).toHaveText(
+      "No connection. Your ballot is safe on this page; nothing has been sent yet.",
+    );
+    await expect(offlineOutcome).toBeVisible();
+    await expect(offlineOutcome).not.toBeFocused();
+
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(offlineOutcome).toBeFocused();
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    expect(postCount).toBe(0);
+
+    await context.setOffline(false);
+    await expect(offlineOutcome).toBeHidden();
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeFocused();
+
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle("Counted — Offline ballot?");
+    expect(postCount).toBe(1);
+  });
+
+  test("keeps the ballot safe when the probe fails though navigator.onLine is true", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Dead uplink?");
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    let postCount = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === created.path
+      ) {
+        postCount += 1;
+      }
+    });
+
+    // navigator.onLine stays true (the Firefox / captive-portal blind spot);
+    // aborting the favicon probe is the dead uplink the submit must survive.
+    await page.route("**/favicon.svg", (route) => route.abort());
+
+    const offlineOutcome = page.locator("[data-offline-outcome]");
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(offlineOutcome).toHaveText(
+      "No connection. Your ballot is safe on this page; nothing has been sent yet.",
+    );
+    await expect(offlineOutcome).toBeFocused();
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    expect(postCount).toBe(0);
+
+    await page.unroute("**/favicon.svg");
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle("Counted — Dead uplink?");
+    expect(postCount).toBe(1);
+  });
+
+  test("mints a fresh submission id when the 10s restore fires on a held POST", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Slow count?");
+    await page.goto(created.path);
+    const submissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(submissionId);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    let postCount = 0;
+    await page.route(`**${created.path}`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      postCount += 1;
+      // A 204 answers the POST without committing a navigation: the document
+      // (and its 10s restore timer) stays alive, as with any lost response.
+      await route.fulfill({ status: 204 });
+    });
+
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page.getByRole("button", { name: "COUNTING…" })).toBeDisabled();
+    await expect
+      .poll(() => postCount, "the intercepted POST left the page")
+      .toBe(1);
+
+    // The response is lost from the page's perspective, so the 10s restore
+    // fires: the form unlocks with a FRESH submission id — an edited
+    // resubmit can never dead-end in IDEMPOTENCY_CONFLICT if the original
+    // request still committed server-side.
+    await page.waitForTimeout(10_500);
+    const restored = await page.evaluate(() => {
+      const button = document.querySelector('button[type="submit"]');
+      const input = document.querySelector('input[name="submission_id"]');
+      const form = document.querySelector("form[data-vote-form]");
+      return {
+        buttonDisabled: button ? button.disabled : null,
+        buttonLabel: button?.textContent?.trim() ?? null,
+        inFlight: form?.getAttribute("data-vote-inflight") ?? null,
+        submissionId: input?.getAttribute("value") ?? "",
+      };
+    });
+    expect(restored).toMatchObject({
+      buttonDisabled: false,
+      buttonLabel: "VOTE",
+    });
+    expect(restored.inFlight).not.toBe("true");
+    assertUuid(restored.submissionId);
+    expect(restored.submissionId).not.toBe(submissionId);
+
+    // And the restored form's retry actually lands.
+    await page.unroute(`**${created.path}`);
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle("Counted — Slow count?");
+  });
+
+  test("suppresses the offline line on a rate-limit-locked form and reconciles it on pageshow", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Locked offline?");
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    const offlineOutcome = page.locator("[data-offline-outcome]");
+
+    // A locked form (the 429 re-render shape) already shows reload guidance;
+    // the offline line must not stack contradictory copy on it.
+    await page.evaluate(() => {
+      document
+        .querySelector("form[data-vote-form]")
+        ?.setAttribute("data-vote-locked", "true");
+      window.dispatchEvent(new Event("offline"));
+    });
+    await expect(offlineOutcome).toBeHidden();
+
+    // A bfcache-frozen page misses offline/online events; pageshow must
+    // reconcile the banner with the connectivity it wakes up to.
+    await page.evaluate(() => {
+      document
+        .querySelector("form[data-vote-form]")
+        ?.setAttribute("data-vote-locked", "false");
+      Object.defineProperty(navigator, "onLine", {
+        get: () => false,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("offline"));
+    });
+    await expect(offlineOutcome).toBeVisible();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "onLine", {
+        get: () => true,
+        configurable: true,
+      });
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+    });
+    await expect(offlineOutcome).toBeHidden();
   });
 
   test("counts a double-clicked submission exactly once", async ({
@@ -751,12 +1247,18 @@ test.describe("public voting flow", () => {
     const question = "Closed choice?";
     const created = await publishPoll(page, context, baseURL, question);
     // Task 9 pins closure-by-deadline: the fixture seeds a PAST deadline.
-    setPollDeadline(created.pollId, Date.now() - 1000);
+    const closedDeadline = Date.now() - 1000;
+    setPollDeadline(created.pollId, closedDeadline);
 
     await page.goto(created.path);
     await expect(page).toHaveTitle(`Poll closed — ${question}`);
     await expect(page.locator("[data-vote-outcome]")).toBeFocused();
     await expect(page.getByText(/^This Poll closed /)).toBeVisible();
+    await expect(page.locator("time[data-deadline]")).toHaveAttribute(
+      "datetime",
+      new Date(closedDeadline).toISOString(),
+    );
+    await expect(page.locator("time[data-deadline]")).not.toContainText("UTC");
     await expect(page.getByText("Alpha")).toBeVisible();
     await expect(page.getByText("Beta")).toBeVisible();
     await expect(page.getByRole("radio")).toHaveCount(0);

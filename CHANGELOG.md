@@ -48,4 +48,7 @@ production on every merge, but no version has been cut or tagged.
 - Signed-out multiple-choice voting with exactly-once D1 persistence, accessible
   counted/already-voted/closed/retry states, first-party duplicate checks, and a
   permissive per-source-IP abuse throttle.
+- Voting-page resilience with local deadline display and sub-24-hour countdowns,
+  a one-request `COUNTING…` submit lock, preserved retry ballots with fresh
+  submission IDs, and focused offline feedback that never sends the held ballot.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

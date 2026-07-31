@@ -34,10 +34,6 @@ CREATE TABLE voter_claim (
   FOREIGN KEY (vote_id) REFERENCES vote(id) ON DELETE CASCADE
 );
 
--- Vote-row deletes (via poll cascade) must find claims by vote_id without a
--- table scan per vote row.
-CREATE INDEX voter_claim_vote_id_idx ON voter_claim(vote_id);
-
 -- The application open-state check exists for useful copy only. This trigger
 -- is the transaction-time correctness boundary: a poll that closes while a
 -- voter decides cannot accept a vote.

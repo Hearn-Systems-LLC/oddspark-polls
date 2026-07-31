@@ -4,7 +4,7 @@ baseline_commit: 57973774b5b224104c0177fbbc8fc37791559dcf
 
 # Story 1.6: Voting-Page States & Resilience
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Prerequisite: Story 1.5 is in `review` on branch `story/1-5-cast-a-vote-that-counts-exactly-once`. 1.6 modifies 1.5's voting page and vote-form script directly — start ONLY after 1.5's review closes and merges to main, then re-check `git log` (the baseline above is pre-1.5-merge main). Every `[1.5]`-tagged file reference below describes that branch's state. -->
@@ -190,6 +190,19 @@ OpenAI Codex (GPT-5)
 - tests/unit/deadline-display.test.ts
 - tests/unit/voting.test.ts
 
+### Review Findings
+
+- [x] [Review][Patch] Timed restore can re-arm a genuinely in-flight POST under the same `submission_id` — resolved (Justin, 2026-07-31): harden. On the 10s `restoreTimer` restore path only, mint a fresh `submission_id` into the hidden field so an edited resubmit can never hit a permanent `IDEMPOTENCY_CONFLICT` (a committed original then answers `already_voted`, an uncommitted one votes cleanly). `pageshow`/bfcache restore keeps the original ID — exact-replay recovery (AD-7) depends on it [src/scripts/vote-form.ts:190]
+- [x] [Review][Patch] Offline protection depends on `navigator.onLine`, unreliable outside Chromium — resolved (Justin, 2026-07-31): compensate. Add a pre-submit connectivity probe: with JS active, `preventDefault` every submit, `fetch` a tiny same-origin URL (`cache: "no-store"`, short `AbortSignal.timeout`), and only on probe success call `form.submit()` (native submit skips the submit event — no recursion); on probe failure show the offline outcome and restore idle. This catches Firefox-offline and captive-portal/dead-uplink cases where `navigator.onLine` lies, at the cost of one extra RTT per vote [src/scripts/vote-form.ts:167-173]
+- [x] [Review][Patch] `offline` event clears the in-flight lock mid-flight [src/scripts/vote-form.ts:194-197]
+- [x] [Review][Patch] In-flight keydown guard swallows browser shortcuts (F5, Ctrl/Cmd+R, Escape, Home/End) when a radio has focus [src/scripts/vote-form.ts:143-151]
+- [x] [Review][Patch] `pageshow` restore does not reconcile the offline banner with current connectivity — stale "No connection" banner persists after bfcache resume while reconnected [src/scripts/vote-form.ts:193]
+- [x] [Review][Patch] Rate-limited (429) locked page still shows the offline banner on connectivity loss, stacking contradictory rejection copy [src/pages/[reference].astro:599, src/scripts/vote-form.ts:194-197]
+- [x] [Review][Patch] Focus drops to `<body>` when a submit hides the focused offline message — `hideOfflineOutcome()` called without a focus target on the submit path [src/scripts/vote-form.ts:178]
+- [x] [Review][Patch] Connectivity flaps re-announce the offline message — `showOfflineOutcome` rewrites `textContent` unconditionally, re-triggering the polite live region [src/scripts/vote-form.ts:78-90]
+- [x] [Review][Patch] Missing-placeholder fallback leaks the literal `{when}`/`{deadline}` token to voters if copy drifts from its placeholder (pre-change `replace` degraded cleanly) [src/pages/[reference].astro:568-583]
+
 ## Change Log
 
 - 2026-07-31: Implemented deadline presentation, resilient in-flight/offline voting states, fresh retry IDs, accessibility recovery, and complete regression coverage for Story 1.6.
+- 2026-07-31: Code review (three adversarial layers, 9 findings applied): pre-submit connectivity probe with fresh-`submission_id` timed restore, offline-event lock preservation, pageshow banner reconciliation, locked-form offline suppression, selection-only keydown guard, focus/flap/token-leak hardening; 3 new e2e flows, full gate green (345 Vitest-equivalent unit+integration, 55 Playwright, types, production build).

@@ -582,6 +582,12 @@ const splitTimedText = (
   ];
 };
 
+// Plain-render fallback: if copy ever drifts from its placeholder, the
+// unsplit path must degrade to a clean sentence — never leak a raw
+// {when}/{deadline} token to voters.
+const stripTimedToken = (text: string): string =>
+  text.replace(/\s*\{(?:when|deadline)\}/g, "");
+
 const outcomeHeadingTime = outcome
   ? splitTimedText(outcome.heading, outcome.time)
   : null;
@@ -635,7 +641,7 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
                     {outcomeHeadingTime[1]}
                   </>
                 ) : (
-                  outcome.heading
+                  stripTimedToken(outcome.heading)
                 )}
               </strong>
               {outcome.body && (
@@ -653,7 +659,7 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
                       {outcomeBodyTime[1]}
                     </>
                   ) : (
-                    outcome.body
+                    stripTimedToken(outcome.body)
                   )}
                 </>
               )}

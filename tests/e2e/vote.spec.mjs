@@ -34,7 +34,17 @@ test.describe("public voting flow", () => {
         /^Failed to load resource: the server responded with a status of (422|429) \(/u.test(
           text,
         ) && message.location().url === page.url();
-      if (message.type() === "error" && !expectedFormResponse) {
+      // Tests deliberately abort the favicon connectivity probe to simulate
+      // a dead uplink with navigator.onLine still true — Chromium logs that
+      // as a resource error scoped to the probe URL only.
+      const expectedProbeAbort =
+        text.includes("ERR_FAILED") &&
+        message.location().url.endsWith("/favicon.svg");
+      if (
+        message.type() === "error" &&
+        !expectedFormResponse &&
+        !expectedProbeAbort
+      ) {
         errors.push(text);
       }
     });
@@ -468,11 +478,16 @@ test.describe("public voting flow", () => {
     });
 
     const voteButton = page.getByRole("button", { name: "VOTE" });
-    await page.evaluate(() => {
-      const form = document.querySelector("form[data-vote-form]");
-      form?.addEventListener("submit", (event) => event.preventDefault(), {
-        once: true,
-      });
+    // The script preventDefaults every JS submit and only calls
+    // form.submit() after the connectivity probe resolves — holding the
+    // probe keeps the form in flight without any POST leaving.
+    let releaseProbe;
+    const heldProbe = new Promise((resolve) => {
+      releaseProbe = resolve;
+    });
+    await page.route("**/favicon.svg", async (route) => {
+      await heldProbe;
+      await route.continue();
     });
     await voteButton.focus();
     await voteButton.press("Enter");
@@ -545,6 +560,18 @@ test.describe("public voting flow", () => {
       "data-vote-inflight",
       "true",
     );
+
+    // Releasing the held probe resolves it against a form that is no longer
+    // in flight — the probe callback's guard must refuse the late submit.
+    const probeSettled = page.waitForResponse(
+      (candidate) =>
+        candidate.url().endsWith("/favicon.svg") &&
+        candidate.request().method() === "HEAD",
+    );
+    releaseProbe?.();
+    await probeSettled;
+    await page.unroute("**/favicon.svg");
+    expect(postCount).toBe(0);
 
     let markGuardProbe;
     const guardProbe = new Promise((resolve) => {
@@ -655,6 +682,153 @@ test.describe("public voting flow", () => {
     await page.getByRole("button", { name: "VOTE" }).click();
     await expect(page).toHaveTitle("Counted — Offline ballot?");
     expect(postCount).toBe(1);
+  });
+
+  test("keeps the ballot safe when the probe fails though navigator.onLine is true", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Dead uplink?");
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    let postCount = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === created.path
+      ) {
+        postCount += 1;
+      }
+    });
+
+    // navigator.onLine stays true (the Firefox / captive-portal blind spot);
+    // aborting the favicon probe is the dead uplink the submit must survive.
+    await page.route("**/favicon.svg", (route) => route.abort());
+
+    const offlineOutcome = page.locator("[data-offline-outcome]");
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(offlineOutcome).toHaveText(
+      "No connection. Your ballot is safe on this page; nothing has been sent yet.",
+    );
+    await expect(offlineOutcome).toBeFocused();
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    expect(postCount).toBe(0);
+
+    await page.unroute("**/favicon.svg");
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle("Counted — Dead uplink?");
+    expect(postCount).toBe(1);
+  });
+
+  test("mints a fresh submission id when the 10s restore fires on a held POST", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Slow count?");
+    await page.goto(created.path);
+    const submissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(submissionId);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    let postCount = 0;
+    await page.route(`**${created.path}`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      postCount += 1;
+      // A 204 answers the POST without committing a navigation: the document
+      // (and its 10s restore timer) stays alive, as with any lost response.
+      await route.fulfill({ status: 204 });
+    });
+
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page.getByRole("button", { name: "COUNTING…" })).toBeDisabled();
+    await expect
+      .poll(() => postCount, "the intercepted POST left the page")
+      .toBe(1);
+
+    // The response is lost from the page's perspective, so the 10s restore
+    // fires: the form unlocks with a FRESH submission id — an edited
+    // resubmit can never dead-end in IDEMPOTENCY_CONFLICT if the original
+    // request still committed server-side.
+    await page.waitForTimeout(10_500);
+    const restored = await page.evaluate(() => {
+      const button = document.querySelector('button[type="submit"]');
+      const input = document.querySelector('input[name="submission_id"]');
+      const form = document.querySelector("form[data-vote-form]");
+      return {
+        buttonDisabled: button ? button.disabled : null,
+        buttonLabel: button?.textContent?.trim() ?? null,
+        inFlight: form?.getAttribute("data-vote-inflight") ?? null,
+        submissionId: input?.getAttribute("value") ?? "",
+      };
+    });
+    expect(restored).toMatchObject({
+      buttonDisabled: false,
+      buttonLabel: "VOTE",
+    });
+    expect(restored.inFlight).not.toBe("true");
+    assertUuid(restored.submissionId);
+    expect(restored.submissionId).not.toBe(submissionId);
+
+    // And the restored form's retry actually lands.
+    await page.unroute(`**${created.path}`);
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle("Counted — Slow count?");
+  });
+
+  test("suppresses the offline line on a rate-limit-locked form and reconciles it on pageshow", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Locked offline?");
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    const offlineOutcome = page.locator("[data-offline-outcome]");
+
+    // A locked form (the 429 re-render shape) already shows reload guidance;
+    // the offline line must not stack contradictory copy on it.
+    await page.evaluate(() => {
+      document
+        .querySelector("form[data-vote-form]")
+        ?.setAttribute("data-vote-locked", "true");
+      window.dispatchEvent(new Event("offline"));
+    });
+    await expect(offlineOutcome).toBeHidden();
+
+    // A bfcache-frozen page misses offline/online events; pageshow must
+    // reconcile the banner with the connectivity it wakes up to.
+    await page.evaluate(() => {
+      document
+        .querySelector("form[data-vote-form]")
+        ?.setAttribute("data-vote-locked", "false");
+      Object.defineProperty(navigator, "onLine", {
+        get: () => false,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("offline"));
+    });
+    await expect(offlineOutcome).toBeVisible();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "onLine", {
+        get: () => true,
+        configurable: true,
+      });
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+    });
+    await expect(offlineOutcome).toBeHidden();
   });
 
   test("counts a double-clicked submission exactly once", async ({

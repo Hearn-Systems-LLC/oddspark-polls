@@ -79,11 +79,20 @@ const showOfflineOutcome = (moveFocus: boolean): void => {
   if (!offlineOutcome || !offlineHeading || !offlineBody) {
     return;
   }
+  // A rate-limit-locked form (429) already shows its own outcome with
+  // reload guidance; the offline line would stack contradictory copy on it.
+  if (form?.dataset.voteLocked === "true") {
+    return;
+  }
   offlineOutcome.setAttribute("aria-live", moveFocus ? "off" : "polite");
-  offlineOutcome.hidden = false;
-  offlineHeading.textContent = offlineOutcome.dataset.offlineHeadingCopy ?? "";
-  const body = offlineOutcome.dataset.offlineBodyCopy ?? "";
-  offlineBody.textContent = body ? ` ${body}` : "";
+  if (offlineOutcome.hidden) {
+    offlineOutcome.hidden = false;
+    offlineHeading.textContent = offlineOutcome.dataset.offlineHeadingCopy ?? "";
+    const body = offlineOutcome.dataset.offlineBodyCopy ?? "";
+    offlineBody.textContent = body ? ` ${body}` : "";
+  }
+  // Already visible: rewriting textContent would re-announce the line on
+  // every connectivity flap; only focus (submit-attempt) still applies.
   if (moveFocus) {
     offlineOutcome.focus();
   }
@@ -130,6 +139,15 @@ if (form) {
     }
   };
 
+  // In flight the ballot is frozen: block only selection-changing keys so
+  // browser shortcuts (reload, Escape, Home/End) keep working.
+  const selectionKeys = new Set([
+    " ",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+  ]);
   for (const option of options) {
     option.addEventListener("change", () => {
       if (form.dataset.voteInflight === "true") {
@@ -143,14 +161,17 @@ if (form) {
     option.addEventListener("keydown", (event) => {
       if (
         form.dataset.voteInflight === "true" &&
-        event.key !== "Tab" &&
-        event.key !== "Shift"
+        selectionKeys.has(event.key)
       ) {
         event.preventDefault();
       }
     });
   }
   syncSelectionState();
+
+  const submissionIdInput = form.querySelector<HTMLInputElement>(
+    'input[name="submission_id"]',
+  );
 
   let restoreTimer = 0;
   const restoreIdleState = (): void => {
@@ -164,18 +185,7 @@ if (form) {
     syncSelectionState();
   };
 
-  form.addEventListener("submit", (event) => {
-    if (!navigator.onLine) {
-      event.preventDefault();
-      restoreIdleState();
-      showOfflineOutcome(true);
-      return;
-    }
-    if (form.dataset.voteInflight === "true") {
-      event.preventDefault();
-      return;
-    }
-    hideOfflineOutcome();
+  const beginInFlight = (): void => {
     inFlightSelection = new Set(
       options.filter((option) => option.checked).map((option) => option.value),
     );
@@ -187,12 +197,89 @@ if (form) {
     }
     // Esc/stop mid-POST fires no pageshow. A completed navigation discards
     // this timer with the document; an aborted one restores the usable form.
-    restoreTimer = window.setTimeout(restoreIdleState, 10_000);
+    // A TIMED restore cannot tell an aborted POST from a slow one — the
+    // request may still commit — so the restored form gets a FRESH
+    // submission_id: an edited resubmit under the original id would dead-end
+    // in IDEMPOTENCY_CONFLICT, while a fresh id turns a committed original
+    // into a clean already_voted and an uncommitted one into a normal vote.
+    // pageshow/bfcache restore keeps the original id: that path only runs
+    // after the response page existed, so exact replay (AD-7) must stay
+    // possible with the id the server saw.
+    restoreTimer = window.setTimeout(() => {
+      restoreIdleState();
+      if (submissionIdInput) {
+        submissionIdInput.value = crypto.randomUUID();
+      }
+    }, 10_000);
+  };
+
+  // navigator.onLine lies outside Chromium (Firefox reports true unless
+  // "Work Offline" is chosen; captive portals and dead uplinks read true
+  // everywhere), so connectivity is proven with a real same-origin probe
+  // before the POST is allowed to navigate. A tiny static asset keeps the
+  // probe free of Worker-side effects; cache: "no-store" defeats caching,
+  // and an HTTPS captive portal cannot forge a passing response.
+  const probeConnectivity = async (): Promise<boolean> => {
+    try {
+      const response = await fetch("/favicon.svg", {
+        method: "HEAD",
+        cache: "no-store",
+        signal: AbortSignal.timeout(3_000),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+
+  form.addEventListener("submit", (event) => {
+    if (form.dataset.voteInflight === "true") {
+      event.preventDefault();
+      return;
+    }
+    // With JS active the script owns submission: always preventDefault,
+    // probe, then form.submit() (native submit skips the submit event, so
+    // no recursion). Without JS the browser's native POST is the floor.
+    event.preventDefault();
+    if (!navigator.onLine) {
+      restoreIdleState();
+      showOfflineOutcome(true);
+      return;
+    }
+    hideOfflineOutcome(voteButton ?? undefined);
+    beginInFlight();
+    void probeConnectivity().then((reachable) => {
+      // A restore (pageshow, 10s timer) may have run while the probe was
+      // pending; only a still-locked form may proceed to the real POST.
+      if (form.dataset.voteInflight !== "true") {
+        return;
+      }
+      if (!reachable) {
+        // The POST never left — the original submission_id is still unused,
+        // so a plain restore (no fresh id) is the safe retry path.
+        restoreIdleState();
+        showOfflineOutcome(true);
+        return;
+      }
+      form.submit();
+    });
   });
 
-  window.addEventListener("pageshow", restoreIdleState);
-  window.addEventListener("offline", () => {
+  window.addEventListener("pageshow", () => {
     restoreIdleState();
+    // A bfcache-frozen page misses offline/online events; reconcile the
+    // banner with reality on resume so a stale "No connection" line cannot
+    // outlive the outage (and a missed outage still surfaces).
+    if (navigator.onLine) {
+      hideOfflineOutcome();
+    } else {
+      showOfflineOutcome(false);
+    }
+  });
+  window.addEventListener("offline", () => {
+    // Message only — never touch the in-flight lock here. The POST's fate
+    // is unknown; unlocking would invite an edited resubmit under the
+    // original submission_id (the IDEMPOTENCY_CONFLICT dead end).
     showOfflineOutcome(false);
   });
   window.addEventListener("online", () =>

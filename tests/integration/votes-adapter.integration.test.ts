@@ -413,7 +413,7 @@ describe("createVotePersistence", () => {
 });
 
 describe("castVote with the D1 adapter", () => {
-  it("returns an identical replay without adding facts or incrementing version twice", async () => {
+  it("keeps the original committed outcome replayable after a divergent retry", async () => {
     await insertPoll();
     const deps = castVoteDeps();
 
@@ -433,6 +433,12 @@ describe("castVote with the D1 adapter", () => {
     ).resolves.toMatchObject({
       ok: false,
       error: { code: "idempotency_conflict" },
+    });
+    // A rejected edited-ballot retry does not poison the original idempotency
+    // key: an exact replay still recovers the one stored outcome.
+    await expect(castVote(deps, integratedCommand)).resolves.toMatchObject({
+      ok: true,
+      value: { existing: true, voteId: "integrated-vote-1" },
     });
     expect(await counts()).toEqual({
       votes: 1,

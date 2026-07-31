@@ -99,6 +99,10 @@ type VoteOutcomeView = {
   body: string;
   code: string;
   heading: string;
+  time: {
+    placeholder: "{deadline}" | "{when}";
+    timestampMs: number;
+  } | null;
   titlePrefix: string;
   tone: "confirmation" | "rejection";
 };
@@ -114,22 +118,30 @@ const formatUtc = (timestampMs: number): string =>
     timeZoneName: "short",
   }).format(timestampMs);
 
-const countedBody = (currentPoll: PollPage): string => {
+const countedBody = (
+  currentPoll: PollPage,
+): Pick<VoteOutcomeView, "body" | "time"> => {
   if (currentPoll.resultVisibility === "live") {
-    return VOTE_COPY.countedLive;
+    return { body: VOTE_COPY.countedLive, time: null };
   }
   if (currentPoll.resultVisibility === "creator_only") {
-    return VOTE_COPY.countedCreatorOnly;
+    return { body: VOTE_COPY.countedCreatorOnly, time: null };
   }
   if (currentPoll.deadlineMs === null) {
     // No deadline: substituting "the Poll closes" for {deadline} rendered
     // "the Poll closes — the Poll closes." Drop the deadline clause instead.
-    return VOTE_COPY.countedAfterClose.replace(" — {deadline}", "");
+    return {
+      body: VOTE_COPY.countedAfterClose.replace(" — {deadline}", ""),
+      time: null,
+    };
   }
-  return VOTE_COPY.countedAfterClose.replace(
-    "{deadline}",
-    formatUtc(currentPoll.deadlineMs),
-  );
+  return {
+    body: VOTE_COPY.countedAfterClose,
+    time: {
+      placeholder: "{deadline}",
+      timestampMs: currentPoll.deadlineMs,
+    },
+  };
 };
 
 // VOTE_COPY is the single source for outcome strings. Each catalog entry is
@@ -156,14 +168,18 @@ const outcomeFromError = (
       return {
         code: error.code,
         ...splitCopy(VOTE_COPY.alreadyVoted),
+        time: null,
         titlePrefix: "Already voted",
         tone: "rejection",
       };
     case "poll_closed": {
-      const when = formatUtc(error.closedAtMs ?? Date.now());
       return {
         code: error.code,
-        ...splitCopy(VOTE_COPY.pollClosed.replace("{when}", when)),
+        ...splitCopy(VOTE_COPY.pollClosed),
+        time: {
+          placeholder: "{when}",
+          timestampMs: error.closedAtMs ?? Date.now(),
+        },
         titlePrefix: "Poll closed",
         tone: "rejection",
       };
@@ -172,6 +188,7 @@ const outcomeFromError = (
       return {
         code: error.code,
         ...splitCopy(VOTE_COPY.selectionRequired),
+        time: null,
         titlePrefix: "Nothing selected",
         tone: "rejection",
       };
@@ -181,6 +198,7 @@ const outcomeFromError = (
       return {
         code: error.code,
         ...splitCopy(VOTE_COPY.idempotencyConflict),
+        time: null,
         titlePrefix: "Vote already counted",
         tone: "rejection",
       };
@@ -191,6 +209,7 @@ const outcomeFromError = (
       return {
         code: error.code,
         ...splitCopy(error.message),
+        time: null,
         titlePrefix: "Vote not counted",
         tone: "rejection",
       };
@@ -198,6 +217,7 @@ const outcomeFromError = (
       return {
         code: error.code,
         ...splitCopy(VOTE_COPY.retry),
+        time: null,
         titlePrefix: "Vote not counted",
         tone: "rejection",
       };
@@ -214,6 +234,7 @@ const rateLimitedOutcome = (): VoteOutcomeView => {
       "Give it a minute.",
       "Give it a minute, then reload this page.",
     ),
+    time: null,
     titlePrefix: "Too many Votes",
     tone: "rejection",
   };
@@ -405,8 +426,12 @@ if (poll && method === "POST") {
   }
 
   if (outcome !== null) {
-    // After a FAILED POST the hidden submission_id may be a permanently
-    // conflicting id — mint a fresh one; the voter's selection is preserved.
+    // Rejected submissions store no idempotency record, so every 422/429
+    // re-render can safely mint a fresh id while preserving the ballot. A
+    // reused id with an edited ballot could otherwise become a permanent
+    // IDEMPOTENCY_CONFLICT. If a committed response was lost, this branch
+    // never rendered: the original page still holds the original id, and an
+    // exact resubmit recovers the stored outcome by design (AD-7).
     submissionId = crypto.randomUUID();
     // The retry the copy promises must actually work: a missing voter cookie
     // (expired/cleared/blocked) is re-issued on the error re-render, not
@@ -473,7 +498,7 @@ if (poll && method === "POST") {
           outcome = {
             code: "counted",
             heading: VOTE_COPY.counted,
-            body: countedBody(poll),
+            ...countedBody(poll),
             titlePrefix: "Counted",
             tone: "confirmation",
           };
@@ -490,8 +515,9 @@ if (poll && method === "POST") {
     const closedAtMs = poll.closedAtMs ?? poll.deadlineMs ?? Date.now();
     outcome = {
       code: "poll_closed_get",
-      heading: VOTE_COPY.closedOnGet.replace("{when}", formatUtc(closedAtMs)),
+      heading: VOTE_COPY.closedOnGet,
       body: "",
+      time: { placeholder: "{when}", timestampMs: closedAtMs },
       titlePrefix: "Poll closed",
       tone: "rejection",
     };
@@ -538,6 +564,31 @@ const title = !poll
   : outcome
     ? `${outcome.titlePrefix} — ${poll.question}`
     : `${poll.question} — Oddspark Polls`;
+
+const splitTimedText = (
+  text: string,
+  time: VoteOutcomeView["time"],
+): [string, string] | null => {
+  if (time === null) {
+    return null;
+  }
+  const tokenIndex = text.indexOf(time.placeholder);
+  if (tokenIndex < 0) {
+    return null;
+  }
+  return [
+    text.slice(0, tokenIndex),
+    text.slice(tokenIndex + time.placeholder.length),
+  ];
+};
+
+const outcomeHeadingTime = outcome
+  ? splitTimedText(outcome.heading, outcome.time)
+  : null;
+const outcomeBodyTime = outcome
+  ? splitTimedText(outcome.body, outcome.time)
+  : null;
+const offlineCopy = splitCopy(VOTE_COPY.offline);
 ---
 
 <BaseLayout title={title}>
@@ -545,6 +596,21 @@ const title = !poll
     {
       poll ? (
         <>
+          {!readOnly && (
+            <p
+              class="vote-outcome is-rejection"
+              data-offline-outcome
+              data-offline-heading-copy={offlineCopy.heading}
+              data-offline-body-copy={offlineCopy.body}
+              tabindex="-1"
+              aria-live="polite"
+              aria-atomic="true"
+              hidden
+            >
+              <strong data-offline-outcome-heading></strong>
+              <span data-offline-outcome-body></span>
+            </p>
+          )}
           {outcome && (
             <p
               class:list={[
@@ -556,9 +622,55 @@ const title = !poll
               tabindex="-1"
               autofocus
             >
-              <strong>{outcome.heading}</strong>
-              {outcome.body && <> {" "}{outcome.body}</>}
+              <strong>
+                {outcomeHeadingTime && outcome.time ? (
+                  <>
+                    {outcomeHeadingTime[0]}
+                    <time
+                      datetime={new Date(outcome.time.timestampMs).toISOString()}
+                      data-deadline={outcome.time.timestampMs}
+                    >
+                      {formatUtc(outcome.time.timestampMs)}
+                    </time>
+                    {outcomeHeadingTime[1]}
+                  </>
+                ) : (
+                  outcome.heading
+                )}
+              </strong>
+              {outcome.body && (
+                <>
+                  {" "}
+                  {outcomeBodyTime && outcome.time ? (
+                    <>
+                      {outcomeBodyTime[0]}
+                      <time
+                        datetime={new Date(outcome.time.timestampMs).toISOString()}
+                        data-deadline={outcome.time.timestampMs}
+                      >
+                        {formatUtc(outcome.time.timestampMs)}
+                      </time>
+                      {outcomeBodyTime[1]}
+                    </>
+                  ) : (
+                    outcome.body
+                  )}
+                </>
+              )}
             </p>
+          )}
+          {!readOnly && poll.deadlineMs !== null && (
+            <div class="poll-meta">
+              <div class="poll-deadline">
+                <time
+                  datetime={new Date(poll.deadlineMs).toISOString()}
+                  data-deadline={poll.deadlineMs}
+                >
+                  {formatUtc(poll.deadlineMs)}
+                </time>
+                <span data-deadline-countdown hidden></span>
+              </div>
+            </div>
           )}
           <h1 class="poll-question">{poll.question}</h1>
           {poll.description && <p class="poll-description">{poll.description}</p>}
@@ -624,7 +736,7 @@ const title = !poll
       )
     }
   </main>
-  {poll && !readOnly && <script src="../scripts/vote-form.ts"></script>}
+  {poll && <script src="../scripts/vote-form.ts"></script>}
 </BaseLayout>
 
 <style>
@@ -632,6 +744,29 @@ const title = !poll
     width: min(100%, var(--space-measure));
     margin-inline: auto;
     padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  .poll-meta {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--space-4);
+  }
+
+  .poll-deadline {
+    display: grid;
+    gap: var(--space-1);
+    justify-items: end;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-align: right;
+    text-transform: uppercase;
+  }
+
+  .poll-deadline [hidden] {
+    display: none;
   }
 
   .poll-question {
@@ -660,6 +795,15 @@ const title = !poll
     list-style: none;
   }
 
+  [data-vote-form][data-vote-inflight="true"] .poll-options {
+    pointer-events: none;
+  }
+
+  [data-vote-form][data-vote-inflight="true"] :global(.vote-button) {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
   .vote-outcome {
     margin: 0 0 var(--space-6);
     color: var(--color-text);
@@ -674,6 +818,10 @@ const title = !poll
 
   .vote-outcome.is-rejection strong {
     color: var(--color-alarm);
+  }
+
+  .vote-outcome[hidden] {
+    display: none;
   }
 
   .vote-action {

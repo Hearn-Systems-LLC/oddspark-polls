@@ -3,6 +3,7 @@ import {
   classifyAuthProviderOutcome,
   emitTelemetry,
   isForbiddenTelemetryKey,
+  telemetryResultForStatus,
   type TelemetryRecord,
 } from "../../src/adapters/telemetry/index";
 
@@ -97,5 +98,28 @@ describe("telemetry adapter", () => {
       classifyAuthProviderOutcome("/api/auth/callback/google", 500, null),
     ).toBe("error");
     expect(classifyAuthProviderOutcome("/creator", 200, null)).toBe("none");
+  });
+
+  it("records vote rejections (422) and rate limits (429) as errors, not ok", () => {
+    expect(telemetryResultForStatus(422)).toBe("error");
+    expect(telemetryResultForStatus(429)).toBe("error");
+  });
+
+  it("keeps the existing 403/404/5xx result mapping unchanged", () => {
+    expect(telemetryResultForStatus(403)).toBe("csrf_rejected");
+    expect(telemetryResultForStatus(404)).toBe("not_found");
+    expect(telemetryResultForStatus(500)).toBe("error");
+    expect(telemetryResultForStatus(502)).toBe("error");
+  });
+
+  it("records ordinary successes and redirects as ok", () => {
+    expect(telemetryResultForStatus(200)).toBe("ok");
+    expect(telemetryResultForStatus(301)).toBe("ok");
+    expect(telemetryResultForStatus(303)).toBe("ok");
+  });
+
+  it("marks any status as an error when the session lookup itself failed", () => {
+    expect(telemetryResultForStatus(200, true)).toBe("error");
+    expect(telemetryResultForStatus(404, true)).toBe("error");
   });
 });

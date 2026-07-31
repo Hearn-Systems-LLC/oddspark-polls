@@ -29,6 +29,11 @@ const {
 {
   readOnly ? (
     <div class:list={["poll-option", "poll-option-readonly", className]}>
+      {/* UX-DR2: the voter's own cast selection is marked with the ◆ glyph;
+          uncast rows render no marker at all. */}
+      {checked && (
+        <span class="poll-option-marker" aria-hidden="true"></span>
+      )}
       <span class="poll-option-text">
         <span class="poll-option-label">{label}</span>
         {description && <span class="poll-option-description">{description}</span>}
@@ -109,6 +114,11 @@ const {
   }
 
   .poll-option-input:checked + .poll-option-marker::before {
+    content: "◆";
+    color: var(--poll-option-marker-selected);
+  }
+
+  .poll-option-readonly .poll-option-marker::before {
     content: "◆";
     color: var(--poll-option-marker-selected);
   }

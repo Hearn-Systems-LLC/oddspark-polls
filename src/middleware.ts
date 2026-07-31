@@ -5,6 +5,7 @@ import {
   classifyAuthProviderOutcome,
   createRequestId,
   emitTelemetry,
+  telemetryResultForStatus,
 } from "./adapters/telemetry/index";
 import {
   checkCsrf,
@@ -273,14 +274,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
       }
 
       const status = response.status;
-      const result =
-        rc.sessionLookupFailed || status >= 500
-          ? "error"
-          : status === 403
-            ? "csrf_rejected"
-            : status === 404
-              ? "not_found"
-              : "ok";
+      const result = telemetryResultForStatus(status, rc.sessionLookupFailed);
 
       emitTelemetry({
         requestId: rc.requestId,

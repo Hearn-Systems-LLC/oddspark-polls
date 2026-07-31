@@ -30,7 +30,7 @@ import {
   type VoteApplicationError,
   type VotingPollTypeStrategy,
 } from "../modules/voting/index";
-import { effectivePollStatus } from "../shared/domain/index";
+import { effectivePollStatus, type PollType } from "../shared/domain/index";
 
 // Root-path poll page (AD-13): the canonical reference resolves here.
 // Story 1.5 keeps the public surface SSR/progressive-enhancement only: native
@@ -121,12 +121,33 @@ const countedBody = (currentPoll: PollPage): string => {
   if (currentPoll.resultVisibility === "creator_only") {
     return VOTE_COPY.countedCreatorOnly;
   }
+  if (currentPoll.deadlineMs === null) {
+    // No deadline: substituting "the Poll closes" for {deadline} rendered
+    // "the Poll closes — the Poll closes." Drop the deadline clause instead.
+    return VOTE_COPY.countedAfterClose.replace(" — {deadline}", "");
+  }
   return VOTE_COPY.countedAfterClose.replace(
     "{deadline}",
-    currentPoll.deadlineMs === null
-      ? "the Poll closes"
-      : formatUtc(currentPoll.deadlineMs),
+    formatUtc(currentPoll.deadlineMs),
   );
+};
+
+// VOTE_COPY is the single source for outcome strings. Each catalog entry is
+// "Heading — body." or "Heading. Body."; split here rather than re-encoding
+// the strings inline (they drift otherwise).
+const splitCopy = (copy: string): { heading: string; body: string } => {
+  const dashIndex = copy.indexOf(" — ");
+  if (dashIndex >= 0) {
+    return {
+      heading: copy.slice(0, dashIndex),
+      body: `— ${copy.slice(dashIndex + 3)}`,
+    };
+  }
+  const dotIndex = copy.indexOf(". ");
+  return {
+    heading: copy.slice(0, dotIndex + 1),
+    body: copy.slice(dotIndex + 2),
+  };
 };
 
 const outcomeFromError = (
@@ -136,8 +157,7 @@ const outcomeFromError = (
     case "already_voted":
       return {
         code: error.code,
-        heading: "You've already voted here.",
-        body: "Enthusiasm noted; the Tally is unchanged.",
+        ...splitCopy(VOTE_COPY.alreadyVoted),
         titlePrefix: "Already voted",
         tone: "rejection",
       };
@@ -145,8 +165,7 @@ const outcomeFromError = (
       const when = formatUtc(error.closedAtMs ?? Date.now());
       return {
         code: error.code,
-        heading: "This Poll closed while you were deciding",
-        body: `— ${when}. Your Vote wasn't recorded.`,
+        ...splitCopy(VOTE_COPY.pollClosed.replace("{when}", when)),
         titlePrefix: "Poll closed",
         tone: "rejection",
       };
@@ -154,29 +173,82 @@ const outcomeFromError = (
     case "selection_required":
       return {
         code: error.code,
-        heading: "Nothing's selected.",
-        body: "Pick an option, then vote.",
+        ...splitCopy(VOTE_COPY.selectionRequired),
         titlePrefix: "Nothing selected",
+        tone: "rejection",
+      };
+    case "idempotency_conflict":
+      // A permanent conflict: the earlier Vote stands. This must never fall
+      // into the generic "wasn't recorded" retry copy.
+      return {
+        code: error.code,
+        ...splitCopy(VOTE_COPY.idempotencyConflict),
+        titlePrefix: "Vote already counted",
         tone: "rejection",
       };
     default:
       return {
         code: error.code,
-        heading: "That didn't land.",
-        body:
-          "The Vote wasn't recorded and your ballot is still here, exactly as you left it. Try again — and if it keeps failing, the Poll will still be here in a minute.",
+        ...splitCopy(VOTE_COPY.retry),
         titlePrefix: "Vote not counted",
         tone: "rejection",
       };
   }
 };
 
+const rateLimitedOutcome = (): VoteOutcomeView => {
+  const { heading, body } = splitCopy(VOTE_COPY.rateLimited);
+  return {
+    code: "rate_limited",
+    heading,
+    // The locked form is a dead end without a reload — say so (no-JS floor).
+    body: body.replace(
+      "Give it a minute.",
+      "Give it a minute, then reload this page.",
+    ),
+    titlePrefix: "Too many Votes",
+    tone: "rejection",
+  };
+};
+
 const formSchema = z.object({
   submissionId: z.string().refine(isUuidShape),
-  selectedOptionIds: z.array(z.string()),
+  // Bounded before any hashing: forged bodies with thousands of entries are
+  // rejected at the schema, not after paying the sort/hash cost.
+  selectedOptionIds: z.array(z.string()).max(16),
 });
 
-let voterToken = Astro.cookies.get(VOTER_COOKIE_NAME)?.value ?? null;
+const issueVoterCookie = (): void => {
+  voterToken = createVoterToken();
+  Astro.cookies.set(VOTER_COOKIE_NAME, voterToken, {
+    httpOnly: true,
+    maxAge: VOTER_COOKIE_MAX_AGE_SECONDS,
+    path: "/",
+    sameSite: "lax",
+    secure: Astro.url.protocol === "https:",
+  });
+};
+
+// The one-shot "Counted." flash carries an HMAC, never the raw internal
+// Poll ID: scoped to the Poll and unforgeable without the digest secret.
+// The "session" check kind is reused with the Poll ID as the token input —
+// the value is compared only against this same recomputation.
+const flashDigestFor = (pollId: PollPage["pollId"]): Promise<string> =>
+  createVoteDigest(env.VOTE_DIGEST_SECRET, {
+    pollId,
+    checkKind: "session",
+    token: pollId,
+  });
+
+const VOTER_TOKEN_SHAPE = /^[a-f0-9]{32}$/;
+
+const cookieVoterToken = Astro.cookies.get(VOTER_COOKIE_NAME)?.value ?? null;
+// A present-but-malformed voter cookie is treated as absent — never HMAC'd
+// into a stable garbage identity — so it is re-issued below instead.
+let voterToken =
+  cookieVoterToken !== null && VOTER_TOKEN_SHAPE.test(cookieVoterToken)
+    ? cookieVoterToken
+    : null;
 let submissionId = crypto.randomUUID();
 let selectedOptionIds: string[] = [];
 let outcome: VoteOutcomeView | null = null;
@@ -184,136 +256,200 @@ let readOnly = false;
 let actionDisabled = false;
 
 if (poll && method === "POST") {
+  // A missing/blank digest secret is a deploy misconfiguration, not a
+  // voter-correctable rejection: fail loud as a 500 (telemetry records an
+  // error) instead of a 422 "Try again" that could never succeed.
+  if (
+    typeof env.VOTE_DIGEST_SECRET !== "string" ||
+    env.VOTE_DIGEST_SECRET.trim().length === 0
+  ) {
+    return new Response("Voting is unavailable.", {
+      status: 500,
+      headers: { "cache-control": "private, no-store" },
+    });
+  }
   try {
     const formData = await Astro.request.formData();
     const text = (entry: FormDataEntryValue | null): string =>
       typeof entry === "string" ? entry : "";
-    const parsed = formSchema.parse({
+    // The ballot is read before validation so a forged/tampered field still
+    // re-renders with the voter's selection preserved.
+    selectedOptionIds = formData.getAll("option_id").map(text);
+    const parsed = formSchema.safeParse({
       submissionId: text(formData.get("submission_id")),
-      selectedOptionIds: formData.getAll("option_id").map(text),
+      selectedOptionIds,
     });
-    submissionId = parsed.submissionId;
-    selectedOptionIds = parsed.selectedOptionIds;
-
-    const admitted = await allowVoteSubmission(
-      env.VOTE_RATE_LIMITER,
-      Astro.request.headers.get("cf-connecting-ip"),
-      poll.pollId,
-    );
-    if (!admitted) {
-      outcome = {
-        code: "rate_limited",
-        heading: "Too many Votes from here, too quickly.",
-        body:
-          "Give it a minute. If you're a person, this shouldn't have happened, and we're sorry it did.",
-        titlePrefix: "Too many Votes",
-        tone: "rejection",
-      };
-      actionDisabled = true;
-      Astro.response.status = 429;
+    if (!parsed.success) {
+      outcome = outcomeFromError({
+        code: "vote_failed",
+        message: VOTE_COPY.retry,
+      });
+      Astro.response.status = 422;
     } else {
-      const strategyFor = (): VotingPollTypeStrategy | null => {
-        const { validateSubmission, persistFacts } = multipleChoiceStrategy;
-        return validateSubmission && persistFacts
-          ? { validateSubmission, persistFacts }
-          : null;
-      };
-      const result = await castVote(
-        {
-          findPoll: votePersistence.findPoll,
-          findVoteBySubmission: votePersistence.findVoteBySubmission,
-          strategyFor,
-          createDigest: (input) =>
-            createVoteDigest(env.VOTE_DIGEST_SECRET ?? "", input),
-          hashPayload: sha256Hex,
-          persistVote: votePersistence.insertVote,
-          generateId: () => crypto.randomUUID(),
-          nowMs: () => Date.now(),
-        },
-        {
-          pollId: poll.pollId,
-          submissionId,
-          selectedOptionIds,
-          browserToken: voterToken,
-        },
-      );
+      const submittedId = parsed.data.submissionId;
 
-      if (result.ok) {
-        Astro.cookies.set(FLASH_COOKIE_NAME, poll.pollId, {
-          httpOnly: true,
-          maxAge: 60,
-          path: "/",
-          sameSite: "lax",
-          secure: Astro.url.protocol === "https:",
-        });
-        return new Response(null, {
-          status: 303,
-          headers: {
-            location: `/${reference}`,
-            "cache-control": "private, no-store",
-          },
-        });
-      }
-      if (result.error.code === "poll_deleted") {
-        poll = null;
-        Astro.response.status = 404;
+      // Replay adjudication precedes the limiter: replays of an existing
+      // submission_id are the designed exactly-once path — they must not
+      // consume limiter budget or be 429'd; castVote adjudicates them.
+      const existing = await votePersistence.findVoteBySubmission(
+        poll.pollId,
+        submittedId,
+      );
+      const admitted =
+        existing !== null ||
+        (await allowVoteSubmission(
+          env.VOTE_RATE_LIMITER,
+          Astro.request.headers.get("cf-connecting-ip"),
+          poll.pollId,
+        ));
+      if (!admitted) {
+        outcome = rateLimitedOutcome();
+        actionDisabled = true;
+        Astro.response.status = 429;
+        Astro.response.headers.set("retry-after", "60");
       } else {
-        outcome = outcomeFromError(result.error);
-        readOnly =
-          result.error.code === "already_voted" ||
-          result.error.code === "poll_closed";
-        Astro.response.status = 422;
+        // Strategy resolution honors the stored poll type: unknown types
+        // fail closed inside castVote (vote_failed), never validated as
+        // multiple choice.
+        const strategyFor = (
+          pollType: PollType,
+        ): VotingPollTypeStrategy | null => {
+          if (pollType !== "multiple_choice") {
+            return null;
+          }
+          const { validateSubmission, persistFacts } = multipleChoiceStrategy;
+          return validateSubmission && persistFacts
+            ? { validateSubmission, persistFacts }
+            : null;
+        };
+        const result = await castVote(
+          {
+            findPoll: votePersistence.findPoll,
+            findVoteBySubmission: votePersistence.findVoteBySubmission,
+            strategyFor,
+            createDigest: (input) =>
+              createVoteDigest(env.VOTE_DIGEST_SECRET, input),
+            hashPayload: sha256Hex,
+            persistVote: votePersistence.insertVote,
+            generateId: () => crypto.randomUUID(),
+            nowMs: () => Date.now(),
+          },
+          {
+            pollId: poll.pollId,
+            submissionId: submittedId,
+            selectedOptionIds,
+            browserToken: voterToken,
+          },
+        );
+
+        if (result.ok) {
+          Astro.cookies.set(FLASH_COOKIE_NAME, await flashDigestFor(poll.pollId), {
+            httpOnly: true,
+            maxAge: 60,
+            path: "/",
+            sameSite: "lax",
+            secure: Astro.url.protocol === "https:",
+          });
+          return new Response(null, {
+            status: 303,
+            headers: {
+              location: `/${reference}`,
+              "cache-control": "private, no-store",
+            },
+          });
+        }
+        if (result.error.code === "poll_deleted") {
+          poll = null;
+          Astro.response.status = 404;
+        } else {
+          outcome = outcomeFromError(result.error);
+          readOnly =
+            result.error.code === "already_voted" ||
+            result.error.code === "poll_closed";
+          Astro.response.status = 422;
+        }
       }
     }
   } catch {
-    outcome = outcomeFromError({
-      code: "vote_failed",
-      message: VOTE_COPY.retry,
-    });
-    Astro.response.status = 422;
-  }
-} else if (poll && (method === "GET" || method === "HEAD")) {
-  if (method === "GET" && voterToken === null) {
-    voterToken = createVoterToken();
-    Astro.cookies.set(VOTER_COOKIE_NAME, voterToken, {
-      httpOnly: true,
-      maxAge: VOTER_COOKIE_MAX_AGE_SECONDS,
-      path: "/",
-      sameSite: "lax",
-      secure: Astro.url.protocol === "https:",
+    // Unexpected exceptions are infrastructure failures — 500, never the
+    // voter-correctable 422. 422 is reserved for domain-mapped outcomes.
+    return new Response("Something went wrong.", {
+      status: 500,
+      headers: { "cache-control": "private, no-store" },
     });
   }
 
-  const flash = Astro.cookies.get(FLASH_COOKIE_NAME)?.value;
-  if (flash === poll.pollId) {
-    Astro.cookies.delete(FLASH_COOKIE_NAME, { path: "/" });
-    outcome = {
-      code: "counted",
-      heading: VOTE_COPY.counted,
-      body: countedBody(poll),
-      titlePrefix: "Counted",
-      tone: "confirmation",
-    };
-    readOnly = true;
-  } else if (effectivePollStatus(poll, Date.now()) === "closed") {
+  if (outcome !== null) {
+    // After a FAILED POST the hidden submission_id may be a permanently
+    // conflicting id — mint a fresh one; the voter's selection is preserved.
+    submissionId = crypto.randomUUID();
+    // The retry the copy promises must actually work: a missing voter cookie
+    // (expired/cleared/blocked) is re-issued on the error re-render, not
+    // only on GET, or every retry fails identically with
+    // session_token_missing.
+    if (voterToken === null) {
+      issueVoterCookie();
+    }
+  }
+} else if (poll && (method === "GET" || method === "HEAD")) {
+  if (method === "GET" && voterToken === null) {
+    issueVoterCookie();
+  }
+
+  // One digest for the current browser token, reused by the already-voted
+  // lookup and the read-only selection marker below.
+  let voterDigest: string | null = null;
+  if (voterToken !== null) {
+    try {
+      voterDigest = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
+        pollId: poll.pollId,
+        checkKind: "session",
+        token: voterToken,
+      });
+    } catch {
+      // The Poll stays readable; a submission will surface the retry outcome
+      // until the missing/misconfigured secret is restored.
+    }
+  }
+
+  // The one-shot flash is consumed on GET only — a prefetcher HEAD must not
+  // eat the "Counted." confirmation.
+  if (method === "GET") {
+    const flash = Astro.cookies.get(FLASH_COOKIE_NAME)?.value;
+    if (flash) {
+      try {
+        if (flash === (await flashDigestFor(poll.pollId))) {
+          Astro.cookies.delete(FLASH_COOKIE_NAME, { path: "/" });
+          outcome = {
+            code: "counted",
+            heading: VOTE_COPY.counted,
+            body: countedBody(poll),
+            titlePrefix: "Counted",
+            tone: "confirmation",
+          };
+          readOnly = true;
+        }
+      } catch {
+        // A stale flash from another Poll simply doesn't match; a
+        // misconfigured secret degrades to the states below.
+      }
+    }
+  }
+
+  if (outcome === null && effectivePollStatus(poll, Date.now()) === "closed") {
     const closedAtMs = poll.closedAtMs ?? poll.deadlineMs ?? Date.now();
     outcome = {
       code: "poll_closed_get",
-      heading: `This Poll closed ${formatUtc(closedAtMs)}.`,
+      heading: VOTE_COPY.closedOnGet.replace("{when}", formatUtc(closedAtMs)),
       body: "",
       titlePrefix: "Poll closed",
       tone: "rejection",
     };
     readOnly = true;
-  } else if (voterToken !== null) {
+  } else if (outcome === null && voterDigest !== null) {
     try {
-      const digest = await createVoteDigest(env.VOTE_DIGEST_SECRET ?? "", {
-        pollId: poll.pollId,
-        checkKind: "session",
-        token: voterToken,
-      });
       if (
-        await votePersistence.findClaim(poll.pollId, "session", digest)
+        await votePersistence.findClaim(poll.pollId, "session", voterDigest)
       ) {
         outcome = outcomeFromError({
           code: "already_voted",
@@ -322,8 +458,22 @@ if (poll && method === "POST") {
         readOnly = true;
       }
     } catch {
-      // The Poll stays readable; a submission will surface the retry outcome
-      // until the missing/misconfigured secret is restored.
+      // Degrades to the open form; a submission surfaces the real outcome.
+    }
+  }
+
+  // Read-only GET states mark the voter's own cast selection (UX-DR2 ◆):
+  // resolve it through the claim → vote → selection chain. POST outcomes
+  // already carry the selection in scope and skip this lookup.
+  if (readOnly && voterDigest !== null) {
+    try {
+      selectedOptionIds = await votePersistence.findVoteSelectionByClaim(
+        poll.pollId,
+        "session",
+        voterDigest,
+      );
+    } catch {
+      // No marker; the state itself still renders.
     }
   }
 }
@@ -363,17 +513,20 @@ const title = !poll
           <h1 class="poll-question">{poll.question}</h1>
           {poll.description && <p class="poll-description">{poll.description}</p>}
           {readOnly ? (
-            <div class="poll-options" aria-label="Options">
+            <ul class="poll-options">
               {poll.options.map((option) => (
-                <PollOption
-                  id={`option-${option.id}`}
-                  name="option_id"
-                  value={option.id}
-                  label={option.label}
-                  readOnly
-                />
+                <li>
+                  <PollOption
+                    id={`option-${option.id}`}
+                    name="option_id"
+                    value={option.id}
+                    label={option.label}
+                    checked={selected.has(option.id)}
+                    readOnly
+                  />
+                </li>
               ))}
-            </div>
+            </ul>
           ) : (
             <form
               method="post"
@@ -399,7 +552,10 @@ const title = !poll
                 ))}
               </fieldset>
               <div class="vote-action">
-                <p class="vote-hint" data-vote-hint hidden={actionDisabled}>
+                {/* UX-DR8: the hint is a JS affordance — the server renders
+                    it hidden (no-JS shows an enabled button with no hint);
+                    vote-form.ts reveals/manages it when JS runs. */}
+                <p class="vote-hint" data-vote-hint hidden>
                   SELECT AN OPTION TO UNLOCK VOTE
                 </p>
                 <ButtonPrimary
@@ -448,6 +604,10 @@ const title = !poll
     margin: 0;
     padding: 0;
     border: 0;
+  }
+
+  .poll-options > li {
+    list-style: none;
   }
 
   .vote-outcome {

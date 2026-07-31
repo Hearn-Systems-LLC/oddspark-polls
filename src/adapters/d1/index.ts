@@ -364,6 +364,22 @@ export function createVotePersistence(db: D1Database) {
         .first<{ found: number }>();
       return row?.found === 1;
     },
+
+    // Read-only states mark the voter's own cast selection: resolve the
+    // claim to its vote, then to that vote's selected options.
+    async findVoteSelectionByClaim(
+      pollId: PollId,
+      checkKind: "session" | "ip",
+      digest: string,
+    ): Promise<PollOptionId[]> {
+      const rows = await db
+        .prepare(
+          "SELECT vs.poll_option_id AS poll_option_id FROM voter_claim vc JOIN vote_selection vs ON vs.vote_id = vc.vote_id WHERE vc.poll_id = ?1 AND vc.check_kind = ?2 AND vc.digest = ?3",
+        )
+        .bind(pollId, checkKind, digest)
+        .all<{ poll_option_id: PollOptionId }>();
+      return rows.results.map((row) => row.poll_option_id);
+    },
   };
 }
 

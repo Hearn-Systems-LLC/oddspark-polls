@@ -85,6 +85,30 @@ export function isForbiddenTelemetryKey(
 }
 
 /**
+ * The single status → result mapping for the per-request record. Vote
+ * rejections (422) and rate limits (429) are errors — recording them as
+ * "ok" would make the two rejection signals invisible.
+ */
+export function telemetryResultForStatus(
+  status: number,
+  sessionLookupFailed = false,
+): TelemetryResultCode {
+  if (sessionLookupFailed || status >= 500) {
+    return "error";
+  }
+  if (status === 403) {
+    return "csrf_rejected";
+  }
+  if (status === 404) {
+    return "not_found";
+  }
+  if (status === 422 || status === 429) {
+    return "error";
+  }
+  return "ok";
+}
+
+/**
  * Typed emit — the only supported way to write operation telemetry.
  * Uses console.log of a JSON object so Workers Logs can structure it.
  */

@@ -22,6 +22,7 @@ const NOW = 1_800_000_000_000;
 const POLL_ID = "poll-1" as PollId;
 const OPTION_A = "option-a" as PollOptionId;
 const OPTION_B = "option-b" as PollOptionId;
+const OPTION_C = "option-c" as PollOptionId;
 
 function poll(
   overrides: Partial<VotingPollSnapshot> = {},
@@ -34,6 +35,9 @@ function poll(
       { id: OPTION_B, label: "B", position: 1 },
     ],
     sessionChecksEnabled: true,
+    multiSelectEnabled: false,
+    minSelections: null,
+    maxSelections: null,
     deadlineMs: null,
     closedAtMs: null,
     ...overrides,
@@ -108,7 +112,7 @@ describe("normalizeVotePayload", () => {
         fc.string({ minLength: 1 }),
         fc
           .uniqueArray(fc.string({ minLength: 1 }), {
-            minLength: 1,
+            minLength: 2,
             maxLength: 8,
           })
           .chain((ids) =>
@@ -135,6 +139,74 @@ describe("normalizeVotePayload", () => {
 });
 
 describe("castVote", () => {
+  it("passes every required multi-select fact to strategy validation", async () => {
+    const validateSubmission = vi.fn(() => ({
+      ok: true as const,
+      value: { selectedOptionIds: [OPTION_A, OPTION_B] },
+    }));
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({
+          options: [
+            { id: OPTION_A, label: "A", position: 0 },
+            { id: OPTION_B, label: "B", position: 1 },
+            { id: OPTION_C, label: "C", position: 2 },
+          ],
+          multiSelectEnabled: true,
+          minSelections: 2,
+          maxSelections: 2,
+        }),
+      strategyFor: () => ({
+        validateSubmission,
+        persistFacts: (validated) => ({
+          selections: validated.selectedOptionIds.map((pollOptionId) => ({
+            pollOptionId,
+          })),
+        }),
+      }),
+    });
+
+    const result = await castVote(commandDeps, {
+      ...input,
+      selectedOptionIds: [OPTION_A, OPTION_B],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(validateSubmission).toHaveBeenCalledWith(
+      { selectedOptionIds: [OPTION_A, OPTION_B] },
+      {
+        options: [
+          { id: OPTION_A, label: "A", position: 0 },
+          { id: OPTION_B, label: "B", position: 1 },
+          { id: OPTION_C, label: "C", position: 2 },
+        ],
+        multiSelectEnabled: true,
+        minSelections: 2,
+        maxSelections: 2,
+      },
+    );
+    expect(commandDeps.persisted[0]?.contributions).toEqual([
+      {
+        kind: "vote_selection",
+        voteId: "vote-1",
+        pollOptionId: OPTION_A,
+      },
+      {
+        kind: "vote_selection",
+        voteId: "vote-1",
+        pollOptionId: OPTION_B,
+      },
+      {
+        kind: "voter_claim",
+        pollId: POLL_ID,
+        checkKind: "session",
+        digest: `digest:${POLL_ID}:session:browser-token`,
+        voteId: "vote-1",
+        createdAtMs: NOW,
+      },
+    ]);
+  });
+
   it("passes contributor output through to the batch untouched (domain seam only — adapter rendering lands with Story 4.1)", async () => {
     const commandDeps = deps({
       contributors: [
@@ -231,6 +303,30 @@ describe("castVote", () => {
 
     const result = await castVote(commandDeps, input);
     expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "idempotency_conflict",
+        message: VOTE_COPY.idempotencyConflict,
+      },
+    });
+  });
+
+  it("rejects a changed multi-select set replayed under the same submission id", async () => {
+    const storedPayload = normalizeVotePayload(POLL_ID, [OPTION_A, OPTION_B]);
+    const commandDeps = deps({
+      findVoteBySubmission: async () => ({
+        voteId: "stored-vote",
+        payloadHash: `hash:${storedPayload}`,
+        createdAtMs: NOW - 10,
+      }),
+    });
+
+    await expect(
+      castVote(commandDeps, {
+        ...input,
+        selectedOptionIds: [OPTION_A, OPTION_C],
+      }),
+    ).resolves.toEqual({
       ok: false,
       error: {
         code: "idempotency_conflict",
@@ -570,6 +666,43 @@ describe("castVote", () => {
     expect(commandDeps.persisted).toHaveLength(0);
   });
 
+  it.each([
+    [
+      "too_few_selections",
+      "Not enough selections. This Poll asks for at least 2, and your ballot is still here.",
+    ],
+    [
+      "too_many_selections",
+      "Too many selections. This Poll takes up to 3, and your ballot is still here.",
+    ],
+  ] as const)("passes through %s strategy copy unmodified", async (code, message) => {
+    const commandDeps = deps({
+      strategyFor: () => ({
+        validateSubmission: () => ({
+          ok: false,
+          error: {
+            code,
+            message,
+            fieldErrors: { selectedOptionIds: message },
+            reasonCodes: { selectedOptionIds: code },
+          },
+        }),
+        persistFacts: () => ({ selections: [] }),
+      }),
+    });
+
+    await expect(castVote(commandDeps, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code,
+        message,
+        fieldErrors: { selectedOptionIds: message },
+        reasonCodes: { selectedOptionIds: code },
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
   it.each<[string, Partial<CastVoteDeps>]>([
     [
       "the payload hash read",
@@ -657,7 +790,7 @@ describe("castVote", () => {
             value: {
               selectedOptionIds: [
                 submission.selectedOptionIds[0] as PollOptionId,
-              ] as readonly [PollOptionId],
+              ] as readonly PollOptionId[],
             },
           }),
           persistFacts: () => {
@@ -713,6 +846,10 @@ describe("VOTE_COPY", () => {
       offline:
         "No connection. Your ballot is safe on this page; nothing has been sent yet.",
       selectionRequired: "Nothing's selected. Pick an option, then vote.",
+      tooFewSelections:
+        "Not enough selections. This Poll asks for at least {min}, and your ballot is still here.",
+      tooManySelections:
+        "Too many selections. This Poll takes up to {max}, and your ballot is still here.",
       pollDeleted: "This Poll no longer exists.",
       idempotencyConflict:
         "Your earlier Vote stands — this change wasn't recorded.",

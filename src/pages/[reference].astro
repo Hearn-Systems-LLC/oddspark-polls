@@ -203,6 +203,8 @@ const outcomeFromError = (
         tone: "rejection",
       };
     case "invalid_selection":
+    case "too_few_selections":
+    case "too_many_selections":
       // The strategy's preserved message describes why THIS ballot can never
       // land — render it, not the retry idiom. (A blank strategy message
       // already fell back to retry copy inside castVote.)
@@ -559,6 +561,20 @@ if (!poll) {
 }
 
 const selected = new Set(selectedOptionIds);
+const multiSelect =
+  poll?.pollType === "multiple_choice" && poll.multiSelectEnabled;
+const effectiveMinSelections = multiSelect ? (poll.minSelections ?? 1) : 1;
+const effectiveMaxSelections = multiSelect
+  ? (poll.maxSelections ?? poll.options.length)
+  : 1;
+const selectedCount = selected.size;
+const boundsHint = !multiSelect
+  ? ""
+  : selectedCount < effectiveMinSelections
+    ? `Pick at least ${effectiveMinSelections}.`
+    : selectedCount >= effectiveMaxSelections
+      ? `Pick up to ${effectiveMaxSelections}. ${selectedCount} chosen.`
+      : "";
 const title = !poll
   ? "Not found — Oddspark Polls"
   : outcome
@@ -690,6 +706,7 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
                     value={option.id}
                     label={option.label}
                     checked={selected.has(option.id)}
+                    type={multiSelect ? "checkbox" : "radio"}
                     readOnly
                   />
                 </li>
@@ -701,13 +718,29 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
               action={`/${reference}`}
               data-vote-form
               data-vote-locked={actionDisabled ? "true" : "false"}
+              data-multi-select={multiSelect ? "true" : "false"}
+              data-min={effectiveMinSelections}
+              data-max={effectiveMaxSelections}
             >
               <input
                 type="hidden"
                 name="submission_id"
                 value={submissionId}
               />
-              <fieldset class="poll-options">
+              {multiSelect && (
+                <p
+                  class="vote-bounds-hint"
+                  id="vote-bounds-hint"
+                  data-bounds-hint
+                  aria-live="polite"
+                >
+                  {boundsHint}
+                </p>
+              )}
+              <fieldset
+                class="poll-options"
+                aria-describedby={multiSelect ? "vote-bounds-hint" : undefined}
+              >
                 <legend class="visually-hidden">Options</legend>
                 {poll.options.map((option) => (
                   <PollOption
@@ -716,6 +749,7 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
                     value={option.id}
                     label={option.label}
                     checked={selected.has(option.id)}
+                    type={multiSelect ? "checkbox" : "radio"}
                   />
                 ))}
               </fieldset>
@@ -723,9 +757,11 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
                 {/* UX-DR8: the hint is a JS affordance — the server renders
                     it hidden (no-JS shows an enabled button with no hint);
                     vote-form.ts reveals/manages it when JS runs. */}
-                <p class="vote-hint" data-vote-hint hidden>
-                  SELECT AN OPTION TO UNLOCK VOTE
-                </p>
+                {!multiSelect && (
+                  <p class="vote-hint" data-vote-hint hidden>
+                    SELECT AN OPTION TO UNLOCK VOTE
+                  </p>
+                )}
                 <ButtonPrimary
                   type="submit"
                   class="vote-button"
@@ -810,6 +846,16 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     outline-offset: var(--focus-outline-offset);
   }
 
+  [data-vote-form][data-max-reached="true"]
+    :global(label.poll-option:has(.poll-option-input:not(:checked))) {
+    cursor: default;
+  }
+
+  [data-vote-form][data-max-reached="true"]
+    :global(label.poll-option:has(.poll-option-input:not(:checked)):hover) {
+    background: transparent;
+  }
+
   .vote-outcome {
     margin: 0 0 var(--space-6);
     color: var(--color-text);
@@ -835,6 +881,13 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     gap: var(--space-3);
     justify-items: start;
     margin-top: var(--space-6);
+  }
+
+  .vote-bounds-hint {
+    margin: 0 0 var(--space-3);
+    color: var(--color-dim);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
   }
 
   .vote-hint {

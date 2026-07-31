@@ -79,6 +79,77 @@ test.describe("authenticated create flow (seeded session)", () => {
     await expect(
       page.getByRole("button", { name: "PUBLISH POLL" }),
     ).toBeVisible();
+
+    const one = page.locator('input[name="multiSelect"][value="false"]');
+    const several = page.locator('input[name="multiSelect"][value="true"]');
+    await expect(
+      page.getByRole("group", { name: "HOW MANY OPTIONS CAN A VOTER PICK" }),
+    ).toBeVisible();
+    await expect(one).toBeChecked();
+    await expect(several).not.toBeChecked();
+    await expect(page.getByLabel("MIN (OPTIONAL)")).toBeHidden();
+    await expect(page.getByLabel("MAX (OPTIONAL)")).toBeHidden();
+
+    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await expect(page.getByLabel("MIN (OPTIONAL)")).toBeVisible();
+    await expect(page.getByLabel("MAX (OPTIONAL)")).toBeVisible();
+
+    const min = page.getByLabel("MIN (OPTIONAL)");
+    await min.fill("1");
+    await page.locator('label[for="multi-select-false"]').click();
+    await expect(min).toBeVisible();
+    await min.fill("");
+    await expect(min).toBeHidden();
+    await expect(one).toBeFocused();
+  });
+
+  test("creates a bounded multi-select poll and preserves invalid bounds on 422", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const seeded = await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill("Pick two?");
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("A");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("B");
+    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    const min = page.getByLabel("MIN (OPTIONAL)");
+    const max = page.getByLabel("MAX (OPTIONAL)");
+    await min.fill("2");
+    await max.fill("3");
+    await expect(max).not.toHaveAttribute("aria-invalid");
+
+    const [invalidResponse] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes("/creator/new") &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+    expect(invalidResponse.status()).toBe(422);
+    await expect(min).toHaveValue("2");
+    await expect(max).toHaveValue("3");
+    await expect(max).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("#max-selections-error")).toHaveText(
+      "Max can't be more than the option count (2).",
+    );
+
+    await max.fill("2");
+    await page.getByRole("button", { name: "PUBLISH POLL" }).click();
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+    expect(
+      d1Query(
+        `SELECT multi_select_enabled, min_selections, max_selections FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      ),
+    ).toEqual([
+      {
+        multi_select_enabled: 1,
+        min_selections: 2,
+        max_selections: 2,
+      },
+    ]);
   });
 
   test("publishes a poll and persists the submitted shape", async ({
@@ -534,6 +605,9 @@ test.describe("authenticated create flow (seeded session)", () => {
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
     await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("Team-Lunch");
+    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await page.getByLabel("MIN (OPTIONAL)").fill("2");
+    await page.getByLabel("MAX (OPTIONAL)").fill("3");
 
     await page.getByRole("button", { name: "ADD OPTION" }).click();
     await expect(page).toHaveURL(/\/creator\/new$/);
@@ -544,6 +618,11 @@ test.describe("authenticated create flow (seeded session)", () => {
     await expect(page.getByLabel("CUSTOM LINK (OPTIONAL)")).toHaveValue(
       "Team-Lunch",
     );
+    await expect(
+      page.locator('input[name="multiSelect"][value="true"]'),
+    ).toBeChecked();
+    await expect(page.getByLabel("MIN (OPTIONAL)")).toHaveValue("2");
+    await expect(page.getByLabel("MAX (OPTIONAL)")).toHaveValue("3");
 
     // The regression being pinned: ADD OPTION must never create a poll.
     const polls = d1Query(

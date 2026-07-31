@@ -51,4 +51,7 @@ production on every merge, but no version has been cut or tagged.
 - Voting-page resilience with local deadline display and sub-24-hour countdowns,
   a one-request `COUNTING…` submit lock, preserved retry ballots with fresh
   submission IDs, and focused offline feedback that never sends the held ballot.
+- Bounded multi-select polls: creators can allow several choices with optional
+  minimum and maximum limits; voter pages enforce the limits accessibly and
+  preserve the complete ballot when a submission is rejected.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

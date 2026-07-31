@@ -32,6 +32,16 @@ function enhance(): void {
   const addButton = form.querySelector<HTMLButtonElement>(
     'button[name="intent"][value="add-option"]',
   );
+  const multiSelectChoices = Array.from(
+    form.querySelectorAll<HTMLInputElement>('input[name="multiSelect"]'),
+  );
+  const bounds = form.querySelector<HTMLElement>("[data-multi-select-bounds]");
+  const minSelections = form.querySelector<HTMLInputElement>(
+    'input[name="minSelections"]',
+  );
+  const maxSelections = form.querySelector<HTMLInputElement>(
+    'input[name="maxSelections"]',
+  );
 
   function optionRows(): HTMLElement[] {
     return Array.from(
@@ -59,6 +69,41 @@ function enhance(): void {
   function syncAddButton(): void {
     if (addButton) {
       addButton.disabled = addOptionDeclined();
+    }
+  }
+
+  // Mirror the domain's integer floor and option-count ceiling without
+  // making browser constraint UI authoritative. The form is `novalidate`, so
+  // publish still reaches the server and receives the designed inline 422.
+  function syncMultiSelectBounds(): void {
+    if (!bounds) {
+      return;
+    }
+    const enabled = multiSelectChoices.some(
+      (choice) => choice.value === "true" && choice.checked,
+    );
+    const hasValues = Boolean(
+      minSelections?.value.trim() || maxSelections?.value.trim(),
+    );
+    const hasServerError = bounds.dataset.hasBoundsError === "true";
+    // With no JS this block stays rendered, preserving the server-first
+    // floor. With enhancement it collapses for a clean single-select form,
+    // but never hides typed values or a returned error.
+    const shouldHide = !enabled && !hasValues && !hasServerError;
+    if (shouldHide && bounds.contains(document.activeElement)) {
+      multiSelectChoices
+        .find((choice) => choice.value === "false" && choice.checked)
+        ?.focus();
+    }
+    bounds.hidden = shouldHide;
+
+    const optionCount = Math.max(1, nonBlankRows());
+    for (const input of [minSelections, maxSelections]) {
+      if (input) {
+        input.min = "1";
+        input.max = String(optionCount);
+        input.step = "1";
+      }
     }
   }
 
@@ -91,6 +136,7 @@ function enhance(): void {
       }
       renumber();
       syncAddButton();
+      syncMultiSelectBounds();
     });
     row.appendChild(remove);
   }
@@ -132,6 +178,7 @@ function enhance(): void {
     attachRemove(next);
     renumber();
     syncAddButton();
+    syncMultiSelectBounds();
     next.querySelector<HTMLInputElement>("input")?.focus();
   }
 
@@ -144,8 +191,18 @@ function enhance(): void {
     renumber();
     syncAddButton();
     // Typing changes the non-blank count, which the cap rule reads.
-    optionList.addEventListener("input", syncAddButton);
+    optionList.addEventListener("input", () => {
+      syncAddButton();
+      syncMultiSelectBounds();
+    });
   }
+
+  multiSelectChoices.forEach((choice) => {
+    choice.addEventListener("change", syncMultiSelectBounds);
+  });
+  minSelections?.addEventListener("input", syncMultiSelectBounds);
+  maxSelections?.addEventListener("input", syncMultiSelectBounds);
+  syncMultiSelectBounds();
 
   // In-flight state is a label swap plus disabled submits, never a spinner —
   // a double-click (or repeated Enter) must not double-POST. With JS active
@@ -174,6 +231,7 @@ function enhance(): void {
       button.disabled = false;
     });
     syncAddButton();
+    syncMultiSelectBounds();
   };
 
   form.addEventListener("submit", () => {

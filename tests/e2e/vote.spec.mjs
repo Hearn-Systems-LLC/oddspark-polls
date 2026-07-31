@@ -137,6 +137,46 @@ test.describe("public voting flow", () => {
     };
   }
 
+  async function publishMultiSelectPoll(
+    page,
+    context,
+    baseURL,
+    question = "Pick two",
+  ) {
+    const seeded = await seedCreatorSession();
+    assertUuid(seeded.userId);
+    seededUserIds.push(seeded.userId);
+    await context.addCookies([
+      {
+        name: "better-auth.session_token",
+        value: seeded.cookieValue,
+        url: requireBaseUrl(baseURL),
+      },
+    ]);
+
+    const reference = `multi-vote-${randomUUID()}`;
+    await page.goto("/creator/new");
+    await page.getByLabel("QUESTION").fill(question);
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
+    await page.getByRole("textbox", { name: "OPTION 3" }).fill("Gamma");
+    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await page.getByLabel("MIN (OPTIONAL)").fill("2");
+    await page.getByLabel("MAX (OPTIONAL)").fill("2");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill(reference);
+    await page.getByRole("button", { name: "PUBLISH POLL" }).click();
+    await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
+
+    const pollId = /\/creator\/polls\/([^?]+)/.exec(page.url())?.[1] ?? "";
+    assertUuid(pollId);
+    await context.clearCookies();
+    return {
+      path: `/${reference}`,
+      pollId,
+      userId: seeded.userId,
+    };
+  }
+
   // Loads the open form, reads the hidden submission id and an option id,
   // then posts the ballot through the shared cookie jar (voter cookie and
   // the one-shot flash both live there).
@@ -167,6 +207,12 @@ test.describe("public voting flow", () => {
     page
       .locator(".poll-option-readonly", { hasText: optionLabel })
       .getByText("Your vote");
+
+  const markerGlyph = (page, optionLabel) =>
+    page
+      .locator(".poll-option", { hasText: optionLabel })
+      .locator(".poll-option-marker")
+      .evaluate((marker) => getComputedStyle(marker, "::before").content);
 
   test.afterAll(() => {
     for (const userId of seededUserIds) {
@@ -199,6 +245,312 @@ test.describe("public voting flow", () => {
       httpOnly: true,
       sameSite: "Lax",
     });
+  });
+
+  test("enforces multi-select bounds without disabling or renaming checkbox rows", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishMultiSelectPoll(page, context, baseURL);
+    await page.goto(created.path);
+
+    const alpha = page.getByRole("checkbox", { name: "Alpha", exact: true });
+    const beta = page.getByRole("checkbox", { name: "Beta", exact: true });
+    const gamma = page.getByRole("checkbox", { name: "Gamma", exact: true });
+    const row = (label) => page.locator("label.poll-option", { hasText: label });
+    const button = page.getByRole("button", { name: "VOTE" });
+    const boundsHint = page.locator("[data-bounds-hint]");
+
+    await expect(page.getByRole("checkbox")).toHaveCount(3);
+    await expect(page.getByRole("radio")).toHaveCount(0);
+    await expect(boundsHint).toHaveAttribute("aria-live", "polite");
+    await expect(page.locator("fieldset.poll-options")).toHaveAttribute(
+      "aria-describedby",
+      "vote-bounds-hint",
+    );
+    await expect(boundsHint).toHaveText("Pick at least 2.");
+    await expect(button).toBeDisabled();
+    expect(await markerGlyph(page, "Alpha")).toBe('"[ ]"');
+
+    await row("Alpha").click();
+    await expect(boundsHint).toHaveText("Pick at least 2.");
+    await expect(button).toBeDisabled();
+    expect(await markerGlyph(page, "Alpha")).toBe('"[×]"');
+
+    await row("Beta").click();
+    await expect(button).toBeEnabled();
+    await expect(boundsHint).toHaveText("Pick up to 2. 2 chosen.");
+    await expect(page.locator("[data-vote-form]")).toHaveAttribute(
+      "data-max-reached",
+      "true",
+    );
+    for (const option of [alpha, beta, gamma]) {
+      await expect(option).toBeEnabled();
+      await expect(option).not.toHaveAttribute("aria-disabled");
+    }
+
+    await row("Gamma").click();
+    await expect(gamma).not.toBeChecked();
+    await expect(alpha).toBeChecked();
+    await expect(beta).toBeChecked();
+    await expect(boundsHint).toHaveText("Pick up to 2. 2 chosen.");
+
+    await page.evaluate(() => {
+      const options = Array.from(
+        document.querySelectorAll('input[name="option_id"]'),
+      );
+      options[2].checked = true;
+      options[2].dispatchEvent(new Event("change", { bubbles: true }));
+      options[0].checked = false;
+      options[0].dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect(gamma).not.toBeChecked();
+    await expect(alpha).not.toBeChecked();
+    await expect(beta).toBeChecked();
+    await expect(button).toBeDisabled();
+    await expect(boundsHint).toHaveText("Pick at least 2.");
+  });
+
+  test("keeps the exact multi-select ballot through in-flight and pageshow restoration", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishMultiSelectPoll(
+      page,
+      context,
+      baseURL,
+      "Frozen multi ballot?",
+    );
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+    await page.locator("label.poll-option", { hasText: "Beta" }).click();
+
+    let releaseProbe;
+    const heldProbe = new Promise((resolve) => {
+      releaseProbe = resolve;
+    });
+    await page.route("**/favicon.svg", async (route) => {
+      await heldProbe;
+      await route.continue();
+    });
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page.getByRole("button", { name: "COUNTING…" })).toBeDisabled();
+    expect(
+      await page.getByRole("checkbox").evaluateAll((options) =>
+        options.map((option) => ({
+          checked: option.checked,
+          disabled: option.disabled,
+        })),
+      ),
+    ).toEqual([
+      { checked: true, disabled: false },
+      { checked: true, disabled: false },
+      { checked: false, disabled: false },
+    ]);
+
+    const guardedSelection = await page.evaluate(() => {
+      const options = Array.from(
+        document.querySelectorAll('input[name="option_id"]'),
+      );
+      options[2].checked = true;
+      options[2].dispatchEvent(new Event("change", { bubbles: true }));
+      return options.map((option) => option.checked);
+    });
+    expect(guardedSelection).toEqual([true, true, false]);
+
+    expect(
+      await page.evaluate(() => {
+        const checkbox = document.querySelectorAll('input[name="option_id"]')[2];
+        if (!(checkbox instanceof HTMLInputElement)) {
+          throw new Error("third checkbox did not render");
+        }
+        checkbox.focus();
+        const arrow = new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        });
+        const space = new KeyboardEvent("keydown", {
+          key: " ",
+          bubbles: true,
+          cancelable: true,
+        });
+        checkbox.dispatchEvent(arrow);
+        checkbox.dispatchEvent(space);
+        return {
+          arrowPrevented: arrow.defaultPrevented,
+          spacePrevented: space.defaultPrevented,
+        };
+      }),
+    ).toEqual({ arrowPrevented: false, spacePrevented: true });
+
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+    });
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    await expect(page.getByRole("checkbox", { name: "Alpha" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Beta" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Gamma" })).not.toBeChecked();
+    await expect(page.locator("[data-bounds-hint]")).toHaveText(
+      "Pick up to 2. 2 chosen.",
+    );
+
+    const probeSettled = page.waitForResponse(
+      (candidate) =>
+        candidate.url().endsWith("/favicon.svg") &&
+        candidate.request().method() === "HEAD",
+    );
+    releaseProbe?.();
+    await probeSettled;
+    await page.unroute("**/favicon.svg");
+  });
+
+  test("preserves out-of-bounds ballots on 422, then counts and replays an exact multi-select vote", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const question = "Bounded ballot?";
+    const created = await publishMultiSelectPoll(
+      page,
+      context,
+      baseURL,
+      question,
+    );
+    await page.goto(created.path);
+    const originalSubmissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    const optionIds = await page
+      .getByRole("checkbox")
+      .evaluateAll((options) => options.map((option) => option.value));
+    assertUuid(originalSubmissionId);
+    optionIds.forEach(assertUuid);
+
+    const [belowMin] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().endsWith(created.path) &&
+          candidate.request().method() === "POST",
+      ),
+      page.evaluate(() => {
+        const form = document.querySelector("form[data-vote-form]");
+        const first = document.querySelector('input[name="option_id"]');
+        if (!(form instanceof HTMLFormElement) || !(first instanceof HTMLInputElement)) {
+          throw new Error("multi-select form did not render");
+        }
+        first.checked = true;
+        form.submit();
+      }),
+    ]);
+    expect(belowMin.status()).toBe(422);
+    await expect(page).toHaveTitle(`Vote not counted — ${question}`);
+    await expect(page.locator("[data-vote-outcome]")).toBeFocused();
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      "Not enough selections. This Poll asks for at least 2, and your ballot is still here.",
+    );
+    await expect(page.locator("[data-vote-outcome]")).not.toContainText(
+      "{min}",
+    );
+    await expect(page.getByRole("checkbox", { name: "Alpha" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Beta" })).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Gamma" })).not.toBeChecked();
+    const afterMinSubmissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(afterMinSubmissionId);
+    expect(afterMinSubmissionId).not.toBe(originalSubmissionId);
+
+    const [invalid] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().endsWith(created.path) &&
+          candidate.request().method() === "POST",
+      ),
+      page.evaluate(() => {
+        const form = document.querySelector("form[data-vote-form]");
+        const options = Array.from(
+          document.querySelectorAll('input[name="option_id"]'),
+        );
+        if (!(form instanceof HTMLFormElement)) {
+          throw new Error("multi-select form did not render");
+        }
+        for (const option of options) {
+          option.checked = true;
+        }
+        form.submit();
+      }),
+    ]);
+    expect(invalid.status()).toBe(422);
+    await expect(page).toHaveTitle(`Vote not counted — ${question}`);
+    await expect(page.locator("[data-vote-outcome]")).toBeFocused();
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      "Too many selections. This Poll takes up to 2, and your ballot is still here.",
+    );
+    await expect(page.locator("[data-vote-outcome]")).not.toContainText(
+      "{max}",
+    );
+    await expect(page.getByRole("checkbox")).toHaveCount(3);
+    for (const option of await page.getByRole("checkbox").all()) {
+      await expect(option).toBeChecked();
+    }
+    const retrySubmissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(retrySubmissionId);
+    expect(retrySubmissionId).not.toBe(afterMinSubmissionId);
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+      ),
+    ).toEqual([{ n: 0 }]);
+
+    const acceptedBody = new URLSearchParams();
+    acceptedBody.set("submission_id", retrySubmissionId);
+    acceptedBody.append("option_id", optionIds[0]);
+    acceptedBody.append("option_id", optionIds[1]);
+    const accepted = await page.request.post(created.path, {
+      data: acceptedBody.toString(),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...formHeaders(baseURL),
+      },
+      maxRedirects: 0,
+    });
+    expect(accepted.status()).toBe(303);
+    const replay = await page.request.post(created.path, {
+      data: acceptedBody.toString(),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...formHeaders(baseURL),
+      },
+      maxRedirects: 0,
+    });
+    expect(replay.status()).toBe(303);
+    expect(
+      d1Query(
+        `SELECT COUNT(DISTINCT v.id) AS votes, COUNT(vs.poll_option_id) AS selections, p.representation_version FROM poll p LEFT JOIN vote v ON v.poll_id = p.id LEFT JOIN vote_selection vs ON vs.vote_id = v.id WHERE p.id = '${created.pollId}' GROUP BY p.id`,
+      ),
+    ).toEqual([{ votes: 1, selections: 2, representation_version: 2 }]);
+
+    await page.goto(created.path);
+    await expect(page.getByRole("checkbox")).toHaveCount(0);
+    await expect(page.getByText("Your vote")).toHaveCount(2);
+    expect(await markerGlyph(page, "Alpha")).toBe('"[×]"');
+    expect(await markerGlyph(page, "Beta")).toBe('"[×]"');
+    expect(await markerGlyph(page, "Gamma")).toBe('"[ ]"');
+    await page.reload();
+    await expect(page).toHaveTitle(`Already voted — ${question}`);
+    expect(await markerGlyph(page, "Alpha")).toBe('"[×]"');
+    expect(await markerGlyph(page, "Beta")).toBe('"[×]"');
+    expect(await markerGlyph(page, "Gamma")).toBe('"[ ]"');
   });
 
   test("renders deadlines locally and adds a countdown only inside 24 hours", async ({

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-31T08:41:29.658Z",
+  "generatedAt": "2026-07-31T15:33:14.723Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -29,6 +29,10 @@
     {
       "file": "0007_voter_claim_vote_id_idx.sql",
       "sha256": "7ecbc50364b0884fe8c33392cdb43b9b1e9b8ad01f268c373be332f1d36e7748"
+    },
+    {
+      "file": "0008_multi_select.sql",
+      "sha256": "ba81c05fbe3fe7db5868d044c0703f9bb03bf1123f0c1bdaf5e66bfac2e062cc"
     }
   ]
 }

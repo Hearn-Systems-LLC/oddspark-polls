@@ -31,6 +31,9 @@ export type PollPage = {
   description: string | null;
   pollType: PollType;
   resultVisibility: ResultVisibility;
+  multiSelectEnabled: boolean;
+  minSelections: number | null;
+  maxSelections: number | null;
   deadlineMs: number | null;
   closedAtMs: number | null;
   options: { id: PollOptionId; label: string; position: number }[];
@@ -48,6 +51,9 @@ type PollRow = {
   description: string | null;
   poll_type: PollType;
   result_visibility: ResultVisibility;
+  multi_select_enabled: number;
+  min_selections: number | null;
+  max_selections: number | null;
   deadline_ms: number | null;
   closed_at_ms: number | null;
 };
@@ -72,6 +78,9 @@ function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
     description: row.description,
     pollType: row.poll_type,
     resultVisibility: row.result_visibility,
+    multiSelectEnabled: row.multi_select_enabled === 1,
+    minSelections: row.min_selections,
+    maxSelections: row.max_selections,
     deadlineMs: row.deadline_ms,
     closedAtMs: row.closed_at_ms,
     options,
@@ -88,7 +97,7 @@ export function createPollPersistence(db: D1Database) {
         await db.batch([
           db
             .prepare(
-              "INSERT INTO poll (id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, session_checks_enabled, deadline_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+              "INSERT INTO poll (id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
             )
             .bind(
               poll.id,
@@ -99,6 +108,9 @@ export function createPollPersistence(db: D1Database) {
               poll.resultVisibility,
               poll.discoveryState,
               poll.sessionChecksEnabled ? 1 : 0,
+              poll.multiSelectEnabled ? 1 : 0,
+              poll.minSelections,
+              poll.maxSelections,
               poll.deadlineMs,
               poll.representationVersion,
               poll.createdAtMs,
@@ -152,7 +164,7 @@ export function createPollPersistence(db: D1Database) {
     async findPollByReference(reference: string): Promise<PollPage | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.deadline_ms, p.closed_at_ms FROM poll p JOIN poll_reference r ON r.poll_id = p.id WHERE r.reference = ?1",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.deadline_ms, p.closed_at_ms FROM poll p JOIN poll_reference r ON r.poll_id = p.id WHERE r.reference = ?1",
         )
         .bind(reference)
         .first<PollRow>();
@@ -189,7 +201,7 @@ export function createPollPersistence(db: D1Database) {
     ): Promise<OwnedPoll | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
         )
         .bind(pollId, ownerUserId)
         .first<
@@ -305,13 +317,16 @@ export function createVotePersistence(db: D1Database) {
     async findPoll(pollId: PollId): Promise<VotingPollSnapshot | null> {
       const row = await db
         .prepare(
-          "SELECT id, poll_type, session_checks_enabled, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
+          "SELECT id, poll_type, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
         )
         .bind(pollId)
         .first<{
           id: PollId;
           poll_type: PollType;
           session_checks_enabled: number;
+          multi_select_enabled: number;
+          min_selections: number | null;
+          max_selections: number | null;
           deadline_ms: number | null;
           closed_at_ms: number | null;
         }>();
@@ -323,6 +338,9 @@ export function createVotePersistence(db: D1Database) {
         pollType: row.poll_type,
         options: await loadOptions(db, row.id),
         sessionChecksEnabled: row.session_checks_enabled === 1,
+        multiSelectEnabled: row.multi_select_enabled === 1,
+        minSelections: row.min_selections,
+        maxSelections: row.max_selections,
         deadlineMs: row.deadline_ms,
         closedAtMs: row.closed_at_ms,
       };

@@ -53,15 +53,21 @@ async function insertPoll(
   overrides: {
     closedAtMs?: number;
     deadlineMs?: number;
+    maxSelections?: number | null;
+    minSelections?: number | null;
+    multiSelectEnabled?: boolean;
     sessionChecksEnabled?: boolean;
   } = {},
 ): Promise<void> {
   await testEnv.DB.batch([
     testEnv.DB.prepare(
-      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, 1, 0, 0)",
+      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, ?5, ?6, ?7, 1, 0, 0)",
     ).bind(
       POLL_ID,
       overrides.sessionChecksEnabled === false ? 0 : 1,
+      overrides.multiSelectEnabled === true ? 1 : 0,
+      overrides.minSelections ?? null,
+      overrides.maxSelections ?? null,
       overrides.deadlineMs ?? null,
       overrides.closedAtMs ?? null,
     ),
@@ -192,6 +198,98 @@ describe("createVotePersistence", () => {
     ).toEqual({ updated_at_ms: NOW });
   });
 
+  it("commits one multi-select vote, every selection, its claim, and one version increment atomically", async () => {
+    await insertPoll({
+      multiSelectEnabled: true,
+      minSelections: 2,
+      maxSelections: 2,
+    });
+    const persistence = createVotePersistence(testEnv.DB);
+    await persistence.insertVote(
+      batch({
+        contributions: [
+          {
+            kind: "vote_selection",
+            voteId: "vote-1",
+            pollOptionId: OPTION_A,
+          },
+          {
+            kind: "vote_selection",
+            voteId: "vote-1",
+            pollOptionId: OPTION_B,
+          },
+          {
+            kind: "voter_claim",
+            pollId: POLL_ID,
+            checkKind: "session",
+            digest: "digest-1",
+            voteId: "vote-1",
+            createdAtMs: NOW,
+          },
+        ],
+      }),
+    );
+
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 2,
+      claims: 1,
+      version: 2,
+    });
+    expect(
+      await testEnv.DB.prepare(
+        "SELECT poll_option_id FROM vote_selection WHERE vote_id = 'vote-1' ORDER BY poll_option_id",
+      ).all(),
+    ).toMatchObject({
+      results: [
+        { poll_option_id: OPTION_A },
+        { poll_option_id: OPTION_B },
+      ],
+    });
+  });
+
+  it("rolls back the whole vote batch when one ballot duplicates an option id", async () => {
+    await insertPoll({
+      multiSelectEnabled: true,
+      minSelections: 1,
+      maxSelections: 2,
+    });
+    const persistence = createVotePersistence(testEnv.DB);
+
+    await expect(
+      persistence.insertVote(
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: "digest-1",
+              voteId: "vote-1",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(await counts()).toEqual({
+      votes: 0,
+      selections: 0,
+      claims: 0,
+      version: 1,
+    });
+  });
+
   it("reads voting Poll facts, stored submissions, and duplicate claims", async () => {
     await insertPoll();
     const persistence = createVotePersistence(testEnv.DB);
@@ -205,6 +303,9 @@ describe("createVotePersistence", () => {
         { id: OPTION_B, label: "B", position: 1 },
       ],
       sessionChecksEnabled: true,
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
       deadlineMs: null,
       closedAtMs: null,
     });
@@ -413,6 +514,34 @@ describe("createVotePersistence", () => {
 });
 
 describe("castVote with the D1 adapter", () => {
+  it("returns the stored outcome when an accepted multi-select ballot is replayed", async () => {
+    await insertPoll({
+      multiSelectEnabled: true,
+      minSelections: 2,
+      maxSelections: 2,
+    });
+    const deps = castVoteDeps();
+    const command = {
+      ...integratedCommand,
+      selectedOptionIds: [OPTION_A, OPTION_B],
+    };
+
+    await expect(castVote(deps, command)).resolves.toMatchObject({
+      ok: true,
+      value: { existing: false, voteId: "integrated-vote-1" },
+    });
+    await expect(castVote(deps, command)).resolves.toMatchObject({
+      ok: true,
+      value: { existing: true, voteId: "integrated-vote-1" },
+    });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 2,
+      claims: 1,
+      version: 2,
+    });
+  });
+
   it("keeps the original committed outcome replayable after a divergent retry", async () => {
     await insertPoll();
     const deps = castVoteDeps();

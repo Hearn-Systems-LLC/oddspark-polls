@@ -15,6 +15,7 @@ import {
   type PollOptionId,
   type PollType,
 } from "../../shared/domain/index";
+import { MULTIPLE_CHOICE_VOTE_COPY } from "../polls/types/multiple-choice";
 
 export const VOTE_COPY = {
   counted: "Counted.",
@@ -34,6 +35,8 @@ export const VOTE_COPY = {
   offline:
     "No connection. Your ballot is safe on this page; nothing has been sent yet.",
   selectionRequired: "Nothing's selected. Pick an option, then vote.",
+  tooFewSelections: MULTIPLE_CHOICE_VOTE_COPY.tooFewSelections,
+  tooManySelections: MULTIPLE_CHOICE_VOTE_COPY.tooManySelections,
   pollDeleted: "This Poll no longer exists.",
   idempotencyConflict:
     "Your earlier Vote stands — this change wasn't recorded.",
@@ -76,6 +79,9 @@ export type VotingPollSnapshot = {
     position: number;
   }[];
   sessionChecksEnabled: boolean;
+  multiSelectEnabled: boolean;
+  minSelections: number | null;
+  maxSelections: number | null;
   deadlineMs: number | null;
   closedAtMs: number | null;
 };
@@ -85,13 +91,19 @@ export type VoteSubmission = {
 };
 
 export type ValidatedVoteSubmission = {
-  selectedOptionIds: readonly [PollOptionId];
+  selectedOptionIds: readonly PollOptionId[];
 };
 
 export type VotingPollTypeStrategy = {
   validateSubmission: (
     submission: VoteSubmission,
-    facts: Pick<VotingPollSnapshot, "options">,
+    facts: Pick<
+      VotingPollSnapshot,
+      | "options"
+      | "multiSelectEnabled"
+      | "minSelections"
+      | "maxSelections"
+    >,
   ) => Result<ValidatedVoteSubmission>;
   persistFacts: (validated: ValidatedVoteSubmission) => {
     selections: { pollOptionId: PollOptionId }[];
@@ -308,7 +320,12 @@ export async function castVote(
   try {
     validated = strategy.validateSubmission(
       { selectedOptionIds: input.selectedOptionIds },
-      { options: poll.options },
+      {
+        options: poll.options,
+        multiSelectEnabled: poll.multiSelectEnabled,
+        minSelections: poll.minSelections,
+        maxSelections: poll.maxSelections,
+      },
     );
   } catch {
     return failure("vote_failed", VOTE_COPY.retry);
@@ -334,6 +351,12 @@ export async function castVote(
       strategyError.message.trim().length > 0
         ? strategyError.message
         : VOTE_COPY.retry;
+    if (
+      strategyError.code === "too_few_selections" ||
+      strategyError.code === "too_many_selections"
+    ) {
+      return failure(strategyError.code, message, detail);
+    }
     return failure("invalid_selection", message, detail);
   }
 

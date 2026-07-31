@@ -59,6 +59,11 @@ const VISIBILITY_CHOICES = [
   { value: "creator_only", label: "CREATOR-ONLY", description: "only you ever see the Tally" },
 ] as const;
 
+const MULTI_SELECT_CHOICES = [
+  { value: "false", label: "ONE" },
+  { value: "true", label: "SEVERAL" },
+] as const;
+
 const INITIAL_OPTION_ROWS = 4;
 
 const formSchema = z.object({
@@ -69,6 +74,9 @@ const formSchema = z.object({
   deadline: z.string().default(""),
   timezone: z.string().default(""),
   customLink: z.string().default(""),
+  multiSelect: z.string().default("false"),
+  minSelections: z.string().default(""),
+  maxSelections: z.string().default(""),
   intent: z.string().default(""),
   pollId: z.string().default(""),
 });
@@ -86,6 +94,9 @@ let values: CreatePollDraft = {
   deadlineLocal: "",
   timeZone: "",
   customLink: "",
+  multiSelect: "false",
+  minSelections: "",
+  maxSelections: "",
   idempotencyId: formPollId,
 };
 let fieldErrors: Record<string, string> = {};
@@ -114,6 +125,9 @@ if (Astro.request.method === "POST") {
       deadline: text(formData.get("deadline")),
       timezone: text(formData.get("timezone")),
       customLink: text(formData.get("customLink")),
+      multiSelect: text(formData.get("multiSelect")) || "false",
+      minSelections: text(formData.get("minSelections")),
+      maxSelections: text(formData.get("maxSelections")),
       // Anything other than exactly "add-option" is a publish.
       intent: text(formData.get("intent")),
       pollId: text(formData.get("poll_id")),
@@ -139,6 +153,9 @@ if (Astro.request.method === "POST") {
     deadlineLocal: parsed.deadline,
     timeZone: parsed.timezone,
     customLink: parsed.customLink,
+    multiSelect: parsed.multiSelect,
+    minSelections: parsed.minSelections,
+    maxSelections: parsed.maxSelections,
     idempotencyId: formPollId,
   };
 
@@ -223,7 +240,7 @@ while (values.options.length < 2) {
 
     {formError && <p class="form-error" tabindex="-1" autofocus>{formError}</p>}
 
-    <form method="post" action="/creator/new" data-create-poll-form>
+    <form method="post" action="/creator/new" data-create-poll-form novalidate>
       <input type="hidden" name="csrf_token" value={csrfToken} />
       <input type="hidden" name="timezone" value={values.timeZone} />
       <input type="hidden" name="poll_id" value={formPollId} />
@@ -280,6 +297,78 @@ while (values.options.length < 2) {
           </ButtonSecondary>
           {optionNote && <p class="helper-note">{optionNote}</p>}
           <p class="helper-note">Blank options are dropped when you publish.</p>
+        </div>
+      </fieldset>
+
+      <fieldset
+        class="field-block"
+        aria-describedby={fieldErrors.multiSelect
+          ? "multi-select-error"
+          : undefined}
+      >
+        <legend class="group-label">HOW MANY OPTIONS CAN A VOTER PICK</legend>
+        <div class="multi-select-choices">
+          {MULTI_SELECT_CHOICES.map((choice) => (
+            <PollOption
+              id={`multi-select-${choice.value}`}
+              name="multiSelect"
+              value={choice.value}
+              label={choice.label}
+              checked={values.multiSelect === choice.value}
+            />
+          ))}
+        </div>
+        {fieldErrors.multiSelect && (
+          <p class="field-error" id="multi-select-error">
+            {fieldErrors.multiSelect}
+          </p>
+        )}
+        <div
+          class="multi-select-bounds"
+          data-multi-select-bounds
+          data-has-bounds-error={Boolean(
+            fieldErrors.minSelections || fieldErrors.maxSelections,
+          )}
+        >
+          <div class="field-block">
+            <Input
+              id="min-selections"
+              name="minSelections"
+              label="MIN (OPTIONAL)"
+              type="number"
+              value={values.minSelections}
+              error={Boolean(fieldErrors.minSelections)}
+              describedby={fieldErrors.minSelections
+                ? "min-selections-error multi-select-bounds-help"
+                : "multi-select-bounds-help"}
+            />
+            {fieldErrors.minSelections && (
+              <p class="field-error" id="min-selections-error">
+                {fieldErrors.minSelections}
+              </p>
+            )}
+          </div>
+          <div class="field-block">
+            <Input
+              id="max-selections"
+              name="maxSelections"
+              label="MAX (OPTIONAL)"
+              type="number"
+              value={values.maxSelections}
+              error={Boolean(fieldErrors.maxSelections)}
+              describedby={fieldErrors.maxSelections
+                ? "max-selections-error multi-select-bounds-help"
+                : "multi-select-bounds-help"}
+            />
+            {fieldErrors.maxSelections && (
+              <p class="field-error" id="max-selections-error">
+                {fieldErrors.maxSelections}
+              </p>
+            )}
+          </div>
+          <p class="helper-note" id="multi-select-bounds-help">
+            Leave blank for 1 to all options.
+          </p>
         </div>
       </fieldset>
 
@@ -452,6 +541,25 @@ while (values.options.length < 2) {
 
   .visibility-choices {
     margin-top: var(--space-3);
+  }
+
+  .multi-select-choices {
+    margin-top: var(--space-3);
+  }
+
+  .multi-select-bounds {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+  }
+
+  .multi-select-bounds[hidden] {
+    display: none;
+  }
+
+  .multi-select-bounds .helper-note {
+    grid-column: 1 / -1;
   }
 
   .description-input {

@@ -38,6 +38,9 @@ function draft(overrides: Partial<CreatePollDraft> = {}): CreatePollDraft {
     deadlineLocal: "",
     timeZone: "",
     customLink: "",
+    multiSelect: "false",
+    minSelections: "",
+    maxSelections: "",
     ...overrides,
   };
 }
@@ -71,7 +74,89 @@ describe("validateCreatePoll", () => {
         resultVisibility: "live",
         deadlineMs: null,
         customLink: null,
+        multiSelect: false,
+        minSelections: null,
+        maxSelections: null,
       });
+    }
+  });
+
+  it.each([
+    ["blank bounds", "", "", null, null],
+    ["explicit bounds", "2", "3", 2, 3],
+    ["equal bounds at the option count", "3", "3", 3, 3],
+  ])(
+    "normalizes multi-select %s",
+    (_case, minSelections, maxSelections, expectedMin, expectedMax) => {
+      const result = validateCreatePoll(
+        draft({
+          options: ["A", "B", "C"],
+          multiSelect: "true",
+          minSelections,
+          maxSelections,
+        }),
+        NOW,
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toMatchObject({
+          multiSelect: true,
+          minSelections: expectedMin,
+          maxSelections: expectedMax,
+        });
+      }
+    },
+  );
+
+  it.each([
+    [
+      "a minimum below one",
+      { multiSelect: "true", minSelections: "0" },
+      "minSelections",
+      "boundsMinTooLow",
+    ],
+    [
+      "a non-integer minimum",
+      { multiSelect: "true", minSelections: "1.5" },
+      "minSelections",
+      "boundsMinTooLow",
+    ],
+    [
+      "a minimum above the maximum",
+      { multiSelect: "true", minSelections: "3", maxSelections: "2" },
+      "minSelections",
+      "boundsOrder",
+    ],
+    [
+      "a maximum above the option count",
+      { multiSelect: "true", maxSelections: "3" },
+      "maxSelections",
+      "boundsMaxTooHigh",
+    ],
+    [
+      "a non-integer maximum",
+      { multiSelect: "true", maxSelections: "1.5" },
+      "maxSelections",
+      "boundsMaxTooHigh",
+    ],
+    [
+      "a minimum bound while multi-select is off",
+      { multiSelect: "false", minSelections: "1" },
+      "multiSelect",
+      "boundsWithoutMultiSelect",
+    ],
+    [
+      "a maximum bound while multi-select is off",
+      { multiSelect: "false", maxSelections: "1" },
+      "multiSelect",
+      "boundsWithoutMultiSelect",
+    ],
+  ] as const)("rejects %s", (_case, overrides, field, copyKey) => {
+    const result = validateCreatePoll(draft(overrides), NOW);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const expected = CREATE_POLL_COPY[copyKey].replace("{count}", "2");
+      expect(result.error.fieldErrors?.[field]).toBe(expected);
     }
   });
 
@@ -398,6 +483,26 @@ describe("validateCreatePoll", () => {
     ["description_too_long", "description", draft({ description: "d".repeat(5001) })],
     ["visibility_invalid", "visibility", draft({ resultVisibility: "everyone" })],
     [
+      "bounds_without_multi_select",
+      "multiSelect",
+      draft({ minSelections: "1" }),
+    ],
+    [
+      "bounds_min_too_low",
+      "minSelections",
+      draft({ multiSelect: "true", minSelections: "0" }),
+    ],
+    [
+      "bounds_order",
+      "minSelections",
+      draft({ multiSelect: "true", minSelections: "2", maxSelections: "1" }),
+    ],
+    [
+      "bounds_max_too_high",
+      "maxSelections",
+      draft({ multiSelect: "true", maxSelections: "3" }),
+    ],
+    [
       "custom_link_invalid",
       "customLink",
       draft({ customLink: "team_lunch" }),
@@ -589,16 +694,25 @@ describe("PollPersistenceRows reference kinds", () => {
 describe("multipleChoiceStrategy", () => {
   const optionA = "option-a" as PollOptionId;
   const optionB = "option-b" as PollOptionId;
+  const optionC = "option-c" as PollOptionId;
   const persistedFacts = {
     options: [
       { id: optionA, label: "A", position: 0 },
       { id: optionB, label: "B", position: 1 },
     ],
+    multiSelectEnabled: false,
+    minSelections: null,
+    maxSelections: null,
   };
 
   it("normalizes labels into positioned option facts", () => {
     const result = multipleChoiceStrategy.create(
-      { optionLabels: ["A", "B", "C"] },
+      {
+        optionLabels: ["A", "B", "C"],
+        multiSelect: true,
+        minSelections: 2,
+        maxSelections: 3,
+      },
       { nowMs: NOW },
     );
     expect(result).toEqual({
@@ -609,13 +723,21 @@ describe("multipleChoiceStrategy", () => {
           { label: "B", position: 1 },
           { label: "C", position: 2 },
         ],
+        multiSelect: true,
+        minSelections: 2,
+        maxSelections: 3,
       },
     });
   });
 
   it("keeps creation facts id-free so they cannot masquerade as validation facts", () => {
     const created = multipleChoiceStrategy.create(
-      { optionLabels: ["A", "B"] },
+      {
+        optionLabels: ["A", "B"],
+        multiSelect: false,
+        minSelections: null,
+        maxSelections: null,
+      },
       { nowMs: NOW },
     );
     if (!created.ok) {
@@ -644,6 +766,109 @@ describe("multipleChoiceStrategy", () => {
   });
 
   it.each([
+    ["the configured minimum", [optionA, optionB], 2, 3],
+    ["the configured maximum", [optionA, optionB], 1, 2],
+    ["the default minimum", [optionA], null, null],
+    ["the default maximum", [optionA, optionB], null, null],
+  ])(
+    "accepts a multi-select ballot at %s",
+    (_case, selectedOptionIds, minSelections, maxSelections) => {
+      expect(
+        multipleChoiceStrategy.validateSubmission(
+          { selectedOptionIds },
+          {
+            ...persistedFacts,
+            multiSelectEnabled: true,
+            minSelections,
+            maxSelections,
+          },
+        ),
+      ).toEqual({
+        ok: true,
+        value: { selectedOptionIds },
+      });
+    },
+  );
+
+  it.each([
+    [
+      "too few selections",
+      [optionA],
+      2,
+      2,
+      "too_few_selections",
+      "Not enough selections. This Poll asks for at least 2, and your ballot is still here.",
+    ],
+    [
+      "too many selections",
+      [optionA, optionB],
+      1,
+      1,
+      "too_many_selections",
+      "Too many selections. This Poll takes up to 1, and your ballot is still here.",
+    ],
+  ] as const)(
+    "rejects %s with interpolated copy",
+    (_case, selectedOptionIds, minSelections, maxSelections, code, message) => {
+      expect(
+        multipleChoiceStrategy.validateSubmission(
+          { selectedOptionIds },
+          {
+            ...persistedFacts,
+            multiSelectEnabled: true,
+            minSelections,
+            maxSelections,
+          },
+        ),
+      ).toEqual({
+        ok: false,
+        error: {
+          code,
+          message,
+          fieldErrors: { selectedOptionIds: message },
+          reasonCodes: { selectedOptionIds: code },
+        },
+      });
+    },
+  );
+
+  it.each([
+    ["a duplicated selection", [optionA, optionA]],
+    ["an unknown option", [optionA, "option-unknown"]],
+  ])("rejects %s before applying multi-select bounds", (_case, selectedOptionIds) => {
+    const result = multipleChoiceStrategy.validateSubmission(
+      { selectedOptionIds },
+      {
+        ...persistedFacts,
+        multiSelectEnabled: true,
+        minSelections: 3,
+        maxSelections: 3,
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "invalid_selection" },
+    });
+  });
+
+  it("keeps an empty multi-select ballot on selection_required", () => {
+    expect(
+      multipleChoiceStrategy.validateSubmission(
+        { selectedOptionIds: [] },
+        {
+          ...persistedFacts,
+          multiSelectEnabled: true,
+          minSelections: 2,
+          maxSelections: 2,
+        },
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "selection_required" },
+    });
+  });
+
+  it.each([
     ["zero selections", []],
     ["multiple selections", [optionA, optionB]],
     ["a duplicated selection", [optionA, optionA]],
@@ -656,6 +881,25 @@ describe("multipleChoiceStrategy", () => {
     expect(result?.ok).toBe(false);
   });
 
+  it("keeps a multi-option single-select ballot on the original invalid-selection outcome", () => {
+    expect(
+      multipleChoiceStrategy.validateSubmission(
+        { selectedOptionIds: [optionA, optionB] },
+        persistedFacts,
+      ),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_selection",
+        message: "That ballot does not match this Poll.",
+        fieldErrors: {
+          selectedOptionIds: "That ballot does not match this Poll.",
+        },
+        reasonCodes: { selectedOptionIds: "invalid_selection" },
+      },
+    });
+  });
+
   it("contributes one relational vote-selection fact", () => {
     expect(
       multipleChoiceStrategy.persistFacts?.({
@@ -663,6 +907,85 @@ describe("multipleChoiceStrategy", () => {
       }),
     ).toEqual({
       selections: [{ pollOptionId: optionA }],
+    });
+  });
+
+  it("contributes every accepted multi-select fact", () => {
+    expect(
+      multipleChoiceStrategy.persistFacts?.({
+        selectedOptionIds: [optionA, optionB],
+      }),
+    ).toEqual({
+      selections: [
+        { pollOptionId: optionA },
+        { pollOptionId: optionB },
+      ],
+    });
+  });
+
+  it("projects single-select votes with zero-count options intact", () => {
+    expect(
+      multipleChoiceStrategy.projectResults?.({
+        options: [{ id: optionA }, { id: optionB }, { id: optionC }],
+        votes: [
+          { selections: [{ pollOptionId: optionA }] },
+          { selections: [{ pollOptionId: optionB }] },
+        ],
+      }),
+    ).toEqual({
+      options: [
+        { pollOptionId: optionA, count: 1 },
+        { pollOptionId: optionB, count: 1 },
+        { pollOptionId: optionC, count: 0 },
+      ],
+      voterCount: 2,
+      selectionCount: 2,
+    });
+  });
+
+  it("projects multi-select votes with distinct voter and selection totals", () => {
+    expect(
+      multipleChoiceStrategy.projectResults?.({
+        options: [{ id: optionA }, { id: optionB }, { id: optionC }],
+        votes: [
+          {
+            selections: [
+              { pollOptionId: optionA },
+              { pollOptionId: optionB },
+            ],
+          },
+          {
+            selections: [
+              { pollOptionId: optionB },
+              { pollOptionId: optionC },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      options: [
+        { pollOptionId: optionA, count: 1 },
+        { pollOptionId: optionB, count: 2 },
+        { pollOptionId: optionC, count: 1 },
+      ],
+      voterCount: 2,
+      selectionCount: 4,
+    });
+  });
+
+  it("projects empty votes as zero counts without dropping options", () => {
+    expect(
+      multipleChoiceStrategy.projectResults?.({
+        options: [{ id: optionA }, { id: optionB }],
+        votes: [],
+      }),
+    ).toEqual({
+      options: [
+        { pollOptionId: optionA, count: 0 },
+        { pollOptionId: optionB, count: 0 },
+      ],
+      voterCount: 0,
+      selectionCount: 0,
     });
   });
 });
@@ -703,6 +1026,9 @@ describe("createPoll command", () => {
       resultVisibility: "live",
       discoveryState: "unlisted",
       sessionChecksEnabled: true,
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
       deadlineMs: null,
       representationVersion: 1,
       createdAtMs: NOW,
@@ -924,6 +1250,9 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
       description: null,
       resultVisibility: "live",
       deadlineMs: null,
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -976,6 +1305,33 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
     if (!result.ok) {
       expect(result.error.code).toBe("poll_duplicate_divergent");
       expect(result.error.message).toBe(CREATE_POLL_COPY.duplicateDivergent);
+    }
+  });
+
+  it.each([
+    [
+      "minimum",
+      { multiSelectEnabled: true, minSelections: 1, maxSelections: 2 },
+      { minSelections: "2", maxSelections: "2" },
+    ],
+    [
+      "maximum",
+      { multiSelectEnabled: true, minSelections: 1, maxSelections: 1 },
+      { minSelections: "1", maxSelections: "2" },
+    ],
+  ] as const)("treats a bounds-only %s change as divergent", async (_bound, existing, changed) => {
+    const result = await createPoll(
+      duplicateDeps(snapshot(existing)),
+      USER_1,
+      draft({
+        idempotencyId: NONCE,
+        multiSelect: "true",
+        ...changed,
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("poll_duplicate_divergent");
     }
   });
 
@@ -1128,6 +1484,9 @@ describe("createPoll retry-after-deadline dedupe", () => {
       description: null,
       resultVisibility: "live",
       deadlineMs: DEADLINE_MS,
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -1152,12 +1511,52 @@ describe("createPoll retry-after-deadline dedupe", () => {
     }
   });
 
+  it("reconstructs multi-select bounds when deduping an after-deadline retry", async () => {
+    const existing: ExistingPollSnapshot = {
+      question: "Where should we eat?",
+      description: null,
+      resultVisibility: "live",
+      deadlineMs: DEADLINE_MS,
+      multiSelectEnabled: true,
+      minSelections: 1,
+      maxSelections: 2,
+      options: [
+        { label: "Pizza", position: 0 },
+        { label: "Tacos", position: 1 },
+      ],
+      canonicalReference: "ref-abc123",
+      canonicalReferenceKind: "generated",
+      createdAtMs: NOW,
+    };
+    const result = await createPoll(
+      afterDeadlineDeps(existing),
+      USER_1,
+      {
+        ...afterDeadlineDraft(),
+        multiSelect: "true",
+        minSelections: "1",
+        maxSelections: "2",
+      },
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        pollId: NONCE,
+        reference: "ref-abc123",
+        existing: true,
+      },
+    });
+  });
+
   it("returns the divergent error when the after-deadline retry diverges", async () => {
     const divergent: ExistingPollSnapshot = {
       question: "A different question entirely?",
       description: null,
       resultVisibility: "live",
       deadlineMs: DEADLINE_MS,
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },

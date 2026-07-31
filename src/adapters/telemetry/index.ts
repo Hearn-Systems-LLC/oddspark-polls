@@ -86,12 +86,15 @@ export function isForbiddenTelemetryKey(
 
 /**
  * The single status → result mapping for the per-request record. Vote
- * rejections (422) and rate limits (429) are errors — recording them as
- * "ok" would make the two rejection signals invisible.
+ * rejections (422) and rate limits (429) are errors ONLY when the vote
+ * route flagged the request (`voteRejection`) — recording them as "ok"
+ * would make the two rejection signals invisible, but an unflagged 422
+ * (creator-surface validation) is an ordinary outcome.
  */
 export function telemetryResultForStatus(
   status: number,
   sessionLookupFailed = false,
+  voteRejection = false,
 ): TelemetryResultCode {
   if (sessionLookupFailed || status >= 500) {
     return "error";
@@ -102,7 +105,7 @@ export function telemetryResultForStatus(
   if (status === 404) {
     return "not_found";
   }
-  if (status === 422 || status === 429) {
+  if (voteRejection && (status === 422 || status === 429)) {
     return "error";
   }
   return "ok";

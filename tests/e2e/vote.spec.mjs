@@ -111,10 +111,13 @@ test.describe("public voting flow", () => {
     return { submissionId, optionId, response };
   }
 
-  const readonlyMarker = (page, optionLabel) =>
+  // The ◆ glyph itself is aria-hidden; the cast row carries visually-hidden
+  // "Your vote" text (a11y), which is also the reliable cast-state hook:
+  // every read-only row renders a marker span for alignment, cast or not.
+  const castMarker = (page, optionLabel) =>
     page
       .locator(".poll-option-readonly", { hasText: optionLabel })
-      .locator(".poll-option-marker");
+      .getByText("Your vote");
 
   test.afterAll(() => {
     for (const userId of seededUserIds) {
@@ -185,8 +188,8 @@ test.describe("public voting flow", () => {
       "Counted. Results are live, updating as they arrive.",
     );
     // The Counted read-only state marks the voter's own cast selection.
-    await expect(readonlyMarker(page, "Beta")).toBeVisible();
-    await expect(readonlyMarker(page, "Alpha")).toHaveCount(0);
+    await expect(castMarker(page, "Beta")).toHaveCount(1);
+    await expect(castMarker(page, "Alpha")).toHaveCount(0);
 
     await page.reload();
     await expect(page).toHaveTitle(`Already voted — ${question}`);
@@ -194,8 +197,8 @@ test.describe("public voting flow", () => {
     await expect(page.getByText("You've already voted here.")).toBeVisible();
     await expect(page.getByText("Alpha")).toBeVisible();
     await expect(page.getByText("Beta")).toBeVisible();
-    await expect(readonlyMarker(page, "Beta")).toBeVisible();
-    await expect(readonlyMarker(page, "Alpha")).toHaveCount(0);
+    await expect(castMarker(page, "Beta")).toHaveCount(1);
+    await expect(castMarker(page, "Alpha")).toHaveCount(0);
     await expect(page.getByRole("radio")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "VOTE" })).toHaveCount(0);
 
@@ -246,8 +249,13 @@ test.describe("public voting flow", () => {
     expect(postResponse.status()).toBe(422);
     await expect(page).toHaveTitle(`Vote not counted — ${question}`);
     await expect(page.locator("[data-vote-outcome]")).toBeFocused();
-    await expect(page.locator("[data-vote-outcome]")).toContainText(
+    // Exact heading/body split: the retry idiom's own " — " must not become
+    // a dangling body fragment.
+    await expect(page.locator("[data-vote-outcome] strong")).toHaveText(
       "That didn't land.",
+    );
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      "That didn't land. The Vote wasn't recorded and your ballot is still here, exactly as you left it. Try again — and if it keeps failing, the Poll will still be here in a minute.",
     );
     await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
     // The error re-render re-issues the voter cookie the retry needs and
@@ -318,11 +326,7 @@ test.describe("public voting flow", () => {
     await expect(noJsPage.locator("[data-vote-outcome]")).toContainText(
       "Counted. Results are live, updating as they arrive.",
     );
-    await expect(
-      noJsPage
-        .locator(".poll-option-readonly", { hasText: "Alpha" })
-        .locator(".poll-option-marker"),
-    ).toBeVisible();
+    await expect(castMarker(noJsPage, "Alpha")).toHaveCount(1);
     expect(
       d1Query(
         `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
@@ -429,8 +433,13 @@ test.describe("public voting flow", () => {
     });
     expect(conflict.status()).toBe(422);
     await page.setContent(await conflict.text());
-    await expect(page.locator("[data-vote-outcome]")).toContainText(
-      "Your earlier Vote stands",
+    // Exact heading/body split: single-sentence copy is ALL heading — the
+    // em-dash clause stays in the heading and the body is empty.
+    await expect(page.locator("[data-vote-outcome] strong")).toHaveText(
+      "Your earlier Vote stands — this change wasn't recorded.",
+    );
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      "Your earlier Vote stands — this change wasn't recorded.",
     );
     await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
     const minted =
@@ -568,15 +577,20 @@ test.describe("public voting flow", () => {
     expect(response.status()).toBe(422);
     await page.setContent(await response.text());
     await expect(page).toHaveTitle(`Poll closed — ${question}`);
-    await expect(page.locator("[data-vote-outcome]")).toContainText(
-      "This Poll closed while you were deciding",
+    // Exact heading/body split: heading runs through the (dynamic) close
+    // timestamp; the body is exactly "Your Vote wasn't recorded." — the
+    // em-dash before {when} must not split into a dangling body.
+    await expect(page.locator("[data-vote-outcome] strong")).toHaveText(
+      /^This Poll closed while you were deciding — .+\.$/u,
     );
-    await expect(page.locator("[data-vote-outcome]")).toContainText(
-      "Your Vote wasn't recorded.",
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      /^This Poll closed while you were deciding — .+\.\s+Your Vote wasn't recorded\.$/u,
     );
     await expect(page.getByRole("radio")).toHaveCount(0);
-    // The preserved ballot marks the submitted selection in the read-only state.
-    await expect(readonlyMarker(page, "Beta")).toBeVisible();
+    // The submitted ballot was REJECTED — never recorded — so the read-only
+    // state marks nothing: the ◆ marks only a vote that actually landed.
+    await expect(castMarker(page, "Beta")).toHaveCount(0);
+    await expect(castMarker(page, "Alpha")).toHaveCount(0);
     expect(
       d1Query(
         `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
@@ -657,8 +671,8 @@ test.describe("public voting flow", () => {
       "This Poll closed",
     );
     await expect(page.getByRole("radio")).toHaveCount(0);
-    await expect(readonlyMarker(page, "Beta")).toBeVisible();
-    await expect(readonlyMarker(page, "Alpha")).toHaveCount(0);
+    await expect(castMarker(page, "Beta")).toHaveCount(1);
+    await expect(castMarker(page, "Alpha")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "VOTE" })).toHaveCount(0);
   });
 
@@ -746,7 +760,100 @@ test.describe("public voting flow", () => {
     await expect(page.getByText("Alpha")).toBeVisible();
     await expect(page.getByText("Beta")).toBeVisible();
     await expect(page.getByRole("radio")).toHaveCount(0);
-    await expect(page.locator(".poll-option-marker")).toHaveCount(0);
+    // Every read-only row renders a marker span (alignment), but nothing was
+    // cast — so no ◆ state and no "Your vote" text anywhere.
+    await expect(page.locator(".poll-option-marker")).toHaveCount(2);
+    await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
+    await expect(page.getByText("Your vote")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "VOTE" })).toHaveCount(0);
+  });
+
+  test("marks the cast selection, never the rejected ballot, on an already-voted re-render", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const question = "Two tabs?";
+    const created = await publishPoll(page, context, baseURL, question);
+    // Two tabs share the cookie jar; both load the open form BEFORE either
+    // votes, so tab B still holds a submittable ballot.
+    await page.goto(created.path);
+    const tabB = await context.newPage();
+    await tabB.goto(created.path);
+    const submissionIdB =
+      (await tabB
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    const betaOptionId =
+      (await tabB
+        .getByRole("radio", { name: "Beta" })
+        .getAttribute("value")) ?? "";
+    assertUuid(submissionIdB);
+    assertUuid(betaOptionId);
+
+    // Tab A votes option 1 (Alpha).
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle(`Counted — ${question}`);
+
+    // Tab B submits option 2 (Beta): rejected as already-voted. The
+    // read-only re-render must mark the CAST selection (Alpha) — never the
+    // just-submitted, rejected one (Beta).
+    const duplicate = await tabB.request.post(created.path, {
+      form: { submission_id: submissionIdB, option_id: betaOptionId },
+      headers: formHeaders(baseURL),
+      maxRedirects: 0,
+    });
+    expect(duplicate.status()).toBe(422);
+    await tabB.setContent(await duplicate.text());
+    await expect(tabB.locator("[data-vote-outcome]")).toContainText(
+      "You've already voted here.",
+    );
+    await expect(castMarker(tabB, "Alpha")).toHaveCount(1);
+    await expect(castMarker(tabB, "Beta")).toHaveCount(0);
+
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    await tabB.close();
+  });
+
+  test("treats a malformed voter cookie as absent, re-issues it, and the Vote lands", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const question = "Malformed cookie?";
+    const created = await publishPoll(page, context, baseURL, question);
+    await context.addCookies([
+      {
+        name: "oddspark.voter",
+        value: "not-hex!",
+        url: requireBaseUrl(baseURL),
+      },
+    ]);
+
+    // A present-but-malformed cookie is never HMAC'd into a garbage
+    // identity: the response re-issues a well-formed one.
+    await page.goto(created.path);
+    const reissued = (await context.cookies()).find(
+      ({ name }) => name === "oddspark.voter",
+    );
+    expect(reissued?.value ?? "").toMatch(/^[a-f0-9]{32}$/u);
+
+    // And the re-issued identity votes normally.
+    const { response } = await castVoteViaRequest(
+      page,
+      baseURL,
+      created.path,
+      "Alpha",
+    );
+    expect(response.status()).toBe(303);
+    await page.goto(created.path);
+    await expect(page.locator("[data-vote-outcome]")).toContainText(
+      "Counted.",
+    );
   });
 });

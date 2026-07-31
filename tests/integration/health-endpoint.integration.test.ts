@@ -1,0 +1,52 @@
+import { env } from "cloudflare:workers";
+import { afterEach, describe, expect, it } from "vitest";
+import { GET } from "../../src/pages/api/health";
+
+// The endpoint reads the worker env directly (cloudflare:workers), so the
+// missing-binding case is simulated by blanking the binding on the shared
+// test env and restoring it afterwards.
+const mutableEnv = env as unknown as Record<string, unknown>;
+const originalDigestSecret = env.VOTE_DIGEST_SECRET;
+
+afterEach(() => {
+  mutableEnv.VOTE_DIGEST_SECRET = originalDigestSecret;
+});
+
+describe("GET /api/health", () => {
+  it("reports ok when every binding voting needs is present", async () => {
+    const response = await GET(
+      {} as unknown as Parameters<typeof GET>[0],
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("fails loud naming the missing binding — never its value", async () => {
+    mutableEnv.VOTE_DIGEST_SECRET = undefined;
+
+    const response = await GET(
+      {} as unknown as Parameters<typeof GET>[0],
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({ ok: false, missing: ["VOTE_DIGEST_SECRET"] });
+    expect(JSON.stringify(body)).not.toContain(String(originalDigestSecret));
+  });
+
+  it("treats a blank digest secret as missing", async () => {
+    mutableEnv.VOTE_DIGEST_SECRET = "   ";
+
+    const response = await GET(
+      {} as unknown as Parameters<typeof GET>[0],
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      missing: ["VOTE_DIGEST_SECRET"],
+    });
+  });
+});

@@ -100,9 +100,15 @@ describe("telemetry adapter", () => {
     expect(classifyAuthProviderOutcome("/creator", 200, null)).toBe("none");
   });
 
-  it("records vote rejections (422) and rate limits (429) as errors, not ok", () => {
-    expect(telemetryResultForStatus(422)).toBe("error");
-    expect(telemetryResultForStatus(429)).toBe("error");
+  it("records flagged vote rejections (422) and rate limits (429) as errors, not ok", () => {
+    expect(telemetryResultForStatus(422, false, true)).toBe("error");
+    expect(telemetryResultForStatus(429, false, true)).toBe("error");
+  });
+
+  it("keeps an unflagged 422/429 (creator-surface validation) as ok", () => {
+    expect(telemetryResultForStatus(422)).toBe("ok");
+    expect(telemetryResultForStatus(429)).toBe("ok");
+    expect(telemetryResultForStatus(422, false, false)).toBe("ok");
   });
 
   it("keeps the existing 403/404/5xx result mapping unchanged", () => {

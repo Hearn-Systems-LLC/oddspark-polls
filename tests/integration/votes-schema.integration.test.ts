@@ -65,7 +65,7 @@ async function insertVote(
   return voteId;
 }
 
-describe("voting D1 schema (migration 0006)", () => {
+describe("voting D1 schema (migrations 0006–0007)", () => {
   it("creates vote facts with the required keys and lookup indexes", async () => {
     const tables = await testEnv.DB.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",

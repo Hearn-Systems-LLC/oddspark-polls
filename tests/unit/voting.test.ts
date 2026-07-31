@@ -10,6 +10,7 @@ import {
   normalizeVotePayload,
   type CastVoteDeps,
   type VotePersistenceBatch,
+  type VoteSubmission,
   type VotingPollSnapshot,
 } from "../../src/modules/voting/index";
 import type {
@@ -514,6 +515,31 @@ describe("castVote", () => {
     expect(commandDeps.persisted).toHaveLength(0);
   });
 
+  it("falls back to the retry idiom when a strategy error message is blank", async () => {
+    const commandDeps = deps({
+      strategyFor: () => ({
+        validateSubmission: () => ({
+          ok: false,
+          error: {
+            code: "invalid_selection",
+            message: "   ",
+          },
+        }),
+        persistFacts: () => ({ selections: [] }),
+      }),
+    });
+
+    const result = await castVote(commandDeps, input);
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_selection",
+        message: VOTE_COPY.retry,
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
   it("keeps the zero-selection copy while preserving the strategy's field errors", async () => {
     const message = "Nothing's selected. Pick an option, then vote.";
     const commandDeps = deps({
@@ -601,6 +627,43 @@ describe("castVote", () => {
             throw new Error("contributor broke");
           },
         ],
+      },
+    ],
+    [
+      "the strategy resolver",
+      {
+        strategyFor: () => {
+          throw new Error("registry broke");
+        },
+      },
+    ],
+    [
+      "strategy validation",
+      {
+        strategyFor: () => ({
+          validateSubmission: () => {
+            throw new Error("validator broke");
+          },
+          persistFacts: () => ({ selections: [] }),
+        }),
+      },
+    ],
+    [
+      "strategy fact persistence",
+      {
+        strategyFor: () => ({
+          validateSubmission: (submission: VoteSubmission) => ({
+            ok: true as const,
+            value: {
+              selectedOptionIds: [
+                submission.selectedOptionIds[0] as PollOptionId,
+              ] as readonly [PollOptionId],
+            },
+          }),
+          persistFacts: () => {
+            throw new Error("facts broke");
+          },
+        }),
       },
     ],
   ])("fails safely when %s throws", async (_dependency, override) => {

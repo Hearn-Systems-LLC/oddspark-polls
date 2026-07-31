@@ -100,6 +100,7 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     pollId: null,
     sessionExpired: false,
     sessionLookupFailed: false,
+    voteRejection: false,
   };
 
   context.locals.requestContext = requestContext;
@@ -274,7 +275,11 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
       }
 
       const status = response.status;
-      const result = telemetryResultForStatus(status, rc.sessionLookupFailed);
+      const result = telemetryResultForStatus(
+        status,
+        rc.sessionLookupFailed,
+        rc.voteRejection,
+      );
 
       emitTelemetry({
         requestId: rc.requestId,

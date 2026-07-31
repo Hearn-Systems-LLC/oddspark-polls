@@ -308,7 +308,7 @@ describe("createVotePersistence", () => {
     });
   });
 
-  it("rolls the whole batch back when the Poll passes its deadline mid-flight", async () => {
+  it("rolls the whole batch back when the Poll's deadline has already passed before the insert", async () => {
     await insertPoll({ deadlineMs: 1 });
     const persistence = createVotePersistence(testEnv.DB);
 
@@ -445,12 +445,24 @@ describe("castVote with the D1 adapter", () => {
   it("counts exactly once when the same submission races itself", async () => {
     await insertPoll();
     const deps = castVoteDeps();
+    // Instrument the real adapter: BOTH submissions must attempt a persist,
+    // proving they raced past the pre-read and the loser's UNIQUE-collision
+    // re-read produced the replay. Sequential scheduling would persist once
+    // (the second pre-read would find the stored vote) and pass the outcome
+    // assertions below without ever exercising the collision path.
+    let persistAttempts = 0;
+    const realPersistVote = deps.persistVote;
+    deps.persistVote = async (persistBatch) => {
+      persistAttempts += 1;
+      return realPersistVote(persistBatch);
+    };
 
     const outcomes = await Promise.all([
       castVote(deps, integratedCommand),
       castVote(deps, integratedCommand),
     ]);
 
+    expect(persistAttempts).toBe(2);
     expect(outcomes.every((result) => result.ok)).toBe(true);
     expect(
       outcomes.filter((result) => result.ok && !result.value.existing),

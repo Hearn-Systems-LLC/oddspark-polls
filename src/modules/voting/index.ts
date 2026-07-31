@@ -290,17 +290,32 @@ export async function castVote(
     });
   }
 
-  const strategy = deps.strategyFor(poll.pollType);
+  // Strategy ports join the module's error discipline: a throwing strategy
+  // (or a throwing strategyFor) degrades to a transient vote_failed Result,
+  // never a rejected promise.
+  let strategy: VotingPollTypeStrategy | null;
+  try {
+    strategy = deps.strategyFor(poll.pollType);
+  } catch {
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
   if (!strategy) {
     return failure("vote_failed", VOTE_COPY.retry);
   }
-  const validated = strategy.validateSubmission(
-    { selectedOptionIds: input.selectedOptionIds },
-    { options: poll.options },
-  );
+  let validated: Result<ValidatedVoteSubmission>;
+  try {
+    validated = strategy.validateSubmission(
+      { selectedOptionIds: input.selectedOptionIds },
+      { options: poll.options },
+    );
+  } catch {
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
   if (!validated.ok) {
     // The strategy's message and field errors describe a ballot that can
     // never succeed — pass them through instead of transient-retry copy.
+    // A blank strategy message is a defect, not voter-facing copy: fall back
+    // to the retry idiom rather than render nothing.
     const strategyError = validated.error;
     const detail = {
       ...(strategyError.fieldErrors !== undefined
@@ -310,9 +325,14 @@ export async function castVote(
         ? { reasonCodes: strategyError.reasonCodes }
         : {}),
     };
-    return strategyError.code === "selection_required"
-      ? failure("selection_required", VOTE_COPY.selectionRequired, detail)
-      : failure("invalid_selection", strategyError.message, detail);
+    if (strategyError.code === "selection_required") {
+      return failure("selection_required", VOTE_COPY.selectionRequired, detail);
+    }
+    const message =
+      strategyError.message.trim().length > 0
+        ? strategyError.message
+        : VOTE_COPY.retry;
+    return failure("invalid_selection", message, detail);
   }
 
   let digest: string | null = null;
@@ -337,14 +357,19 @@ export async function castVote(
   } catch {
     return failure("vote_failed", VOTE_COPY.retry);
   }
-  const contributions: VotePersistenceContribution[] =
-    strategy.persistFacts(validated.value).selections.map(
-      ({ pollOptionId }) => ({
-        kind: "vote_selection",
-        voteId,
-        pollOptionId,
-      }),
-    );
+  let selections: { pollOptionId: PollOptionId }[];
+  try {
+    selections = strategy.persistFacts(validated.value).selections;
+  } catch {
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
+  const contributions: VotePersistenceContribution[] = selections.map(
+    ({ pollOptionId }) => ({
+      kind: "vote_selection",
+      voteId,
+      pollOptionId,
+    }),
+  );
   if (digest !== null) {
     contributions.push({
       kind: "voter_claim",

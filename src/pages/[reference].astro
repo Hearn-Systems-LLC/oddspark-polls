@@ -133,17 +133,15 @@ const countedBody = (currentPoll: PollPage): string => {
 };
 
 // VOTE_COPY is the single source for outcome strings. Each catalog entry is
-// "Heading — body." or "Heading. Body."; split here rather than re-encoding
-// the strings inline (they drift otherwise).
+// "Heading. Body."; split on the FIRST sentence break here rather than
+// re-encoding the strings inline (they drift otherwise). Never split on
+// " — ": retry and idempotencyConflict carry their own em-dash clause, and
+// a dash-first split mangles them. Single-sentence copy is all heading.
 const splitCopy = (copy: string): { heading: string; body: string } => {
-  const dashIndex = copy.indexOf(" — ");
-  if (dashIndex >= 0) {
-    return {
-      heading: copy.slice(0, dashIndex),
-      body: `— ${copy.slice(dashIndex + 3)}`,
-    };
-  }
   const dotIndex = copy.indexOf(". ");
+  if (dotIndex < 0) {
+    return { heading: copy, body: "" };
+  }
   return {
     heading: copy.slice(0, dotIndex + 1),
     body: copy.slice(dotIndex + 2),
@@ -186,6 +184,16 @@ const outcomeFromError = (
         titlePrefix: "Vote already counted",
         tone: "rejection",
       };
+    case "invalid_selection":
+      // The strategy's preserved message describes why THIS ballot can never
+      // land — render it, not the retry idiom. (A blank strategy message
+      // already fell back to retry copy inside castVote.)
+      return {
+        code: error.code,
+        ...splitCopy(error.message),
+        titlePrefix: "Vote not counted",
+        tone: "rejection",
+      };
     default:
       return {
         code: error.code,
@@ -214,9 +222,20 @@ const rateLimitedOutcome = (): VoteOutcomeView => {
 const formSchema = z.object({
   submissionId: z.string().refine(isUuidShape),
   // Bounded before any hashing: forged bodies with thousands of entries are
-  // rejected at the schema, not after paying the sort/hash cost.
-  selectedOptionIds: z.array(z.string()).max(16),
+  // rejected at the schema, not after paying the sort/hash cost. The bound
+  // is the domain option cap so Story 1.7 multi-select ballots on large
+  // polls are never schema-rejected.
+  selectedOptionIds: z.array(z.string()).max(POLL_CAPS.maxOptions),
 });
+
+// Only the vote route's own 422/429 outcomes are telemetry errors — a
+// creator-surface validation 422 keeps its pre-1.5 "ok" semantics. The vote
+// page flags each rejection it assigns so the mapping can tell them apart.
+const markVoteRejection = (): void => {
+  if (Astro.locals.requestContext) {
+    Astro.locals.requestContext.voteRejection = true;
+  }
+};
 
 const issueVoterCookie = (): void => {
   voterToken = createVoterToken();
@@ -285,6 +304,7 @@ if (poll && method === "POST") {
         message: VOTE_COPY.retry,
       });
       Astro.response.status = 422;
+      markVoteRejection();
     } else {
       const submittedId = parsed.data.submissionId;
 
@@ -307,6 +327,7 @@ if (poll && method === "POST") {
         actionDisabled = true;
         Astro.response.status = 429;
         Astro.response.headers.set("retry-after", "60");
+        markVoteRejection();
       } else {
         // Strategy resolution honors the stored poll type: unknown types
         // fail closed inside castVote (vote_failed), never validated as
@@ -367,12 +388,16 @@ if (poll && method === "POST") {
             result.error.code === "already_voted" ||
             result.error.code === "poll_closed";
           Astro.response.status = 422;
+          markVoteRejection();
         }
       }
     }
-  } catch {
+  } catch (error) {
     // Unexpected exceptions are infrastructure failures — 500, never the
     // voter-correctable 422. 422 is reserved for domain-mapped outcomes.
+    // Log the cause for diagnostics; the response stays generic and never
+    // leaks internals.
+    console.error("Vote submission failed unexpectedly.", error);
     return new Response("Something went wrong.", {
       status: 500,
       headers: { "cache-control": "private, no-store" },
@@ -389,6 +414,31 @@ if (poll && method === "POST") {
     // session_token_missing.
     if (voterToken === null) {
       issueVoterCookie();
+    }
+  }
+
+  if (readOnly) {
+    // already_voted / poll_closed re-renders are read-only — but the ballot
+    // just submitted was REJECTED, so it must never be marked as cast.
+    // Resolve the voter's actual cast selection through the claim → vote →
+    // selection chain exactly as the GET path does; no stored vote means no
+    // marker.
+    selectedOptionIds = [];
+    if (voterToken !== null) {
+      try {
+        const voterDigest = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
+          pollId: poll.pollId,
+          checkKind: "session",
+          token: voterToken,
+        });
+        selectedOptionIds = await votePersistence.findVoteSelectionByClaim(
+          poll.pollId,
+          "session",
+          voterDigest,
+        );
+      } catch {
+        // No marker; the state itself still renders.
+      }
     }
   }
 } else if (poll && (method === "GET" || method === "HEAD")) {
@@ -463,8 +513,8 @@ if (poll && method === "POST") {
   }
 
   // Read-only GET states mark the voter's own cast selection (UX-DR2 ◆):
-  // resolve it through the claim → vote → selection chain. POST outcomes
-  // already carry the selection in scope and skip this lookup.
+  // resolve it through the claim → vote → selection chain. Read-only POST
+  // re-renders resolve the same way in the POST branch above.
   if (readOnly && voterDigest !== null) {
     try {
       selectedOptionIds = await votePersistence.findVoteSelectionByClaim(

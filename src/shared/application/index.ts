@@ -81,8 +81,11 @@ export interface PollTypeStrategy<
   readonly type: PollType;
   readonly contractVersion: typeof POLL_TYPE_CONTRACT_VERSION;
   readonly create: PollTypeCreatePort<TCreateInput, TCreationFacts>;
-  // Story 1.5: validates one Voter submission against the Poll's persisted
-  // creation facts (selection shape, ballot ordering, availability grid).
+  // Story 1.5: validates one Voter submission against the Poll's validation
+  // facts (selection shape, ballot ordering, availability grid). A poll-type
+  // module may narrow this port to its persisted facts shape — ids exist only
+  // after creation — without bumping the contract version
+  // (docs/design/poll-type-contract-check.md, "Sanctioned refinements").
   readonly validateSubmission?: (
     submission: TSubmission,
     facts: TCreationFacts,

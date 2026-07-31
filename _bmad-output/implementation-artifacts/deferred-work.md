@@ -1,5 +1,9 @@
 # Deferred Work
 
+## Deferred from: code review of 1-7-multi-select-voting (2026-07-31)
+
+- **Bounds lock after first Vote (AD-17 handoff to Story 1.12)** — multi-select min/max bounds lock with question/options/type once any Vote is accepted; retroactive bound edits would invalidate accepted ballots. No edit surface exists until Story 1.12 (close/edit/delete); 1.12 must enforce the lock. Recorded in Story 1.7 decisions table; not implemented in 1.7 by design.
+
 ## Deferred from: code review of 1-1-project-foundation-deployable-skeleton (2026-07-29)
 
 - Playwright e2e not in CI gate — spec gate requires unit+integration only; add when the e2e suite grows.
@@ -80,3 +84,4 @@
 - The vote-flash digest is deterministic per poll (HMAC of the poll id), so a copied cookie value can re-fire the cosmetic "Counted." banner on another visit. Deferred: no tally impact; binding the flash to the voter token is polish for a later story [src/pages/[reference].astro].
 - `/api/health` checks binding presence only (no D1 query, no `VOTE_RATE_LIMITER` check), and the deploy gate smokes staging but not production. Accepted as-is (Justin, 2026-07-31): presence-only + staging smoke is Story 1.5's bar; a production-leg smoke and a deepened probe are candidates for the ops hardening track [src/pages/api/health.ts, .github/workflows/deploy.yml].
 - A `#` inside an unquoted pasted secret would be silently truncated by dotenv while the provisioning helper reports success. Deferred: GitHub secrets are hex and Google's are `[A-Za-z0-9-_]`, so no real provider credential hits this; the script's `binding_key` comment documents the unmodeled dotenv forms [scripts/provision-auth-secrets.zsh].
+- The staging smoke races Workers version propagation: the PR #3 deploy gate failed on `/api/health` 404s because the smoke's five retries over ~20s all hit the pre-deploy version when a brand-new route shipped; the endpoint was live moments later and the re-run passed. Deferred: widen the smoke's retry/backoff window (or poll until the new version marker appears) so first-deploy-of-a-route doesn't need a manual `gh run rerun` [scripts/smoke.mjs, .github/workflows/deploy.yml].

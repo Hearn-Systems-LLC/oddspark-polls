@@ -103,6 +103,15 @@ function enhance(): void {
         input.min = "1";
         input.max = String(optionCount);
         input.step = "1";
+        // Clamp an oversized typed value when options shrink so the field
+        // stays within the domain ceiling before submit (novalidate form).
+        const raw = input.value.trim();
+        if (raw.length > 0) {
+          const parsed = Number(raw);
+          if (Number.isInteger(parsed) && parsed > optionCount) {
+            input.value = String(optionCount);
+          }
+        }
       }
     }
   }

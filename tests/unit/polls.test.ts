@@ -119,13 +119,24 @@ describe("validateCreatePoll", () => {
       "a non-integer minimum",
       { multiSelect: "true", minSelections: "1.5" },
       "minSelections",
-      "boundsMinTooLow",
+      "boundsNotInteger",
     ],
     [
       "a minimum above the maximum",
-      { multiSelect: "true", minSelections: "3", maxSelections: "2" },
+      {
+        multiSelect: "true",
+        minSelections: "3",
+        maxSelections: "2",
+        options: ["A", "B", "C", "D"],
+      } satisfies Partial<CreatePollDraft>,
       "minSelections",
       "boundsOrder",
+    ],
+    [
+      "a minimum above the option count with blank max",
+      { multiSelect: "true", minSelections: "3" },
+      "minSelections",
+      "boundsMinTooHigh",
     ],
     [
       "a maximum above the option count",
@@ -137,7 +148,7 @@ describe("validateCreatePoll", () => {
       "a non-integer maximum",
       { multiSelect: "true", maxSelections: "1.5" },
       "maxSelections",
-      "boundsMaxTooHigh",
+      "boundsNotInteger",
     ],
     [
       "a minimum bound while multi-select is off",
@@ -151,12 +162,37 @@ describe("validateCreatePoll", () => {
       "multiSelect",
       "boundsWithoutMultiSelect",
     ],
-  ] as const)("rejects %s", (_case, overrides, field, copyKey) => {
-    const result = validateCreatePoll(draft(overrides), NOW);
+  ])("rejects %s", (_case, overrides, field, copyKey) => {
+    const input = draft(overrides as Partial<CreatePollDraft>);
+    const result = validateCreatePoll(input, NOW);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      const expected = CREATE_POLL_COPY[copyKey].replace("{count}", "2");
-      expect(result.error.fieldErrors?.[field]).toBe(expected);
+      const optionCount = String(
+        input.options.filter((label: string) => label.trim().length > 0).length,
+      );
+      const expected = CREATE_POLL_COPY[
+        copyKey as keyof typeof CREATE_POLL_COPY
+      ].replace("{count}", optionCount);
+      expect(result.error.fieldErrors?.[field as string]).toBe(expected);
+    }
+  });
+
+  it("does not add a spurious bounds error when options are already missing", () => {
+    const result = validateCreatePoll(
+      draft({
+        options: ["", ""],
+        multiSelect: "true",
+        minSelections: "",
+        maxSelections: "",
+      }),
+      NOW,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reasonCodes).toEqual({
+        options: "options_missing",
+      });
+      expect(result.error.fieldErrors?.minSelections).toBeUndefined();
     }
   });
 
@@ -493,9 +529,29 @@ describe("validateCreatePoll", () => {
       draft({ multiSelect: "true", minSelections: "0" }),
     ],
     [
+      "bounds_not_integer",
+      "minSelections",
+      draft({ multiSelect: "true", minSelections: "1.5" }),
+    ],
+    [
+      "bounds_not_integer",
+      "maxSelections",
+      draft({ multiSelect: "true", maxSelections: "1.5" }),
+    ],
+    [
+      "bounds_min_too_high",
+      "minSelections",
+      draft({ multiSelect: "true", minSelections: "3" }),
+    ],
+    [
       "bounds_order",
       "minSelections",
-      draft({ multiSelect: "true", minSelections: "2", maxSelections: "1" }),
+      draft({
+        multiSelect: "true",
+        minSelections: "3",
+        maxSelections: "2",
+        options: ["A", "B", "C", "D"],
+      }),
     ],
     [
       "bounds_max_too_high",
@@ -1332,6 +1388,31 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("poll_duplicate_divergent");
+    }
+  });
+
+  it("dedupes blank-default NULL bounds against an explicit 1-to-all retry", async () => {
+    // Stored NULL means effective min 1 / max all options; retyping those
+    // numbers on retry is the same policy, not a divergent edit.
+    const result = await createPoll(
+      duplicateDeps(
+        snapshot({
+          multiSelectEnabled: true,
+          minSelections: null,
+          maxSelections: null,
+        }),
+      ),
+      USER_1,
+      draft({
+        idempotencyId: NONCE,
+        multiSelect: "true",
+        minSelections: "1",
+        maxSelections: "2",
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.existing).toBe(true);
     }
   });
 

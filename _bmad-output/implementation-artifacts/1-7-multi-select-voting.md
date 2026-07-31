@@ -4,7 +4,7 @@ baseline_commit: 3115c1b6d29257a3ddfe5a9cc8814d8455746473
 
 # Story 1.7: Multi-Select Voting
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Prerequisite: Story 1.6 is in `review` on branch `story/1-6-voting-page-states-resilience`. 1.7 modifies 1.6's voting page (`[reference].astro`) and vote-form script directly — start ONLY after 1.6's review closes and merges to main, then re-check `git log` (the baseline above is pre-1.6-merge main). Every `[1.6]`-tagged file reference below describes that branch's state. -->
@@ -60,6 +60,19 @@ so that "choose your top three" polls work without becoming a survey.
   - [x] Integration: `polls-schema` 0008 columns/defaults; `polls-adapter` bounds round-trip + D4 dedupe divergence on bounds-only difference (the `matchesExistingPoll` trap); `votes-adapter` — one batch commits vote + N `vote_selection` rows + claim + version increment atomically; duplicate option ID in one ballot aborts the whole batch (composite-PK guard); replay of a committed multi-select vote returns the stored outcome
   - [x] E2E (`vote.spec.mjs` + `create-poll-authed.spec.mjs` patterns, `creator-session.mjs` helpers): create a multi-select poll with bounds via the form (bad bounds → inline 422, fields preserved); voter page renders checkboxes with `[ ]`/`[×]`; below min → button disabled + `Pick at least {min}.`; at max → unselected rows refuse checks, selected rows still uncheck, caption shows `Pick up to {max}. {n} chosen.`; forced out-of-bounds POST (JS-off or scripted) → 422 naming the bound with the real number (never a literal `{min}`), every checkbox re-checked, fresh `submission_id`, outcome focused; happy path counts once and replays clean; POST-vote and already-voted read-only renders show `[×]` on every cast row and `[ ]` on uncast rows (never `◆`/`·`). Keep specs retry-tolerant (`cleanupCreator` in `afterAll` — the 1.4 CI-retry hazard)
   - [x] Gates in the 1.5/1.6 order: `pnpm migrations:guard` → full Vitest → `pnpm check` → Playwright → `pnpm types` → production build — all green before story-done
+
+### Review Findings
+
+Code review 2026-07-31 (bmad-code-review; blind + edge-case + acceptance layers; 1.7-only diff vs `dbb7f56`). Acceptance Auditor: all four ACs + listed constraints pass. Edge Case Hunter: no unhandled paths. Blind Hunter findings triaged against source.
+
+- [x] [Review][Patch] D4 treats blank-default NULL bounds as divergent from explicit effective defaults (min=1 / max=option count) — a retry that re-expresses the same 1-to-all policy can force "start a new one" [`src/modules/polls/index.ts:570-572`] — fixed: `matchesExistingPoll` compares effective min/max policy
+- [x] [Review][Patch] Non-integer max uses `bounds_max_too_high` + option-count copy; non-integer min uses `bounds_min_too_low` ("Min is at least 1") — wrong steering for values like `1.5` [`src/modules/polls/index.ts:303-324`] — fixed: `bounds_not_integer` / "Bounds must be whole numbers."
+- [x] [Review][Patch] Multi-select bounds still evaluate when the option list is already invalid (zero labels → effective max 0) and can add a spurious `bounds_order` beside the real options error [`src/modules/polls/index.ts:271-337`] — fixed: skip bounds when `options` already failed
+- [x] [Review][Patch] When min alone exceeds the option count (blank max), failure is still `bounds_order` ("Min can't be more than max") and never names that the implicit max is the option count [`src/modules/polls/index.ts:330-337`] — fixed: `bounds_min_too_high` names option count
+- [x] [Review][Patch] Over-max 422 re-render SSR's correct caption and checked set but does not set `data-max-reached` on the form — max-reached visual affordance waits for JS [`src/pages/[reference].astro:721-723`] — fixed: SSR `data-max-reached` when at max
+- [x] [Review][Patch] Create-form enhancer updates `input.max` when options shrink but leaves an oversized typed max in the field; with `novalidate` the creator only learns on 422 [`src/scripts/create-poll-form.ts:100-107`] — fixed: clamp oversized typed bounds to option count
+- [x] [Review][Patch] Below-min multi-select reassigns the live region's `textContent` on every toggle even when the string is unchanged (`Pick at least {min}.`), risking polite re-chatter without new information [`src/scripts/vote-form.ts:163-166`] — fixed: rewrite caption only when text changes
+- [x] [Review][Patch] Story decision that bounds lock after first Vote (AD-17 / Story 1.12 handoff) lives only in the story file — record it in `deferred-work.md` so 1.12 cannot miss it [`1-7-multi-select-voting.md` decisions table] — fixed: ledger entry under code review of 1.7
 
 ## Dev Notes
 
@@ -218,7 +231,9 @@ OpenAI Codex (GPT-5)
 - tests/integration/votes-adapter.integration.test.ts
 - tests/unit/polls.test.ts
 - tests/unit/voting.test.ts
+- _bmad-output/implementation-artifacts/deferred-work.md
 
 ## Change Log
 
 - 2026-07-31: Implemented bounded multi-select poll creation, checkbox voting, atomic N-selection persistence, result projection facts, accessibility hardening, and complete Story 1.7 regression coverage; all six repository gates are green.
+- 2026-07-31: Code review patches — D4 effective-bounds match, integer/min-vs-count bound errors, skip bounds when options invalid, SSR `data-max-reached`, create-form clamp, live-region chatter fix, AD-17 deferred-work handoff.

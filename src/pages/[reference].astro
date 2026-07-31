@@ -721,6 +721,10 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
               data-multi-select={multiSelect ? "true" : "false"}
               data-min={effectiveMinSelections}
               data-max={effectiveMaxSelections}
+              {...(multiSelect &&
+              selectedCount >= effectiveMaxSelections
+                ? { "data-max-reached": "true" }
+                : {})}
             >
               <input
                 type="hidden"

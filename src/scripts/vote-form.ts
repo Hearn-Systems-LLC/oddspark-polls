@@ -161,8 +161,14 @@ if (form) {
           locked || count < minSelections || count > maxSelections;
       }
       if (boundsHint) {
-        boundsAnnouncementRevision += 1;
-        boundsHint.textContent = boundsMessage(count);
+        const nextMessage = boundsMessage(count);
+        // Only rewrite when the caption changes — reassigning the same
+        // "Pick at least {min}." string on every below-min toggle re-chatters
+        // the polite live region without new information.
+        if (boundsHint.textContent !== nextMessage) {
+          boundsAnnouncementRevision += 1;
+          boundsHint.textContent = nextMessage;
+        }
       }
       if (count >= maxSelections) {
         form.dataset.maxReached = "true";

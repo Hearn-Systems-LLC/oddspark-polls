@@ -86,7 +86,9 @@ export const CREATE_POLL_COPY = {
   customLinkTaken: "`{slug}` is taken. Pick another.",
   boundsMinTooLow:
     "Min is at least 1 — a Poll someone can't vote in isn't a Poll.",
+  boundsNotInteger: "Bounds must be whole numbers.",
   boundsOrder: "Min can't be more than max.",
+  boundsMinTooHigh: `Min can't be more than the option count ({count}).`,
   boundsMaxTooHigh: `Max can't be more than the option count ({count}).`,
   boundsWithoutMultiSelect: "Bounds only apply when multi-select is on.",
   createFailed: "That didn't publish. Nothing was created — try again.",
@@ -297,10 +299,19 @@ export function validateCreatePoll(
         CREATE_POLL_COPY.boundsWithoutMultiSelect,
       );
     }
-  } else {
+  } else if (fieldErrors["options"] === undefined) {
+    // Skip bounds when the option list is already invalid — effective max
+    // would be 0 (or 1) and produce a noisy bounds_order next to the real
+    // options error.
     if (rawMinSelections.length > 0) {
       const parsedMin = Number(rawMinSelections);
-      if (!Number.isInteger(parsedMin) || parsedMin < 1) {
+      if (!Number.isInteger(parsedMin)) {
+        fail(
+          "minSelections",
+          "bounds_not_integer",
+          CREATE_POLL_COPY.boundsNotInteger,
+        );
+      } else if (parsedMin < 1) {
         fail(
           "minSelections",
           "bounds_min_too_low",
@@ -316,11 +327,8 @@ export function validateCreatePoll(
       if (!Number.isInteger(parsedMax)) {
         fail(
           "maxSelections",
-          "bounds_max_too_high",
-          CREATE_POLL_COPY.boundsMaxTooHigh.replace(
-            "{count}",
-            String(labels.length),
-          ),
+          "bounds_not_integer",
+          CREATE_POLL_COPY.boundsNotInteger,
         );
       } else {
         maxSelections = parsedMax;
@@ -330,12 +338,6 @@ export function validateCreatePoll(
     const effectiveMin = minSelections ?? 1;
     const effectiveMax = maxSelections ?? labels.length;
     if (
-      fieldErrors["minSelections"] === undefined &&
-      fieldErrors["maxSelections"] === undefined &&
-      effectiveMin > effectiveMax
-    ) {
-      fail("minSelections", "bounds_order", CREATE_POLL_COPY.boundsOrder);
-    } else if (
       fieldErrors["maxSelections"] === undefined &&
       effectiveMax > labels.length
     ) {
@@ -347,6 +349,24 @@ export function validateCreatePoll(
           String(labels.length),
         ),
       );
+    } else if (
+      fieldErrors["minSelections"] === undefined &&
+      effectiveMin > labels.length
+    ) {
+      fail(
+        "minSelections",
+        "bounds_min_too_high",
+        CREATE_POLL_COPY.boundsMinTooHigh.replace(
+          "{count}",
+          String(labels.length),
+        ),
+      );
+    } else if (
+      fieldErrors["minSelections"] === undefined &&
+      fieldErrors["maxSelections"] === undefined &&
+      effectiveMin > effectiveMax
+    ) {
+      fail("minSelections", "bounds_order", CREATE_POLL_COPY.boundsOrder);
     }
   }
 
@@ -561,6 +581,12 @@ function matchesExistingPoll(
       ? existing.canonicalReferenceKind === "generated"
       : existing.canonicalReferenceKind === "custom" &&
         validated.customLink === existing.canonicalReference;
+  // Compare effective selection policy, not stored NULL-vs-number encoding:
+  // blank defaults persist as NULL (min 1 / max all), while an explicit
+  // min=1 / max=option-count is the same 1-to-all policy.
+  const optionCount = validated.options.length;
+  const effectiveMin = (value: number | null): number => value ?? 1;
+  const effectiveMax = (value: number | null): number => value ?? optionCount;
   return (
     referenceMatches &&
     validated.question === existing.question &&
@@ -568,9 +594,11 @@ function matchesExistingPoll(
     validated.resultVisibility === existing.resultVisibility &&
     validated.deadlineMs === existing.deadlineMs &&
     validated.multiSelect === existing.multiSelectEnabled &&
-    validated.minSelections === existing.minSelections &&
-    validated.maxSelections === existing.maxSelections &&
-    validated.options.length === existing.options.length &&
+    effectiveMin(validated.minSelections) ===
+      effectiveMin(existing.minSelections) &&
+    effectiveMax(validated.maxSelections) ===
+      effectiveMax(existing.maxSelections) &&
+    optionCount === existing.options.length &&
     validated.options.every(
       (option, index) =>
         option.label === existing.options[index]?.label &&

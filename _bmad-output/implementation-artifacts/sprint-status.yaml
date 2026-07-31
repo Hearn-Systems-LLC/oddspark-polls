@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-29T11:11:59-0400
-last_updated: 2026-07-31T12:31:24-0400
+last_updated: 2026-07-31T13:42:00-0400
 project: oddspark-polls
 project_key: NOKEY
 tracking_system: file-system
@@ -55,7 +55,7 @@ development_status:
   1-4-custom-links: done
   1-5-cast-a-vote-that-counts-exactly-once: done
   1-6-voting-page-states-resilience: done
-  1-7-multi-select-voting: review
+  1-7-multi-select-voting: done
   1-8-results-view-with-visibility-settings: backlog
   1-9-live-updating-results: backlog
   1-10-motion-system-chart-toggle: backlog

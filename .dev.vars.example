@@ -4,12 +4,15 @@
 # Generate independently for local use: openssl rand -base64 32
 BETTER_AUTH_SECRET=
 BETTER_AUTH_URL=http://localhost:4321
-# Keys duplicate-vote claim digests — generate independently of the auth
-# secret: openssl rand -base64 32
-VOTE_DIGEST_SECRET=
 
 # Use the dedicated local OAuth registrations documented in README.md.
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
+
+# Keys duplicate-vote claim digests — generate independently of the auth
+# secret: openssl rand -base64 32. Keep this key last: `wrangler types` emits
+# keys in file order and the committed worker-configuration.d.ts expects
+# digest-last.
+VOTE_DIGEST_SECRET=

@@ -108,10 +108,14 @@ How to *prove* a change is good, and which layer to run for which change.
 | `pnpm migrations:guard` | Migration ordering + immutability of committed migrations | no |
 | `pnpm test:e2e` | Playwright against a dev server it starts itself — in the deploy gate (CI provisions browsers, local D1 migrations, and a throwaway `.dev.vars`) | no |
 | `pnpm build:production` | The artifact that actually ships | — |
-| `pnpm smoke:staging` | Deployed staging returns 200 and serves the token marker | yes, deployed |
+| `pnpm smoke:staging` | Deployed staging returns 200, serves the token marker, and answers the auth + binding liveness probes (`/api/auth/ok`, `/api/health`) | yes, deployed |
 
 The CI gate (`.github/workflows/deploy.yml`) runs, in order: migration guard → `pnpm test`
-→ `pnpm check` → `pnpm test:e2e` → `pnpm types` → `pnpm build:production`. Match that locally before pushing.
+→ `pnpm check` → `pnpm test:e2e` → `pnpm types` → binding-types drift check
+(`git diff --exit-code worker-configuration.d.ts`) → `pnpm build:production`. Match that
+locally before pushing. The drift check is sensitive to `.dev.vars` key order — `wrangler
+types` emits keys in file order — so keep `.dev.vars` in the canonical order the
+provisioning script produces (`VOTE_DIGEST_SECRET` last, matching `.dev.vars.example`).
 
 ### What the automated checks *don't* catch
 
@@ -278,7 +282,15 @@ drift. Record decisions where they belong above.
 - **The staging smoke test reads a real design token.** `scripts/smoke.mjs` extracts
   `--color-solar-dark` from `src/styles/tokens.css` and asserts the served HTML carries that
   hex — deleting or renaming that token breaks the deploy gate *by design*. If the smoke test
-  fails after a styling change, the fix is in the styles, not in the smoke script.
+  fails after a styling change, the fix is in the styles, not in the smoke script. The same
+  script then probes `/api/auth/ok` (auth config construction) and `/api/health` (binding
+  liveness), so a deploy with a forgotten secret fails the gate even when the page renders.
+
+- **`/api/health` is a presence-only binding-liveness probe, not a status page.** It answers
+  200 when every required binding is present and otherwise names the *missing bindings by
+  name* — never values, no authentication required. That presence-only contract is
+  load-bearing: `scripts/smoke.mjs` asserts it in the deploy gate, so keep the response free
+  of secret values and side effects.
 
 - **Hexagonal dependency direction is an invariant (AD-1), not a preference.** `src/modules/*`
   owns domain policy and depends on nothing outside the domain. `src/adapters/*` implements

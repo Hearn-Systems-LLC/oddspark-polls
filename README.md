@@ -99,7 +99,10 @@ Cloudflare preserves secrets omitted from a bulk update, so provider rotation
 never replaces `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, or
 `VOTE_DIGEST_SECRET`. Wrangler disk logs and metrics are disabled for this
 operation. Never paste a credential into chat, a command argument,
-`wrangler.jsonc`, CI logs, or Git.
+`wrangler.jsonc`, CI logs, or Git. If `.dev.vars` lists any managed key more
+than once, the helper refuses to run in every mode — wrangler applies the
+last occurrence of a duplicated key, so remove the duplicates by hand and
+re-run.
 
 Rotating `BETTER_AUTH_SECRET` is intentionally outside this helper because it
 invalidates active sessions and makes previously encrypted OAuth access and
@@ -152,7 +155,7 @@ Order is fixed:
 1. Tests + build
 2. Staging migration
 3. Staging deploy
-4. Staging smoke (HTTP 200 + token marker in HTML)
+4. Staging smoke (HTTP 200 + token marker in HTML + auth and `/api/health` binding-liveness probes)
 5. Production migration
 6. Production deploy
 
@@ -166,6 +169,10 @@ pnpm migrate:staging && pnpm deploy:staging
 SMOKE_URL=https://oddspark-polls-staging.hearnsystems.workers.dev pnpm smoke:staging
 pnpm migrate:production && pnpm deploy:production
 ```
+
+The smoke check ends with `/api/health`, an unauthenticated binding-liveness
+probe: it returns 200 when every required binding is present and names the
+missing bindings (never their values) otherwise.
 
 ### Live URLs (foundation placeholder)
 

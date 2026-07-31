@@ -65,34 +65,98 @@ remote_secret_names() {
 }
 
 # Extract the normalized binding key from a .dev.vars line, covering the
-# forms wrangler/dotenv also treat as the same key: optional leading
-# whitespace and an optional shell-style `export ` prefix. Prints nothing and
-# returns nonzero for comments, blank lines, and other non-bindings.
+# dotenv forms wrangler also treats as the same key: optional leading
+# whitespace, an optional shell-style `export ` prefix, and either an `=` or
+# `:` separator. Not modeled (accepted by dotenv but never present in this
+# repo's .dev.vars): multi-line quoted values, inline `#` comments after a
+# value, and backtick-quoted values. Prints nothing and returns nonzero for
+# comments, blank lines, and other non-bindings.
 binding_key() {
   local line="$1"
-  if [[ "$line" =~ '^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=' ]]; then
+  if [[ "$line" =~ '^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*[=:]' ]]; then
     print -r -- "${match[2]}"
     return 0
   fi
   return 1
 }
 
-has_nonempty_local_binding() {
-  local expected="$1"
-  local line key
+# Extract the value dotenv would see for a .dev.vars line: everything after
+# the first `=`/`:` separator, trimmed, with one layer of surrounding single
+# or double quotes stripped (dotenv strips quotes after trimming, so `KEY=""`
+# and `KEY="   "` both parse to empty at runtime).
+binding_value() {
+  local line="$1"
+  local value="${line#*[=:]}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if (( ${#value} >= 2 )); then
+    if [[ ( "${value[1]}" == '"' && "${value[-1]}" == '"' ) ||
+          ( "${value[1]}" == "'" && "${value[-1]}" == "'" ) ]]; then
+      value="${value[2,-2]}"
+    fi
+  fi
+  print -r -- "$value"
+}
 
-  # wrangler/dotenv honor the FIRST occurrence of a duplicated key, so the
-  # effective binding is the first matching line, never the last.
+# The keys this script manages. A .dev.vars that lists any of them more than
+# once is ambiguous — wrangler/dotenv applies the LAST occurrence of a
+# duplicated key, and guessing which line the user meant has already caused
+# one wrong fix — so every mode refuses to run against such a file.
+typeset -A managed_keys
+managed_keys=(
+  BETTER_AUTH_SECRET 1
+  BETTER_AUTH_URL 1
+  VOTE_DIGEST_SECRET 1
+  GOOGLE_CLIENT_ID 1
+  GOOGLE_CLIENT_SECRET 1
+  GITHUB_CLIENT_ID 1
+  GITHUB_CLIENT_SECRET 1
+)
+
+reject_duplicated_managed_keys() {
+  [[ -f "$destination" ]] || return 0
+  local line key
+  typeset -A occurrences
+  local -a duplicated
   while IFS= read -r line || [[ -n "$line" ]]; do
     key="$(binding_key "$line")" || continue
-    if [[ "$key" == "$expected" ]]; then
-      local effective_value="${line#*=}"
-      [[ -n "${effective_value//[[:space:]]/}" ]]
-      return
+    if (( ${+managed_keys[$key]} )); then
+      occurrences[$key]=$(( ${occurrences[$key]:-0} + 1 ))
+      if (( occurrences[$key] == 2 )); then
+        duplicated+=("$key")
+      fi
     fi
   done < "$destination"
 
-  return 1
+  if (( ${#duplicated} )); then
+    print -u2 "Refusing to run: .dev.vars lists managed key(s) more than once: ${(j:, :)duplicated}."
+    print -u2 "wrangler/dotenv applies the last occurrence of a duplicated key; remove the duplicates by hand so the file is unambiguous, then re-run."
+    exit 1
+  fi
+}
+
+has_nonempty_local_binding() {
+  local expected="$1"
+  local line key value
+  local nonempty=1
+
+  # wrangler/dotenv applies the LAST occurrence of a duplicated key. Managed
+  # duplicates are rejected before this runs (see reject_duplicated_managed_keys),
+  # but evaluate the last match anyway so the check stays aligned with the
+  # runtime parser.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    key="$(binding_key "$line")" || continue
+    if [[ "$key" == "$expected" ]]; then
+      value="$(binding_value "$line")"
+      if [[ -n "${value//[[:space:]]/}" ]]; then
+        nonempty=0
+      else
+        nonempty=1
+      fi
+    fi
+  done < "$destination"
+
+  return $nonempty
 }
 
 read_provider_credentials() {
@@ -122,9 +186,15 @@ emit_provider_bindings() {
 emit_initial_bindings() {
   printf 'BETTER_AUTH_SECRET=%s\n' "$better_auth_secret"
   printf 'BETTER_AUTH_URL=%s\n' "$base_url"
-  printf 'VOTE_DIGEST_SECRET=%s\n' "$vote_digest_secret"
   emit_provider_bindings
+  # VOTE_DIGEST_SECRET stays last: `wrangler types` emits .dev.vars keys in
+  # file order, and the committed worker-configuration.d.ts (plus CI's
+  # throwaway .dev.vars and binding-types drift check) expects digest-last.
+  printf 'VOTE_DIGEST_SECRET=%s\n' "$vote_digest_secret"
 }
+
+# No mode proceeds against an ambiguous .dev.vars.
+reject_duplicated_managed_keys
 
 if [[ "$operation" == "initialize-voting" ]]; then
   if [[ "$target" != "local" ]]; then
@@ -151,7 +221,7 @@ if [[ "$operation" == "initialize-voting" ]]; then
   trap 'rm -f -- "$temporary_file"' EXIT HUP INT TERM
   # Drop every stale VOTE_DIGEST_SECRET line — including `export `-prefixed
   # and leading-whitespace forms — so no duplicate survives next to the
-  # fresh binding appended below (wrangler/dotenv would honor the first).
+  # fresh binding appended below (wrangler/dotenv would honor the last).
   while IFS= read -r line || [[ -n "$line" ]]; do
     local_key="$(binding_key "$line")" || local_key=""
     if [[ "$local_key" == VOTE_DIGEST_SECRET ]]; then
@@ -234,6 +304,13 @@ if [[ "$target" == "local" ]]; then
   while IFS= read -r line || [[ -n "$line" ]]; do
     key="$(binding_key "$line")" || key=""
     if [[ -n "$key" ]] && (( ${+replacement_values[$key]} )); then
+      # Replace only the first occurrence of each key and drop any later
+      # duplicates rather than re-emitting the new value next to them.
+      # Duplicated managed keys are rejected before rotation runs, so this
+      # is defense-in-depth for the loop itself.
+      if (( ${+replaced_keys[$key]} )); then
+        continue
+      fi
       printf '%s=%s\n' "$key" "$replacement_values[$key]" >> "$temporary_file"
       replaced_keys[$key]=1
     else

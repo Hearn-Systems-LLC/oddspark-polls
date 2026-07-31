@@ -613,6 +613,24 @@ describe("multipleChoiceStrategy", () => {
     });
   });
 
+  it("keeps creation facts id-free so they cannot masquerade as validation facts", () => {
+    const created = multipleChoiceStrategy.create(
+      { optionLabels: ["A", "B"] },
+      { nowMs: NOW },
+    );
+    if (!created.ok) {
+      throw new Error("creation should succeed");
+    }
+    const rejected = multipleChoiceStrategy.validateSubmission(
+      { selectedOptionIds: [optionA] },
+      // @ts-expect-error — validation consumes persisted facts with required
+      // option ids; creation facts (no ids yet) must not type-check here.
+      created.value,
+    );
+    // At runtime such a ballot is rejected, never silently accepted.
+    expect(rejected.ok).toBe(false);
+  });
+
   it("validates exactly one persisted option id", () => {
     expect(
       multipleChoiceStrategy.validateSubmission?.(

@@ -33,6 +33,8 @@ export const VOTE_COPY = {
     "Too many Votes from here, too quickly. Give it a minute. If you're a person, this shouldn't have happened, and we're sorry it did.",
   selectionRequired: "Nothing's selected. Pick an option, then vote.",
   pollDeleted: "This Poll no longer exists.",
+  idempotencyConflict:
+    "Your earlier Vote stands — this change wasn't recorded.",
 } as const;
 
 export class AlreadyVotedError extends Error {
@@ -214,7 +216,9 @@ function acceptedReplay(
 function failure(
   code: string,
   message: string,
-  extra: Pick<VoteApplicationError, "closedAtMs"> = {},
+  extra: Partial<
+    Pick<VoteApplicationError, "closedAtMs" | "fieldErrors" | "reasonCodes">
+  > = {},
 ): Result<CastVoteOutcome> {
   return {
     ok: false,
@@ -234,7 +238,9 @@ function adjudicateReplay(
   if (stored.payloadHash === payloadHash) {
     return acceptedReplay(pollId, stored);
   }
-  return failure("idempotency_conflict", VOTE_COPY.retry);
+  // A payload mismatch is a permanent conflict, not a transient failure —
+  // the stored vote stands and retrying the same submission can never land.
+  return failure("idempotency_conflict", VOTE_COPY.idempotencyConflict);
 }
 
 export async function castVote(
@@ -272,7 +278,12 @@ export async function castVote(
     return failure("poll_deleted", VOTE_COPY.pollDeleted);
   }
 
-  const nowMs = deps.nowMs();
+  let nowMs: number;
+  try {
+    nowMs = deps.nowMs();
+  } catch {
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
   if (effectivePollStatus(poll, nowMs) === "closed") {
     return failure("poll_closed", VOTE_COPY.pollClosed, {
       closedAtMs: poll.closedAtMs ?? poll.deadlineMs ?? nowMs,
@@ -288,9 +299,20 @@ export async function castVote(
     { options: poll.options },
   );
   if (!validated.ok) {
-    return validated.error.code === "selection_required"
-      ? failure("selection_required", VOTE_COPY.selectionRequired)
-      : failure("invalid_selection", VOTE_COPY.retry);
+    // The strategy's message and field errors describe a ballot that can
+    // never succeed — pass them through instead of transient-retry copy.
+    const strategyError = validated.error;
+    const detail = {
+      ...(strategyError.fieldErrors !== undefined
+        ? { fieldErrors: strategyError.fieldErrors }
+        : {}),
+      ...(strategyError.reasonCodes !== undefined
+        ? { reasonCodes: strategyError.reasonCodes }
+        : {}),
+    };
+    return strategyError.code === "selection_required"
+      ? failure("selection_required", VOTE_COPY.selectionRequired, detail)
+      : failure("invalid_selection", strategyError.message, detail);
   }
 
   let digest: string | null = null;
@@ -309,7 +331,12 @@ export async function castVote(
     }
   }
 
-  const voteId = deps.generateId();
+  let voteId: string;
+  try {
+    voteId = deps.generateId();
+  } catch {
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
   const contributions: VotePersistenceContribution[] =
     strategy.persistFacts(validated.value).selections.map(
       ({ pollOptionId }) => ({
@@ -375,6 +402,21 @@ export async function castVote(
       return failure("already_voted", VOTE_COPY.alreadyVoted);
     }
     if (cause instanceof PollClosedError) {
+      // The closed-poll trigger fires BEFORE the submission unique check, so
+      // a replay arriving after close surfaces here. Re-read first: a voter
+      // whose vote WAS recorded must get their stored outcome, never
+      // "Your Vote wasn't recorded."
+      try {
+        const stored = await deps.findVoteBySubmission(
+          poll.id,
+          input.submissionId,
+        );
+        if (stored) {
+          return adjudicateReplay(poll.id, payloadHash, stored);
+        }
+      } catch {
+        return failure("vote_failed", VOTE_COPY.retry);
+      }
       return failure("poll_closed", VOTE_COPY.pollClosed, {
         closedAtMs: poll.closedAtMs ?? poll.deadlineMs ?? nowMs,
       });

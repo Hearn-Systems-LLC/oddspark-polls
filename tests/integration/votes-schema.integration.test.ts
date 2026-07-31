@@ -81,6 +81,7 @@ describe("voting D1 schema (migration 0006)", () => {
       expect.arrayContaining([
         "vote_poll_id_idx",
         "vote_poll_id_submission_id_idx",
+        "voter_claim_vote_id_idx",
       ]),
     );
 
@@ -197,5 +198,19 @@ describe("voting D1 schema (migration 0006)", () => {
     });
 
     await expect(insertVote(pollId, "future")).resolves.toBe("vote-future");
+  });
+
+  it("fires the closed-poll trigger before the submission unique check", async () => {
+    const { pollId } = await insertPoll("trigger-order");
+    await insertVote(pollId, "trigger-order", "shared-submission");
+    await testEnv.DB.prepare("UPDATE poll SET closed_at_ms = ?1 WHERE id = ?2")
+      .bind(Date.now(), pollId)
+      .run();
+
+    // A late replay with the same submission_id hits the trigger, not the
+    // unique constraint — the application re-reads to adjudicate.
+    await expect(
+      insertVote(pollId, "trigger-order-replay", "shared-submission"),
+    ).rejects.toThrow(/poll_closed/i);
   });
 });

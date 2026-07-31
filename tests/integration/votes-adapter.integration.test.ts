@@ -16,6 +16,7 @@ import {
   PollGoneError,
   SubmissionReplayError,
   castVote,
+  type CastVoteDeps,
   type VotePersistenceBatch,
   type VotingPollTypeStrategy,
 } from "../../src/modules/voting/index";
@@ -133,6 +134,40 @@ async function counts(): Promise<{
     version: poll?.representation_version,
     votes: votes?.n ?? -1,
   };
+}
+
+function castVoteDeps(): CastVoteDeps {
+  const persistence = createVotePersistence(testEnv.DB);
+  let generated = 0;
+  return {
+    ...persistence,
+    strategyFor: (): VotingPollTypeStrategy | null => {
+      const { validateSubmission, persistFacts } = multipleChoiceStrategy;
+      return persistFacts ? { validateSubmission, persistFacts } : null;
+    },
+    createDigest: (digestInput: {
+      pollId: PollId;
+      checkKind: "session";
+      token: string;
+    }) => createVoteDigest("integration-vote-digest-secret", digestInput),
+    hashPayload: sha256Hex,
+    persistVote: persistence.insertVote,
+    generateId: () => `integrated-vote-${(generated += 1)}`,
+    nowMs: () => NOW,
+  };
+}
+
+const integratedCommand = {
+  pollId: POLL_ID,
+  submissionId: "integrated-submission",
+  selectedOptionIds: [OPTION_A],
+  browserToken: "browser-token",
+};
+
+async function closePoll(): Promise<void> {
+  await testEnv.DB.prepare("UPDATE poll SET closed_at_ms = ?1 WHERE id = ?2")
+    .bind(NOW + 1, POLL_ID)
+    .run();
 }
 
 describe("createVotePersistence", () => {
@@ -273,6 +308,91 @@ describe("createVotePersistence", () => {
     });
   });
 
+  it("rolls the whole batch back when the Poll passes its deadline mid-flight", async () => {
+    await insertPoll({ deadlineMs: 1 });
+    const persistence = createVotePersistence(testEnv.DB);
+
+    await expect(persistence.insertVote(batch())).rejects.toBeInstanceOf(
+      PollClosedError,
+    );
+    expect(await counts()).toEqual({
+      votes: 0,
+      selections: 0,
+      claims: 0,
+      version: 1,
+    });
+  });
+
+  it("surfaces PollClosedError when a batch both collides on the claim and hits the closed trigger", async () => {
+    await insertPoll();
+    const persistence = createVotePersistence(testEnv.DB);
+    await persistence.insertVote(batch());
+    await closePoll();
+
+    // The second batch carries the SAME claim digest — but the vote-row
+    // trigger aborts before the claim insert runs.
+    await expect(
+      persistence.insertVote(
+        batch({
+          vote: {
+            ...batch().vote,
+            id: "vote-2",
+            submissionId: "submission-2",
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(PollClosedError);
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("surfaces PollClosedError before the submission unique check for a late replay", async () => {
+    await insertPoll();
+    const persistence = createVotePersistence(testEnv.DB);
+    await persistence.insertVote(batch());
+    await closePoll();
+
+    // Same submission_id as the committed vote: the BEFORE-INSERT trigger
+    // fires ahead of the unique constraint, so a voter whose vote WAS
+    // recorded sees the closed error here — castVote re-reads to adjudicate.
+    await expect(
+      persistence.insertVote(
+        batch({ vote: { ...batch().vote, id: "vote-replay" } }),
+      ),
+    ).rejects.toBeInstanceOf(PollClosedError);
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("rejects an extension contribution until its adapter rendering lands (Story 4.1/Epic 8)", async () => {
+    await insertPoll();
+    const persistence = createVotePersistence(testEnv.DB);
+
+    await expect(
+      persistence.insertVote(
+        batch({
+          contributions: [
+            { kind: "extension:test", payload: { proof: "contributed" } },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/Unsupported vote contribution kind/);
+    expect(await counts()).toEqual({
+      votes: 0,
+      selections: 0,
+      claims: 0,
+      version: 1,
+    });
+  });
+
   it("maps a vanished Poll FK and leaves no partial vote facts", async () => {
     await insertPoll();
     const persistence = createVotePersistence(testEnv.DB);
@@ -295,53 +415,70 @@ describe("createVotePersistence", () => {
 describe("castVote with the D1 adapter", () => {
   it("returns an identical replay without adding facts or incrementing version twice", async () => {
     await insertPoll();
-    const persistence = createVotePersistence(testEnv.DB);
-    let generated = 0;
-    const deps = {
-      ...persistence,
-      strategyFor: (): VotingPollTypeStrategy | null => {
-        const { validateSubmission, persistFacts } = multipleChoiceStrategy;
-        return validateSubmission && persistFacts
-          ? { validateSubmission, persistFacts }
-          : null;
-      },
-      createDigest: (digestInput: {
-        pollId: PollId;
-        checkKind: "session";
-        token: string;
-      }) =>
-        createVoteDigest(
-          "integration-vote-digest-secret",
-          digestInput,
-        ),
-      hashPayload: sha256Hex,
-      persistVote: persistence.insertVote,
-      generateId: () => `integrated-vote-${(generated += 1)}`,
-      nowMs: () => NOW,
-    };
-    const command = {
-      pollId: POLL_ID,
-      submissionId: "integrated-submission",
-      selectedOptionIds: [OPTION_A],
-      browserToken: "browser-token",
-    };
+    const deps = castVoteDeps();
 
-    await expect(castVote(deps, command)).resolves.toMatchObject({
+    await expect(castVote(deps, integratedCommand)).resolves.toMatchObject({
       ok: true,
       value: { existing: false, voteId: "integrated-vote-1" },
     });
-    await expect(castVote(deps, command)).resolves.toMatchObject({
+    await expect(castVote(deps, integratedCommand)).resolves.toMatchObject({
       ok: true,
       value: { existing: true, voteId: "integrated-vote-1" },
     });
     await expect(
       castVote(deps, {
-        ...command,
+        ...integratedCommand,
         selectedOptionIds: [OPTION_B],
       }),
     ).resolves.toMatchObject({
       ok: false,
       error: { code: "idempotency_conflict" },
+    });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("counts exactly once when the same submission races itself", async () => {
+    await insertPoll();
+    const deps = castVoteDeps();
+
+    const outcomes = await Promise.all([
+      castVote(deps, integratedCommand),
+      castVote(deps, integratedCommand),
+    ]);
+
+    expect(outcomes.every((result) => result.ok)).toBe(true);
+    expect(
+      outcomes.filter((result) => result.ok && !result.value.existing),
+    ).toHaveLength(1);
+    expect(
+      outcomes.filter((result) => result.ok && result.value.existing),
+    ).toHaveLength(1);
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("returns the stored outcome for a replay that arrives after the Poll closed", async () => {
+    await insertPoll();
+    const deps = castVoteDeps();
+
+    await expect(castVote(deps, integratedCommand)).resolves.toMatchObject({
+      ok: true,
+      value: { existing: false, voteId: "integrated-vote-1" },
+    });
+    await closePoll();
+
+    await expect(castVote(deps, integratedCommand)).resolves.toMatchObject({
+      ok: true,
+      value: { existing: true, voteId: "integrated-vote-1" },
     });
     expect(await counts()).toEqual({
       votes: 1,

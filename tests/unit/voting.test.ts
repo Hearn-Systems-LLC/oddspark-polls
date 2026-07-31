@@ -104,15 +104,29 @@ describe("normalizeVotePayload", () => {
   it("is invariant under every permutation of a ballot", () => {
     fc.assert(
       fc.property(
-        fc.uniqueArray(fc.string({ minLength: 1 }), {
-          minLength: 1,
-          maxLength: 8,
-        }),
-        (ids) => {
-          const reversed = [...ids].reverse();
-          expect(
-            normalizeVotePayload(POLL_ID, ids),
-          ).toBe(normalizeVotePayload(POLL_ID, reversed));
+        fc.string({ minLength: 1 }),
+        fc
+          .uniqueArray(fc.string({ minLength: 1 }), {
+            minLength: 1,
+            maxLength: 8,
+          })
+          .chain((ids) =>
+            fc.tuple(
+              fc.constant(ids),
+              fc.shuffledSubarray(ids, {
+                minLength: ids.length,
+                maxLength: ids.length,
+              }),
+            ),
+          ),
+        (pollId, [ids, shuffled]) => {
+          expect(normalizeVotePayload(pollId as PollId, ids)).toBe(
+            normalizeVotePayload(pollId as PollId, shuffled),
+          );
+          // …but the Poll id stays load-bearing in the payload.
+          expect(normalizeVotePayload(pollId as PollId, ids)).not.toBe(
+            normalizeVotePayload(`${pollId}-other` as PollId, ids),
+          );
         },
       ),
     );
@@ -120,7 +134,7 @@ describe("normalizeVotePayload", () => {
 });
 
 describe("castVote", () => {
-  it("builds one ordered batch with type facts, claim, extensions, and version increment", async () => {
+  it("passes contributor output through to the batch untouched (domain seam only — adapter rendering lands with Story 4.1)", async () => {
     const commandDeps = deps({
       contributors: [
         async ({ voteId }) => [
@@ -219,7 +233,7 @@ describe("castVote", () => {
       ok: false,
       error: {
         code: "idempotency_conflict",
-        message: VOTE_COPY.retry,
+        message: VOTE_COPY.idempotencyConflict,
       },
     });
   });
@@ -361,6 +375,259 @@ describe("castVote", () => {
       },
     });
   });
+
+  it("returns the stored outcome when a replay arrives after the Poll closed mid-flight", async () => {
+    const normalized = normalizeVotePayload(POLL_ID, [OPTION_A]);
+    let lookup = 0;
+    const commandDeps = deps({
+      findVoteBySubmission: async () => {
+        lookup += 1;
+        return lookup === 1
+          ? null
+          : {
+              voteId: "stored-vote",
+              payloadHash: `hash:${normalized}`,
+              createdAtMs: NOW - 5,
+            };
+      },
+      persistVote: async () => {
+        throw new PollClosedError();
+      },
+    });
+
+    await expect(castVote(commandDeps, input)).resolves.toEqual({
+      ok: true,
+      value: {
+        acceptedAtMs: NOW - 5,
+        existing: true,
+        pollId: POLL_ID,
+        voteId: "stored-vote",
+      },
+    });
+  });
+
+  it("conflicts when the post-close re-read finds a divergent payload hash", async () => {
+    let lookup = 0;
+    const commandDeps = deps({
+      findVoteBySubmission: async () => {
+        lookup += 1;
+        return lookup === 1
+          ? null
+          : {
+              voteId: "stored-vote",
+              payloadHash: "different-hash",
+              createdAtMs: NOW - 5,
+            };
+      },
+      persistVote: async () => {
+        throw new PollClosedError();
+      },
+    });
+
+    await expect(castVote(commandDeps, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "idempotency_conflict",
+        message: VOTE_COPY.idempotencyConflict,
+      },
+    });
+  });
+
+  it("fails honestly when the post-close re-read cannot confirm a stored vote", async () => {
+    let lookup = 0;
+    const commandDeps = deps({
+      findVoteBySubmission: async () => {
+        lookup += 1;
+        if (lookup === 1) {
+          return null;
+        }
+        throw new Error("D1 read failed");
+      },
+      persistVote: async () => {
+        throw new PollClosedError();
+      },
+    });
+
+    await expect(castVote(commandDeps, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "vote_failed",
+        message: VOTE_COPY.retry,
+      },
+    });
+  });
+
+  it("conflicts when the race re-read finds a divergent payload hash", async () => {
+    let lookup = 0;
+    const commandDeps = deps({
+      findVoteBySubmission: async () => {
+        lookup += 1;
+        return lookup === 1
+          ? null
+          : {
+              voteId: "concurrent-vote",
+              payloadHash: "different-hash",
+              createdAtMs: NOW - 1,
+            };
+      },
+      persistVote: async () => {
+        throw new SubmissionReplayError();
+      },
+    });
+
+    await expect(castVote(commandDeps, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "idempotency_conflict",
+        message: VOTE_COPY.idempotencyConflict,
+      },
+    });
+  });
+
+  it("preserves the strategy's message and field errors on an invalid selection", async () => {
+    const message = "That ballot does not match this Poll.";
+    const commandDeps = deps({
+      strategyFor: () => ({
+        validateSubmission: () => ({
+          ok: false,
+          error: {
+            code: "invalid_selection",
+            message,
+            fieldErrors: { selectedOptionIds: message },
+            reasonCodes: { selectedOptionIds: "invalid_selection" },
+          },
+        }),
+        persistFacts: () => ({ selections: [] }),
+      }),
+    });
+
+    const result = await castVote(commandDeps, input);
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_selection",
+        message,
+        fieldErrors: { selectedOptionIds: message },
+        reasonCodes: { selectedOptionIds: "invalid_selection" },
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it("keeps the zero-selection copy while preserving the strategy's field errors", async () => {
+    const message = "Nothing's selected. Pick an option, then vote.";
+    const commandDeps = deps({
+      strategyFor: () => ({
+        validateSubmission: () => ({
+          ok: false,
+          error: {
+            code: "selection_required",
+            message,
+            fieldErrors: { selectedOptionIds: message },
+            reasonCodes: { selectedOptionIds: "selection_required" },
+          },
+        }),
+        persistFacts: () => ({ selections: [] }),
+      }),
+    });
+
+    const result = await castVote(commandDeps, input);
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "selection_required",
+        message: VOTE_COPY.selectionRequired,
+        fieldErrors: { selectedOptionIds: message },
+        reasonCodes: { selectedOptionIds: "selection_required" },
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it.each<[string, Partial<CastVoteDeps>]>([
+    [
+      "the payload hash read",
+      {
+        hashPayload: async () => {
+          throw new Error("crypto unavailable");
+        },
+      },
+    ],
+    [
+      "the stored-vote lookup",
+      {
+        findVoteBySubmission: async () => {
+          throw new Error("read failed");
+        },
+      },
+    ],
+    [
+      "the Poll lookup",
+      {
+        findPoll: async () => {
+          throw new Error("read failed");
+        },
+      },
+    ],
+    [
+      "the digest read",
+      {
+        createDigest: async () => {
+          throw new Error("hmac failed");
+        },
+      },
+    ],
+    [
+      "the clock",
+      {
+        nowMs: () => {
+          throw new Error("clock broke");
+        },
+      },
+    ],
+    [
+      "the id generator",
+      {
+        generateId: () => {
+          throw new Error("ids exhausted");
+        },
+      },
+    ],
+    [
+      "a fact contributor",
+      {
+        contributors: [
+          async () => {
+            throw new Error("contributor broke");
+          },
+        ],
+      },
+    ],
+  ])("fails safely when %s throws", async (_dependency, override) => {
+    const commandDeps = deps(override);
+
+    await expect(castVote(commandDeps, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "vote_failed",
+        message: VOTE_COPY.retry,
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it("fails safely when no strategy exists for the Poll type", async () => {
+    const commandDeps = deps({ strategyFor: () => null });
+
+    await expect(castVote(commandDeps, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "vote_failed",
+        message: VOTE_COPY.retry,
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
 });
 
 describe("VOTE_COPY", () => {
@@ -382,6 +649,8 @@ describe("VOTE_COPY", () => {
         "Too many Votes from here, too quickly. Give it a minute. If you're a person, this shouldn't have happened, and we're sorry it did.",
       selectionRequired: "Nothing's selected. Pick an option, then vote.",
       pollDeleted: "This Poll no longer exists.",
+      idempotencyConflict:
+        "Your earlier Vote stands — this change wasn't recorded.",
     });
   });
 });

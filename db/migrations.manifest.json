@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-30T00:09:02.344Z",
+  "generatedAt": "2026-07-31T08:41:29.658Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -21,6 +21,14 @@
     {
       "file": "0005_poll_reference_canonical_unique.sql",
       "sha256": "79befde3f5eecd90c601e558c9b655ff744a4ed0db7bbdac61f0dfdad27f47f9"
+    },
+    {
+      "file": "0006_votes.sql",
+      "sha256": "9bd4aa08e17f4283acb0e99eb12ccc59a2cd3cb03624c8dc01d3d961ab2dbf22"
+    },
+    {
+      "file": "0007_voter_claim_vote_id_idx.sql",
+      "sha256": "7ecbc50364b0884fe8c33392cdb43b9b1e9b8ad01f268c373be332f1d36e7748"
     }
   ]
 }

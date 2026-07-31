@@ -10,3 +10,9 @@ GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
+
+# Keys duplicate-vote claim digests — generate independently of the auth
+# secret: openssl rand -base64 32. Keep this key last: `wrangler types` emits
+# keys in file order and the committed worker-configuration.d.ts expects
+# digest-last.
+VOTE_DIGEST_SECRET=

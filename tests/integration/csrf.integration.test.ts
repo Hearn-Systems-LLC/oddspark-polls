@@ -49,6 +49,7 @@ describe("csrf delivery boundary (workerd)", () => {
       result: "csrf_rejected",
       durationMs: 1,
       providerOutcome: "none",
+      pollId: null,
     };
     // Must not throw in Workers runtime
     expect(() => emitTelemetry(record)).not.toThrow();

@@ -135,14 +135,65 @@ export async function seedCreatorSession() {
 
 export function cleanupCreator(userId) {
   assertUuid(userId);
-  // Clean all three poll tables explicitly rather than trusting ON DELETE
-  // CASCADE (the cascade has its own schema test).
+  // Clean vote and Poll facts explicitly so test failures remain inspectable
+  // and retries do not inherit accepted submissions.
   d1Execute(
+    `DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
+      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}'));` +
+      `DELETE FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
     `DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM poll_reference WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM poll WHERE owner_user_id = '${userId}';` +
       `DELETE FROM session WHERE user_id = '${userId}';` +
       `DELETE FROM user WHERE id = '${userId}';`,
+  );
+}
+
+export function closePoll(pollId, closedAtMs) {
+  assertUuid(pollId);
+  if (!Number.isInteger(closedAtMs) || closedAtMs < 0) {
+    throw new Error("closedAtMs must be a non-negative integer");
+  }
+  d1Execute(
+    `UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = '${pollId}';`,
+  );
+}
+
+// Task 9 pins closure-by-deadline: fixtures that need a closed Poll seed a
+// past deadline, not only closed_at_ms.
+export function setPollDeadline(pollId, deadlineMs) {
+  assertUuid(pollId);
+  if (!Number.isInteger(deadlineMs) || deadlineMs < 0) {
+    throw new Error("deadlineMs must be a non-negative integer");
+  }
+  d1Execute(
+    `UPDATE poll SET deadline_ms = ${deadlineMs} WHERE id = '${pollId}';`,
+  );
+}
+
+const RESULT_VISIBILITIES = new Set(["live", "after_close", "creator_only"]);
+
+export function setResultVisibility(pollId, visibility) {
+  assertUuid(pollId);
+  if (!RESULT_VISIBILITIES.has(visibility)) {
+    throw new Error(`Unknown result_visibility: ${visibility}`);
+  }
+  d1Execute(
+    `UPDATE poll SET result_visibility = '${visibility}' WHERE id = '${pollId}';`,
+  );
+}
+
+// Removes a Poll and its dependent rows (the CLI runs without FK pragmas, so
+// children go first) — exercises the deleted-between-GET-and-POST path.
+export function deletePoll(pollId) {
+  assertUuid(pollId);
+  d1Execute(
+    `DELETE FROM voter_claim WHERE poll_id = '${pollId}';` +
+      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${pollId}');` +
+      `DELETE FROM vote WHERE poll_id = '${pollId}';` +
+      `DELETE FROM poll_option WHERE poll_id = '${pollId}';` +
+      `DELETE FROM poll_reference WHERE poll_id = '${pollId}';` +
+      `DELETE FROM poll WHERE id = '${pollId}';`,
   );
 }
 

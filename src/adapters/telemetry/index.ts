@@ -20,7 +20,7 @@ export type TelemetryResultCode =
   | "error";
 
 /**
- * Exactly five fields. The type is intentionally narrow so forbidden
+ * Exactly six fields. The type is intentionally narrow so forbidden
  * fields cannot be added without a deliberate type change.
  */
 export type TelemetryRecord = {
@@ -29,6 +29,8 @@ export type TelemetryRecord = {
   result: TelemetryResultCode;
   durationMs: number;
   providerOutcome: ProviderOutcome;
+  /** Internal ID only; public references and ballot data stay out of logs. */
+  pollId: string | null;
 };
 
 const FORBIDDEN_KEYS = [
@@ -83,6 +85,33 @@ export function isForbiddenTelemetryKey(
 }
 
 /**
+ * The single status → result mapping for the per-request record. Vote
+ * rejections (422) and rate limits (429) are errors ONLY when the vote
+ * route flagged the request (`voteRejection`) — recording them as "ok"
+ * would make the two rejection signals invisible, but an unflagged 422
+ * (creator-surface validation) is an ordinary outcome.
+ */
+export function telemetryResultForStatus(
+  status: number,
+  sessionLookupFailed = false,
+  voteRejection = false,
+): TelemetryResultCode {
+  if (sessionLookupFailed || status >= 500) {
+    return "error";
+  }
+  if (status === 403) {
+    return "csrf_rejected";
+  }
+  if (status === 404) {
+    return "not_found";
+  }
+  if (voteRejection && (status === 422 || status === 429)) {
+    return "error";
+  }
+  return "ok";
+}
+
+/**
  * Typed emit — the only supported way to write operation telemetry.
  * Uses console.log of a JSON object so Workers Logs can structure it.
  */
@@ -94,6 +123,7 @@ export function emitTelemetry(record: TelemetryRecord): void {
     result: record.result,
     durationMs: record.durationMs,
     providerOutcome: record.providerOutcome,
+    pollId: record.pollId,
   };
   console.log(JSON.stringify(payload));
 }

@@ -107,3 +107,30 @@ if (authRes.status !== 200) {
 }
 
 console.log(`smoke: ok ${authUrl} (auth liveness 200)`);
+
+// Binding liveness: neither probe above touches VOTE_DIGEST_SECRET, DB, or
+// SESSION — a deploy with a forgotten digest secret (the same forgotten-
+// secret failure class the auth probe names) would pass both while every
+// vote 500s. /api/health returns 200 or lists the missing binding names.
+const healthUrl = new URL("api/health", url.endsWith("/") ? url : `${url}/`).toString();
+let healthRes;
+try {
+  healthRes = await fetch(healthUrl, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(15000),
+  });
+} catch (err) {
+  const reason = err instanceof Error ? err.message : String(err);
+  console.error(`smoke: binding liveness request failed for ${healthUrl}: ${reason}`);
+  process.exit(1);
+}
+
+if (healthRes.status !== 200) {
+  const detail = await healthRes.text().catch(() => "");
+  console.error(
+    `smoke: binding liveness expected 200, got ${healthRes.status} for ${healthUrl} — check bindings (${detail})`,
+  );
+  process.exit(1);
+}
+
+console.log(`smoke: ok ${healthUrl} (binding liveness 200)`);

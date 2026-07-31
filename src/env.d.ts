@@ -9,6 +9,7 @@ declare global {
   interface AuthBindings {
     BETTER_AUTH_SECRET: string;
     BETTER_AUTH_URL: string;
+    VOTE_DIGEST_SECRET: string;
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;
     GITHUB_CLIENT_ID: string;
@@ -34,7 +35,11 @@ declare global {
     ASSETS: Fetcher;
     /** Cloudflare Images binding (adapter default); not R2. */
     IMAGES?: ImagesBinding;
-    SESSION?: KVNamespace;
+    // SESSION and VOTE_RATE_LIMITER are declared required by
+    // worker-configuration.d.ts (`wrangler types`); redeclaring them optional
+    // here would be a TS2430 conflict in the merged global Env. Test/local
+    // runtimes that cannot emulate them keep the optionality at the
+    // consumption sites instead.
   }
 }
 

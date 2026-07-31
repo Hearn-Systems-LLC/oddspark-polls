@@ -24,6 +24,7 @@ export default defineConfig({
           BETTER_AUTH_SECRET:
             "integration-secret-that-is-at-least-32-characters",
           BETTER_AUTH_URL: "https://polls.example.test",
+          VOTE_DIGEST_SECRET: "integration-vote-digest-secret",
           GOOGLE_CLIENT_ID: "integration-google-client",
           GOOGLE_CLIENT_SECRET: "integration-google-secret",
           GITHUB_CLIENT_ID: "integration-github-client",

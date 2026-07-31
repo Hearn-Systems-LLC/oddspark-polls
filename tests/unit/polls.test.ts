@@ -20,7 +20,7 @@ import {
   isReservedSlug,
 } from "../../src/modules/polls/reserved-slugs";
 import { multipleChoiceStrategy } from "../../src/modules/polls/types/multiple-choice";
-import type { UserId } from "../../src/shared/domain/index";
+import type { PollOptionId, UserId } from "../../src/shared/domain/index";
 
 const NOW = Date.UTC(2026, 6, 29, 12, 0, 0);
 const USER_1 = "user-1" as UserId;
@@ -587,6 +587,15 @@ describe("PollPersistenceRows reference kinds", () => {
 });
 
 describe("multipleChoiceStrategy", () => {
+  const optionA = "option-a" as PollOptionId;
+  const optionB = "option-b" as PollOptionId;
+  const persistedFacts = {
+    options: [
+      { id: optionA, label: "A", position: 0 },
+      { id: optionB, label: "B", position: 1 },
+    ],
+  };
+
   it("normalizes labels into positioned option facts", () => {
     const result = multipleChoiceStrategy.create(
       { optionLabels: ["A", "B", "C"] },
@@ -601,6 +610,59 @@ describe("multipleChoiceStrategy", () => {
           { label: "C", position: 2 },
         ],
       },
+    });
+  });
+
+  it("keeps creation facts id-free so they cannot masquerade as validation facts", () => {
+    const created = multipleChoiceStrategy.create(
+      { optionLabels: ["A", "B"] },
+      { nowMs: NOW },
+    );
+    if (!created.ok) {
+      throw new Error("creation should succeed");
+    }
+    const rejected = multipleChoiceStrategy.validateSubmission(
+      { selectedOptionIds: [optionA] },
+      // @ts-expect-error — validation consumes persisted facts with required
+      // option ids; creation facts (no ids yet) must not type-check here.
+      created.value,
+    );
+    // At runtime such a ballot is rejected, never silently accepted.
+    expect(rejected.ok).toBe(false);
+  });
+
+  it("validates exactly one persisted option id", () => {
+    expect(
+      multipleChoiceStrategy.validateSubmission?.(
+        { selectedOptionIds: [optionB] },
+        persistedFacts,
+      ),
+    ).toEqual({
+      ok: true,
+      value: { selectedOptionIds: [optionB] },
+    });
+  });
+
+  it.each([
+    ["zero selections", []],
+    ["multiple selections", [optionA, optionB]],
+    ["a duplicated selection", [optionA, optionA]],
+    ["an unknown option", ["option-unknown"]],
+  ])("rejects %s", (_case, selectedOptionIds) => {
+    const result = multipleChoiceStrategy.validateSubmission?.(
+      { selectedOptionIds },
+      persistedFacts,
+    );
+    expect(result?.ok).toBe(false);
+  });
+
+  it("contributes one relational vote-selection fact", () => {
+    expect(
+      multipleChoiceStrategy.persistFacts?.({
+        selectedOptionIds: [optionA],
+      }),
+    ).toEqual({
+      selections: [{ pollOptionId: optionA }],
     });
   });
 });

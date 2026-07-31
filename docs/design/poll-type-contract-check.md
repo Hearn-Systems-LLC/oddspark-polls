@@ -88,6 +88,25 @@ Load-bearing properties:
   `validateSubmission` + `persistFacts` ports on the strategy; the contract
   does not need a revision port. Fits.
 
+## Sanctioned refinements (no contract bump)
+
+Recorded 2026-07-31 (Story 1.5 review): **per-type validation-facts narrowing
+is a sanctioned refinement of the frozen contract.** The shared interface
+types `validateSubmission(submission, facts)` against the creation-facts
+generic, but validation actually runs against the Poll's *persisted* shape —
+option ids exist only after the creation batch assigns them. A poll-type
+module may therefore narrow the port for its own implementation (e.g.
+`MultipleChoiceValidationFacts` requiring option ids while
+`MultipleChoiceCreationFacts` stays id-less, via `Omit` + redeclaration in
+`src/modules/polls/types/multiple-choice.ts`) **without bumping
+`POLL_TYPE_CONTRACT_VERSION`**, as long as:
+
+1. the shared `PollTypeStrategy` interface itself is unchanged, and
+2. the narrowing lives in the poll-type module, never in the shared kernel.
+
+A change that alters the shared interface's port shapes remains a version
+bump plus moving the compile-time consumers together, per the verdict below.
+
 ## Verdict
 
 Contract version 1 **freezes**. All four types fit through per-type generics;

@@ -8,7 +8,7 @@
 **Purpose:** Trustworthy casual polls — multiple-choice, ranked, image, and meeting polls with vote security and no subscription wall.
 **Live:** Cloudflare Workers, `oddspark-polls` — production ships from `main` via `.github/workflows/deploy.yml`. Custom domain `polls.oddspark.dev` is not bound yet.
 **Preview:** Cloudflare Workers, `oddspark-polls-staging` — every production deploy passes through staging first; there is no separate staging branch.
-**Last updated:** 2026-07-29
+**Last updated:** 2026-07-30
 
 This is a **public demonstration build**. The product is real, the repo is presentable, and
 nothing secret belongs in history — not in code, not in `wrangler.jsonc`, not in a commit
@@ -32,6 +32,7 @@ Binding truth lives in `wrangler.jsonc`. Secrets never do.
 | `MEDIA` | R2 bucket for poll images (named `MEDIA`, not `IMAGES`, to avoid clashing with Cloudflare Images) |
 | `SESSION` | KV namespace for Astro sessions (adapter default name) |
 | `ASSETS` | Static assets from `./dist` |
+| `VOTE_RATE_LIMITER` | Best-effort per-source-IP per-Poll vote admission throttle (shared IPs share one budget) |
 
 | Env | Worker | D1 / R2 name |
 |---|---|---|
@@ -65,8 +66,9 @@ pnpm test
 
 ### Secrets
 
-Six bindings are required in **every** environment: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
+Seven bindings are required in **every** environment: `BETTER_AUTH_SECRET`,
+`BETTER_AUTH_URL`, `VOTE_DIGEST_SECRET`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
 Each environment has its own OAuth registrations — six in total — so a local or staging
 callback can never share production credentials.
 
@@ -75,15 +77,19 @@ and shell history:
 
 ```zsh
 ./scripts/provision-auth-secrets.zsh local initialize
+./scripts/provision-auth-secrets.zsh local initialize-voting
 ./scripts/provision-auth-secrets.zsh staging rotate-providers
 ```
 
 - **Never** paste a credential into chat, a command argument, `wrangler.jsonc`, CI logs, or Git.
 - The helper deliberately refuses remote master-secret initialization — Cloudflare secret
-  writes are upserts, so `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` are bootstrapped once by
-  hand in each Worker's dashboard.
+  writes are upserts, so `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` / `VOTE_DIGEST_SECRET`
+  are bootstrapped once by hand in each Worker's dashboard.
 - Rotating `BETTER_AUTH_SECRET` invalidates active sessions and makes stored OAuth tokens
   unreadable. Treat it as a planned incident, never a routine step.
+- Rotating `VOTE_DIGEST_SECRET` makes existing duplicate-vote claims
+  incomparable and can allow repeat voting. Treat it as a planned integrity
+  incident, never a routine step.
 
 See `README.md` for the full provider-registration table.
 
@@ -102,10 +108,14 @@ How to *prove* a change is good, and which layer to run for which change.
 | `pnpm migrations:guard` | Migration ordering + immutability of committed migrations | no |
 | `pnpm test:e2e` | Playwright against a dev server it starts itself — in the deploy gate (CI provisions browsers, local D1 migrations, and a throwaway `.dev.vars`) | no |
 | `pnpm build:production` | The artifact that actually ships | — |
-| `pnpm smoke:staging` | Deployed staging returns 200 and serves the token marker | yes, deployed |
+| `pnpm smoke:staging` | Deployed staging returns 200, serves the token marker, and answers the auth + binding liveness probes (`/api/auth/ok`, `/api/health`) | yes, deployed |
 
 The CI gate (`.github/workflows/deploy.yml`) runs, in order: migration guard → `pnpm test`
-→ `pnpm check` → `pnpm test:e2e` → `pnpm types` → `pnpm build:production`. Match that locally before pushing.
+→ `pnpm check` → `pnpm test:e2e` → `pnpm types` → binding-types drift check
+(`git diff --exit-code worker-configuration.d.ts`) → `pnpm build:production`. Match that
+locally before pushing. The drift check is sensitive to `.dev.vars` key order — `wrangler
+types` emits keys in file order — so keep `.dev.vars` in the canonical order the
+provisioning script produces (`VOTE_DIGEST_SECRET` last, matching `.dev.vars.example`).
 
 ### What the automated checks *don't* catch
 
@@ -272,7 +282,15 @@ drift. Record decisions where they belong above.
 - **The staging smoke test reads a real design token.** `scripts/smoke.mjs` extracts
   `--color-solar-dark` from `src/styles/tokens.css` and asserts the served HTML carries that
   hex — deleting or renaming that token breaks the deploy gate *by design*. If the smoke test
-  fails after a styling change, the fix is in the styles, not in the smoke script.
+  fails after a styling change, the fix is in the styles, not in the smoke script. The same
+  script then probes `/api/auth/ok` (auth config construction) and `/api/health` (binding
+  liveness), so a deploy with a forgotten secret fails the gate even when the page renders.
+
+- **`/api/health` is a presence-only binding-liveness probe, not a status page.** It answers
+  200 when every required binding is present and otherwise names the *missing bindings by
+  name* — never values, no authentication required. That presence-only contract is
+  load-bearing: `scripts/smoke.mjs` asserts it in the deploy gate, so keep the response free
+  of secret values and side effects.
 
 - **Hexagonal dependency direction is an invariant (AD-1), not a preference.** `src/modules/*`
   owns domain policy and depends on nothing outside the domain. `src/adapters/*` implements

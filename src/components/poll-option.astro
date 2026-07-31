@@ -9,6 +9,7 @@ interface Props {
   description?: string;
   checked?: boolean;
   type?: "radio" | "checkbox";
+  readOnly?: boolean;
   class?: string;
 }
 
@@ -20,25 +21,47 @@ const {
   description,
   checked = false,
   type = "radio",
+  readOnly = false,
   class: className = "",
 } = Astro.props;
 ---
 
-<label class:list={["poll-option", className]} for={id}>
-  <input
-    class="visually-hidden poll-option-input"
-    type={type}
-    id={id}
-    name={name}
-    value={value}
-    checked={checked}
-  />
-  <span class="poll-option-marker" aria-hidden="true"></span>
-  <span class="poll-option-text">
-    <span class="poll-option-label">{label}</span>
-    {description && <span class="poll-option-description">{description}</span>}
-  </span>
-</label>
+{
+  readOnly ? (
+    <div class:list={["poll-option", "poll-option-readonly", className]}>
+      {/* UX-DR2: the voter's own cast selection is marked with the ◆ glyph.
+          The marker span renders on EVERY read-only row (the uncast rows
+          stay · so rows keep their alignment); the glyph is aria-hidden, so
+          the cast row also carries visually-hidden text a screen reader can
+          announce. */}
+      <span
+        class:list={["poll-option-marker", checked && "is-cast"]}
+        aria-hidden="true"
+      ></span>
+      <span class="poll-option-text">
+        {checked && <span class="visually-hidden">Your vote</span>}
+        <span class="poll-option-label">{label}</span>
+        {description && <span class="poll-option-description">{description}</span>}
+      </span>
+    </div>
+  ) : (
+    <label class:list={["poll-option", className]} for={id}>
+      <input
+        class="visually-hidden poll-option-input"
+        type={type}
+        id={id}
+        name={name}
+        value={value}
+        checked={checked}
+      />
+      <span class="poll-option-marker" aria-hidden="true"></span>
+      <span class="poll-option-text">
+        <span class="poll-option-label">{label}</span>
+        {description && <span class="poll-option-description">{description}</span>}
+      </span>
+    </label>
+  )
+}
 
 <style>
   .poll-option {
@@ -60,6 +83,14 @@ const {
     background: var(--poll-option-hover-bg);
   }
 
+  .poll-option-readonly {
+    cursor: default;
+  }
+
+  .poll-option-readonly:hover {
+    background: transparent;
+  }
+
   .poll-option:focus-within {
     outline: var(--focus-outline);
     outline-offset: var(--focus-outline-offset);
@@ -78,24 +109,22 @@ const {
   .poll-option-marker {
     flex-shrink: 0;
     width: 14px;
-    height: 14px;
-    border: var(--space-hairline) solid var(--poll-option-marker);
-    border-radius: var(--rounded-default);
+    color: var(--poll-option-marker);
+    text-align: center;
     position: relative;
   }
 
   .poll-option-marker::before {
-    content: "";
-    position: absolute;
-    inset: 2px;
-    background: transparent;
-  }
-
-  .poll-option-input:checked + .poll-option-marker {
-    border-color: var(--poll-option-marker-selected);
+    content: "·";
   }
 
   .poll-option-input:checked + .poll-option-marker::before {
-    background: var(--poll-option-marker-selected);
+    content: "◆";
+    color: var(--poll-option-marker-selected);
+  }
+
+  .poll-option-readonly .poll-option-marker.is-cast::before {
+    content: "◆";
+    color: var(--poll-option-marker-selected);
   }
 </style>

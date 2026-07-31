@@ -7,7 +7,6 @@
 - Mode-toggle label goes stale on OS theme change — no `matchMedia("prefers-color-scheme")` change listener [src/scripts/mode-override.ts:52-69].
 - `…Light` exception tokens `availability-yes-glyph-light` / `solar-ink-on-wash-light` defined but unconsumed — canonical DESIGN.md tokens consumed by Epic 7 availability-cell [src/styles/tokens.css:41,48-50].
 - Structural Seed deviation — `src/lib/`, `src/layouts/`, `src/styles/` not in the seed tree; update ARCHITECTURE-SPINE seed to match the real layout.
-- poll-option uses a real `<span>` marker instead of decorative `::before` on the row — visually equivalent [src/components/poll-option.astro].
 - results-bar `NaN`/`Infinity` percent unhandled — clamp gives false input-safety; latent until live data arrives [src/components/results-bar.astro:23].
 
 ## Deferred from: code review round 2 of 1-1-project-foundation-deployable-skeleton (2026-07-29)
@@ -28,8 +27,6 @@
 ## Deferred from: code review of 1-3-create-a-multiple-choice-poll (2026-07-29)
 
 - Public poll page does a per-request D1 read with no caching decision — every bot scan and link preview of `/{anything}` hits `findPollByReference`; the page sets no `cache-control` (AD-21 governs creator surfaces only). Deferred: caching the public surface is a product/perf decision outside Story 1.3's ACs [src/pages/[reference].astro].
-- Closed/expired poll renders identically to open on the public page — `findPollByReference` fetches `deadline_ms`/`closed_at_ms` but the page never calls `effectivePollStatus`. Deferred: closed-state rendering belongs to the Story 1.5 vote-path scope [src/pages/[reference].astro:15-47].
-- Public poll page hand-rolls option-row markup instead of consuming the `poll-option` primitive (Task 6 said "as `poll-option` rows"). Accepted for 1.3: the rows are read-only until voting arrives; Story 1.5 must build its votable rows on the `poll-option` primitive rather than restyle it (decision, Justin 2026-07-29) [src/pages/[reference].astro:35-42].
 
 ## Deferred from: code review round 2 of 1-3-create-a-multiple-choice-poll (2026-07-29)
 
@@ -71,3 +68,15 @@
 ## Deferred from: code review round 3 of 1-4-custom-links (2026-07-30)
 
 - A mixed-case request to an orphan reference row (poll deleted out-of-band, bypassing the FK cascade) 301s into a 404 instead of 404ing directly — the exact lookup misses and no reachability re-check runs before the 301. Deferred: corrupt-state-only reachability (D1 enforces the cascade), the redirect chain terminates at the designed 404, and a reachability re-check would tax every legitimate case-variant hit [src/pages/[reference].astro].
+
+## Deferred from: code review of 1-5-cast-a-vote-that-counts-exactly-once (2026-07-31)
+
+- Any FK failure in the vote batch maps to `PollGoneError` ("This Poll no longer exists") — the batch has four FKs that can fail independently of the poll's existence (`vote_selection.poll_option_id`, `voter_claim.vote_id`, …), but D1's error text doesn't name the failing FK, so the mapping can't be narrowed today. Deferred: only bites if options ever become deletable (or recovery-drift loses option rows); revisit when a delete-options capability lands [src/adapters/d1/index.ts:295-300].
+- POST to a case-variant custom slug receives a bare 301 that browsers rewrite to GET, silently discarding the ballot. Deferred, pre-existing: the redirect predates this story (1.4) and is effectively unreachable in browser flow — the vote form is only ever served at the canonical reference, so only scripted POSTs hit it [src/pages/[reference].astro:70-91].
+- The `extension:*` vote-contribution seam is a domain-only contract: `castVote` accepts `deps.contributors`, but the D1 adapter throws `Unsupported vote contribution kind` on any extension contribution, and the unit test proves the seam only against a mock. Deferred (Justin, 2026-07-31): adapter rendering is owned by the first real consumer — Story 4.1 (comment port) or Epic 8 (code-redemption slot); until then the seam must not be wired in production deps [src/modules/voting/index.ts:331-345, src/adapters/d1/index.ts:259].
+- Rotating `VOTE_DIGEST_SECRET` silently resets exactly-once protection: claims key on `HMAC(secret, pollId, checkKind, token)`, so post-rotation every prior voter's digest changes and the same browser can vote again. Deferred (Justin, 2026-07-31): accepted ops trade-off, same class as `BETTER_AUTH_SECRET` rotation — a planned incident, never a routine step; documented in README [src/adapters/digest/index.ts].
+- The poll-option `<span>`-marker deferral from Story 1.1 ("real `<span>` marker instead of decorative `::before`") is resolved by rewrite: Story 1.5 replaced the marker structure with the UX-DR2 `·`/`◆` glyph contract, superseding the original entry. Recorded per review decision (Justin, 2026-07-31) — the ledger deletion was intentional, not silent [src/components/poll-option.astro].
+- The replay pre-read runs a D1 `findVoteBySubmission` on every vote POST — including throttled floods — and `castVote` repeats the lookup after the limiter admits. Deferred: inherent to the ratified replay-before-limiter decision (review round 1); verified non-exploitable — forged submission ids yield only a stored outcome or `idempotency_conflict`, never extra votes — but the read amplification is unmitigated [src/pages/[reference].astro].
+- The vote-flash digest is deterministic per poll (HMAC of the poll id), so a copied cookie value can re-fire the cosmetic "Counted." banner on another visit. Deferred: no tally impact; binding the flash to the voter token is polish for a later story [src/pages/[reference].astro].
+- `/api/health` checks binding presence only (no D1 query, no `VOTE_RATE_LIMITER` check), and the deploy gate smokes staging but not production. Accepted as-is (Justin, 2026-07-31): presence-only + staging smoke is Story 1.5's bar; a production-leg smoke and a deepened probe are candidates for the ops hardening track [src/pages/api/health.ts, .github/workflows/deploy.yml].
+- A `#` inside an unquoted pasted secret would be silently truncated by dotenv while the provisioning helper reports success. Deferred: GitHub secrets are hex and Google's are `[A-Za-z0-9-_]`, so no real provider credential hits this; the script's `binding_key` comment documents the unmodeled dotenv forms [scripts/provision-auth-secrets.zsh].

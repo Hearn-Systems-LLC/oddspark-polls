@@ -35,6 +35,17 @@
       "bucket_name": "oddspark-polls-local"
     }
   ],
+  "ratelimits": [
+    {
+      "name": "VOTE_RATE_LIMITER",
+      // Arbitrary account-unique ID chosen at Story 1.5 provisioning; must stay distinct per environment.
+      "namespace_id": "79071158",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    }
+  ],
   "env": {
     "staging": {
       "name": "oddspark-polls-staging",
@@ -56,6 +67,17 @@
         {
           "binding": "MEDIA",
           "bucket_name": "oddspark-polls-staging"
+        }
+      ],
+      "ratelimits": [
+        {
+          "name": "VOTE_RATE_LIMITER",
+          // Arbitrary account-unique ID chosen at Story 1.5 provisioning; must stay distinct per environment.
+          "namespace_id": "259051630",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
         }
       ]
     },
@@ -79,6 +101,17 @@
         {
           "binding": "MEDIA",
           "bucket_name": "oddspark-polls"
+        }
+      ],
+      "ratelimits": [
+        {
+          "name": "VOTE_RATE_LIMITER",
+          // Arbitrary account-unique ID chosen at Story 1.5 provisioning; must stay distinct per environment.
+          "namespace_id": "197005227",
+          "simple": {
+            "limit": 30,
+            "period": 60
+          }
         }
       ]
     }

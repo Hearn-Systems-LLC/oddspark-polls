@@ -5,6 +5,7 @@ import {
   classifyAuthProviderOutcome,
   createRequestId,
   emitTelemetry,
+  telemetryResultForStatus,
 } from "./adapters/telemetry/index";
 import {
   checkCsrf,
@@ -96,8 +97,10 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     startedAtMs,
     principal: null,
     csrfToken: null,
+    pollId: null,
     sessionExpired: false,
     sessionLookupFailed: false,
+    voteRejection: false,
   };
 
   context.locals.requestContext = requestContext;
@@ -272,14 +275,11 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
       }
 
       const status = response.status;
-      const result =
-        rc.sessionLookupFailed || status >= 500
-          ? "error"
-          : status === 403
-            ? "csrf_rejected"
-            : status === 404
-              ? "not_found"
-              : "ok";
+      const result = telemetryResultForStatus(
+        status,
+        rc.sessionLookupFailed,
+        rc.voteRejection,
+      );
 
       emitTelemetry({
         requestId: rc.requestId,
@@ -291,6 +291,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
           status,
           response.headers.get("location"),
         ),
+        pollId: rc.pollId,
       });
 
       return finalResponse;
@@ -305,6 +306,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
         result: "error",
         durationMs: Date.now() - rc.startedAtMs,
         providerOutcome: classifyAuthProviderOutcome(pathname, 500, null),
+        pollId: rc.pollId,
       });
     }
     throw error;

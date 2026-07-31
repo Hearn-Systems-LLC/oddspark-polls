@@ -8,6 +8,15 @@ import {
   ReferenceTakenError,
   type PollPersistenceRows,
 } from "../../modules/polls/index";
+import {
+  AlreadyVotedError,
+  PollClosedError,
+  PollGoneError,
+  SubmissionReplayError,
+  type StoredVoteOutcome,
+  type VotePersistenceBatch,
+  type VotingPollSnapshot,
+} from "../../modules/voting/index";
 import type {
   PollId,
   PollOptionId,
@@ -203,4 +212,176 @@ export function createPollPersistence(db: D1Database) {
   };
 }
 
+export function createVotePersistence(db: D1Database) {
+  return {
+    async insertVote(batch: VotePersistenceBatch): Promise<void> {
+      const statements: D1PreparedStatement[] = [
+        db
+          .prepare(
+            "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+          )
+          .bind(
+            batch.vote.id,
+            batch.vote.pollId,
+            batch.vote.submissionId,
+            batch.vote.payloadHash,
+            batch.vote.createdAtMs,
+          ),
+      ];
+
+      for (const contribution of batch.contributions) {
+        if (contribution.kind === "vote_selection") {
+          statements.push(
+            db
+              .prepare(
+                "INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (?1, ?2)",
+              )
+              .bind(contribution.voteId, contribution.pollOptionId),
+          );
+          continue;
+        }
+        if (contribution.kind === "voter_claim") {
+          statements.push(
+            db
+              .prepare(
+                "INSERT INTO voter_claim (poll_id, check_kind, digest, vote_id, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+              )
+              .bind(
+                contribution.pollId,
+                contribution.checkKind,
+                contribution.digest,
+                contribution.voteId,
+                contribution.createdAtMs,
+              ),
+          );
+          continue;
+        }
+        throw new Error(`Unsupported vote contribution kind: ${contribution.kind}`);
+      }
+
+      statements.push(
+        db
+          .prepare(
+            "UPDATE poll SET representation_version = representation_version + 1, updated_at_ms = ?2 WHERE id = ?1",
+          )
+          .bind(
+            batch.representationVersion.pollId,
+            batch.representationVersion.updatedAtMs,
+          ),
+      );
+
+      try {
+        await db.batch(statements);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          /UNIQUE constraint failed: vote\.poll_id, vote\.submission_id/.test(
+            error.message,
+          )
+        ) {
+          throw new SubmissionReplayError();
+        }
+        if (
+          error instanceof Error &&
+          /UNIQUE constraint failed: voter_claim\.poll_id, voter_claim\.check_kind, voter_claim\.digest/.test(
+            error.message,
+          )
+        ) {
+          throw new AlreadyVotedError();
+        }
+        if (error instanceof Error && /poll_closed/.test(error.message)) {
+          throw new PollClosedError();
+        }
+        if (
+          error instanceof Error &&
+          /FOREIGN KEY constraint failed/i.test(error.message)
+        ) {
+          throw new PollGoneError();
+        }
+        throw error;
+      }
+    },
+
+    async findPoll(pollId: PollId): Promise<VotingPollSnapshot | null> {
+      const row = await db
+        .prepare(
+          "SELECT id, poll_type, session_checks_enabled, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
+        )
+        .bind(pollId)
+        .first<{
+          id: PollId;
+          poll_type: PollType;
+          session_checks_enabled: number;
+          deadline_ms: number | null;
+          closed_at_ms: number | null;
+        }>();
+      if (!row) {
+        return null;
+      }
+      return {
+        id: row.id,
+        pollType: row.poll_type,
+        options: await loadOptions(db, row.id),
+        sessionChecksEnabled: row.session_checks_enabled === 1,
+        deadlineMs: row.deadline_ms,
+        closedAtMs: row.closed_at_ms,
+      };
+    },
+
+    async findVoteBySubmission(
+      pollId: PollId,
+      submissionId: string,
+    ): Promise<StoredVoteOutcome | null> {
+      const row = await db
+        .prepare(
+          "SELECT id, payload_hash, created_at_ms FROM vote WHERE poll_id = ?1 AND submission_id = ?2",
+        )
+        .bind(pollId, submissionId)
+        .first<{
+          id: string;
+          payload_hash: string;
+          created_at_ms: number;
+        }>();
+      return row
+        ? {
+            voteId: row.id,
+            payloadHash: row.payload_hash,
+            createdAtMs: row.created_at_ms,
+          }
+        : null;
+    },
+
+    async findClaim(
+      pollId: PollId,
+      checkKind: "session" | "ip",
+      digest: string,
+    ): Promise<boolean> {
+      const row = await db
+        .prepare(
+          "SELECT 1 AS found FROM voter_claim WHERE poll_id = ?1 AND check_kind = ?2 AND digest = ?3",
+        )
+        .bind(pollId, checkKind, digest)
+        .first<{ found: number }>();
+      return row?.found === 1;
+    },
+
+    // Read-only states mark the voter's own cast selection: resolve the
+    // claim to its vote, then to that vote's selected options.
+    async findVoteSelectionByClaim(
+      pollId: PollId,
+      checkKind: "session" | "ip",
+      digest: string,
+    ): Promise<PollOptionId[]> {
+      const rows = await db
+        .prepare(
+          "SELECT vs.poll_option_id AS poll_option_id FROM voter_claim vc JOIN vote_selection vs ON vs.vote_id = vc.vote_id WHERE vc.poll_id = ?1 AND vc.check_kind = ?2 AND vc.digest = ?3",
+        )
+        .bind(pollId, checkKind, digest)
+        .all<{ poll_option_id: PollOptionId }>();
+      return rows.results.map((row) => row.poll_option_id);
+    },
+  };
+}
+
 export type PollPersistence = ReturnType<typeof createPollPersistence>;
+export type VotePersistence = ReturnType<typeof createVotePersistence>;

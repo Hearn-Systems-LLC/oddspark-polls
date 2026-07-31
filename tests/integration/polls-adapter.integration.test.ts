@@ -8,6 +8,8 @@ import { createPollPersistence } from "../../src/adapters/d1/index";
 import {
   DuplicatePollIdError,
   ReferenceTakenError,
+  createPoll,
+  type CreatePollDraft,
   type PollPersistenceRows,
 } from "../../src/modules/polls/index";
 import type {
@@ -50,6 +52,9 @@ function rows(overrides: Partial<PollPersistenceRows> = {}): PollPersistenceRows
       resultVisibility: "live",
       discoveryState: "unlisted",
       sessionChecksEnabled: true,
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
       deadlineMs: null,
       representationVersion: 1,
       createdAtMs: NOW,
@@ -74,7 +79,7 @@ describe("createPollPersistence.insertPoll", () => {
     await persistence.insertPoll(rows());
 
     const poll = await testEnv.DB.prepare(
-      "SELECT owner_user_id, poll_type, result_visibility, discovery_state, session_checks_enabled, representation_version, deadline_ms, closed_at_ms FROM poll WHERE id = 'poll-1'",
+      "SELECT owner_user_id, poll_type, result_visibility, discovery_state, session_checks_enabled, multi_select_enabled, min_selections, max_selections, representation_version, deadline_ms, closed_at_ms FROM poll WHERE id = 'poll-1'",
     ).first();
     expect(poll).toEqual({
       owner_user_id: "owner-1",
@@ -82,6 +87,9 @@ describe("createPollPersistence.insertPoll", () => {
       result_visibility: "live",
       discovery_state: "unlisted",
       session_checks_enabled: 1,
+      multi_select_enabled: 0,
+      min_selections: null,
+      max_selections: null,
       representation_version: 1,
       deadline_ms: null,
       closed_at_ms: null,
@@ -91,6 +99,30 @@ describe("createPollPersistence.insertPoll", () => {
       "SELECT COUNT(*) AS n FROM poll_option WHERE poll_id = 'poll-1'",
     ).first<{ n: number }>();
     expect(optionCount?.n).toBe(2);
+  });
+
+  it("round-trips explicit multi-select bounds through every poll read", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    const multiSelect = rows();
+    multiSelect.poll = {
+      ...multiSelect.poll,
+      multiSelectEnabled: true,
+      minSelections: 2,
+      maxSelections: 2,
+    };
+    await persistence.insertPoll(multiSelect);
+
+    const expectedBounds = {
+      multiSelectEnabled: true,
+      minSelections: 2,
+      maxSelections: 2,
+    };
+    await expect(
+      persistence.findPollByReference("ref-abc-123"),
+    ).resolves.toMatchObject(expectedBounds);
+    await expect(
+      persistence.findPollForOwner(POLL_1, OWNER_1),
+    ).resolves.toMatchObject(expectedBounds);
   });
 
   it("persists a custom reference as the one canonical row", async () => {
@@ -180,6 +212,64 @@ describe("createPollPersistence.insertPoll", () => {
 });
 
 describe("createPollPersistence reads", () => {
+  it("rejects a duplicate-ID retry whose only divergence is multi-select bounds", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    const nonce = "3f6b2c90-9a42-4d8e-b7a1-2c4e5f6a7b8c";
+    let generatedId = 0;
+    const deps = {
+      persist: persistence.insertPoll,
+      findExistingPoll: persistence.findPollForOwner,
+      generateId: () => `d4-option-${(generatedId += 1)}`,
+      generateReference: () => "d4-bounds-reference",
+      nowMs: () => NOW,
+    };
+    const draft: CreatePollDraft = {
+      idempotencyId: nonce,
+      question: "Where should we eat?",
+      description: "",
+      options: ["Pizza", "Tacos"],
+      resultVisibility: "live",
+      deadlineLocal: "",
+      timeZone: "",
+      customLink: "",
+      multiSelect: "true",
+      minSelections: "1",
+      maxSelections: "2",
+    };
+
+    await expect(createPoll(deps, OWNER_1, draft)).resolves.toMatchObject({
+      ok: true,
+      value: { existing: false, pollId: nonce },
+    });
+    await expect(
+      createPoll(deps, OWNER_1, {
+        ...draft,
+        minSelections: "2",
+        maxSelections: "2",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "poll_duplicate_divergent" },
+    });
+    await expect(
+      createPoll(deps, OWNER_1, {
+        ...draft,
+        minSelections: "1",
+        maxSelections: "1",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "poll_duplicate_divergent" },
+    });
+    await expect(
+      persistence.findPollForOwner(nonce as PollId, OWNER_1),
+    ).resolves.toMatchObject({
+      multiSelectEnabled: true,
+      minSelections: 1,
+      maxSelections: 2,
+    });
+  });
+
   it("finds a poll page by reference with ordered options", async () => {
     const persistence = createPollPersistence(testEnv.DB);
     await persistence.insertPoll(
@@ -200,6 +290,9 @@ describe("createPollPersistence reads", () => {
       description: null,
       pollType: "multiple_choice",
       resultVisibility: "live",
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
       deadlineMs: null,
       closedAtMs: null,
       options: [

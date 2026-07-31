@@ -119,18 +119,66 @@ if (form) {
     'button[type="submit"]',
   );
   const hint = form.querySelector<HTMLElement>("[data-vote-hint]");
+  const boundsHint = form.querySelector<HTMLElement>("[data-bounds-hint]");
   const options = Array.from(
     form.querySelectorAll<HTMLInputElement>('input[name="option_id"]'),
   );
   const locked = form.dataset.voteLocked === "true";
+  const multiSelect = form.dataset.multiSelect === "true";
+  const parsedMin = Number(form.dataset.min);
+  const parsedMax = Number(form.dataset.max);
+  const minSelections =
+    Number.isInteger(parsedMin) && parsedMin >= 1 ? parsedMin : 1;
+  const maxSelections =
+    Number.isInteger(parsedMax) && parsedMax >= minSelections
+      ? parsedMax
+      : Math.max(minSelections, options.length);
   const idleVoteLabel = voteButton?.textContent?.trim() || "VOTE";
   let inFlightSelection = new Set<string>();
+  let boundsAnnouncementRevision = 0;
+
+  const selectedCount = (): number =>
+    options.filter((option) => option.checked).length;
+
+  const boundsMessage = (count: number): string => {
+    if (count < minSelections) {
+      return `Pick at least ${minSelections}.`;
+    }
+    if (count >= maxSelections) {
+      return `Pick up to ${maxSelections}. ${count} chosen.`;
+    }
+    return "";
+  };
 
   const syncSelectionState = (): void => {
     if (form.dataset.voteInflight === "true") {
       return;
     }
-    const hasSelection = options.some((option) => option.checked);
+    const count = selectedCount();
+    if (multiSelect) {
+      if (voteButton) {
+        voteButton.disabled =
+          locked || count < minSelections || count > maxSelections;
+      }
+      if (boundsHint) {
+        const nextMessage = boundsMessage(count);
+        // Only rewrite when the caption changes — reassigning the same
+        // "Pick at least {min}." string on every below-min toggle re-chatters
+        // the polite live region without new information.
+        if (boundsHint.textContent !== nextMessage) {
+          boundsAnnouncementRevision += 1;
+          boundsHint.textContent = nextMessage;
+        }
+      }
+      if (count >= maxSelections) {
+        form.dataset.maxReached = "true";
+      } else {
+        delete form.dataset.maxReached;
+      }
+      return;
+    }
+
+    const hasSelection = count > 0;
     if (voteButton) {
       voteButton.disabled = locked || !hasSelection;
     }
@@ -139,10 +187,26 @@ if (form) {
     }
   };
 
+  const reannounceBounds = (): void => {
+    if (!boundsHint) {
+      return;
+    }
+    const message = boundsHint.textContent ?? "";
+    if (message.length === 0) {
+      return;
+    }
+    const revision = (boundsAnnouncementRevision += 1);
+    boundsHint.textContent = "";
+    window.requestAnimationFrame(() => {
+      if (revision === boundsAnnouncementRevision) {
+        boundsHint.textContent = message;
+      }
+    });
+  };
+
   // In flight the ballot is frozen: block only selection-changing keys so
   // browser shortcuts (reload, Escape, Home/End) keep working.
-  const selectionKeys = new Set([
-    " ",
+  const radioSelectionKeys = new Set([
     "ArrowUp",
     "ArrowDown",
     "ArrowLeft",
@@ -156,12 +220,19 @@ if (form) {
         }
         return;
       }
+      if (multiSelect && option.checked && selectedCount() > maxSelections) {
+        option.checked = false;
+        syncSelectionState();
+        reannounceBounds();
+        return;
+      }
       syncSelectionState();
     });
     option.addEventListener("keydown", (event) => {
       if (
         form.dataset.voteInflight === "true" &&
-        selectionKeys.has(event.key)
+        (event.key === " " ||
+          (option.type === "radio" && radioSelectionKeys.has(event.key)))
       ) {
         event.preventDefault();
       }

@@ -16,7 +16,7 @@ interface PollTypeStrategy<TCreateInput, TCreationFacts, TSubmission,
   create(input, { nowMs }): Result<TCreationFacts>;
   validateSubmission?(submission, facts): Result<TValidatedSubmission>;   // Story 1.5
   persistFacts?(validated): TPersistedFacts;                              // Story 1.5
-  projectResults?(facts: TPersistedFacts): TResultProjection;             // Story 1.8
+  projectResults?(facts: TPersistedFacts): TResultProjection;             // data in 1.7, surface in 1.8
 }
 ```
 
@@ -31,7 +31,8 @@ Load-bearing properties:
    command or another type's facts.
 3. **Ports arrive with their consuming stories.** `validateSubmission` /
    `persistFacts` join the AD-7 vote transaction in Story 1.5;
-   `projectResults` joins the AR-17 result surfaces in Story 1.8. They are
+   multiple-choice `projectResults` data arrives early in Story 1.7, while
+   its AR-17 result-surface consumer still joins in Story 1.8. They are
    declared now so their position in the contract is frozen; a contract change
    after freeze requires a version bump plus moving the compile-time consumer
    test (`tests/unit/shared-kernel.test.ts`). All three are optional members
@@ -106,6 +107,23 @@ module may therefore narrow the port for its own implementation (e.g.
 
 A change that alters the shared interface's port shapes remains a version
 bump plus moving the compile-time consumers together, per the verdict below.
+
+Recorded 2026-07-31 (Story 1.7): the multiple-choice strategy exercises three
+per-type refinements without changing the shared interface:
+
+1. `MultipleChoiceCreateInput` and `MultipleChoiceCreationFacts` widen with
+   the multi-select flag and nullable min/max bounds owned by this Poll Type.
+2. `MultipleChoiceValidatedSubmission` widens from a one-item tuple to this
+   type's selected-option array, while `MultipleChoiceValidationFacts` adds
+   the persisted multi-select configuration needed to enforce its bounds.
+3. `projectResults` arrives early in Story 1.7 and is narrowed in the
+   multiple-choice module to consume the cross-Vote option/selection facts a
+   result projection actually needs; the Story 1.8 surface remains deferred,
+   while single-Vote `MultipleChoicePersistedFacts` and the shared kernel stay
+   unchanged.
+
+All three refinements remain inside `multiple-choice.ts`; contract version 1
+and `tests/unit/shared-kernel.test.ts` therefore remain unchanged.
 
 ## Verdict
 

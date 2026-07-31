@@ -31,6 +31,9 @@ export type CreatePollDraft = {
   deadlineLocal: string;
   timeZone: string;
   customLink: string;
+  multiSelect: string;
+  minSelections: string;
+  maxSelections: string;
   // No-JS duplicate-POST dedupe (D4, decision 2026-07-29): the form renders
   // with a pre-minted poll UUID; a retried publish carrying the same ID
   // collides on the poll PRIMARY KEY instead of minting a second Poll.
@@ -53,6 +56,9 @@ export type ValidatedCreatePoll = {
   resultVisibility: ResultVisibility;
   deadlineMs: number | null;
   customLink: string | null;
+  multiSelect: boolean;
+  minSelections: number | null;
+  maxSelections: number | null;
 };
 
 // Voice-and-Tone catalog for creation failures. The three epic-specified
@@ -78,6 +84,13 @@ export const CREATE_POLL_COPY = {
   customLinkReserved:
     "`{slug}` is reserved by the application itself. Pick something less structural.",
   customLinkTaken: "`{slug}` is taken. Pick another.",
+  boundsMinTooLow:
+    "Min is at least 1 — a Poll someone can't vote in isn't a Poll.",
+  boundsNotInteger: "Bounds must be whole numbers.",
+  boundsOrder: "Min can't be more than max.",
+  boundsMinTooHigh: `Min can't be more than the option count ({count}).`,
+  boundsMaxTooHigh: `Max can't be more than the option count ({count}).`,
+  boundsWithoutMultiSelect: "Bounds only apply when multi-select is on.",
   createFailed: "That didn't publish. Nothing was created — try again.",
   duplicateDivergent: "That Poll already published. Start a new one.",
   dedupeUnconfirmable:
@@ -272,6 +285,91 @@ export function validateCreatePoll(
     fail("options", "options_duplicate", CREATE_POLL_COPY.optionsDuplicate);
   }
 
+  const multiSelect = draft.multiSelect === "true";
+  const rawMinSelections = draft.minSelections.trim();
+  const rawMaxSelections = draft.maxSelections.trim();
+  let minSelections: number | null = null;
+  let maxSelections: number | null = null;
+
+  if (!multiSelect) {
+    if (rawMinSelections.length > 0 || rawMaxSelections.length > 0) {
+      fail(
+        "multiSelect",
+        "bounds_without_multi_select",
+        CREATE_POLL_COPY.boundsWithoutMultiSelect,
+      );
+    }
+  } else if (fieldErrors["options"] === undefined) {
+    // Skip bounds when the option list is already invalid — effective max
+    // would be 0 (or 1) and produce a noisy bounds_order next to the real
+    // options error.
+    if (rawMinSelections.length > 0) {
+      const parsedMin = Number(rawMinSelections);
+      if (!Number.isInteger(parsedMin)) {
+        fail(
+          "minSelections",
+          "bounds_not_integer",
+          CREATE_POLL_COPY.boundsNotInteger,
+        );
+      } else if (parsedMin < 1) {
+        fail(
+          "minSelections",
+          "bounds_min_too_low",
+          CREATE_POLL_COPY.boundsMinTooLow,
+        );
+      } else {
+        minSelections = parsedMin;
+      }
+    }
+
+    if (rawMaxSelections.length > 0) {
+      const parsedMax = Number(rawMaxSelections);
+      if (!Number.isInteger(parsedMax)) {
+        fail(
+          "maxSelections",
+          "bounds_not_integer",
+          CREATE_POLL_COPY.boundsNotInteger,
+        );
+      } else {
+        maxSelections = parsedMax;
+      }
+    }
+
+    const effectiveMin = minSelections ?? 1;
+    const effectiveMax = maxSelections ?? labels.length;
+    if (
+      fieldErrors["maxSelections"] === undefined &&
+      effectiveMax > labels.length
+    ) {
+      fail(
+        "maxSelections",
+        "bounds_max_too_high",
+        CREATE_POLL_COPY.boundsMaxTooHigh.replace(
+          "{count}",
+          String(labels.length),
+        ),
+      );
+    } else if (
+      fieldErrors["minSelections"] === undefined &&
+      effectiveMin > labels.length
+    ) {
+      fail(
+        "minSelections",
+        "bounds_min_too_high",
+        CREATE_POLL_COPY.boundsMinTooHigh.replace(
+          "{count}",
+          String(labels.length),
+        ),
+      );
+    } else if (
+      fieldErrors["minSelections"] === undefined &&
+      fieldErrors["maxSelections"] === undefined &&
+      effectiveMin > effectiveMax
+    ) {
+      fail("minSelections", "bounds_order", CREATE_POLL_COPY.boundsOrder);
+    }
+  }
+
   const description = draft.description.trim();
   if (codePoints(description) > POLL_CAPS.maxDescriptionLength) {
     fail(
@@ -342,7 +440,12 @@ export function validateCreatePoll(
   }
 
   const facts = multipleChoiceStrategy.create(
-    { optionLabels: labels },
+    {
+      optionLabels: labels,
+      multiSelect,
+      minSelections,
+      maxSelections,
+    },
     { nowMs },
   );
   if (!facts.ok) {
@@ -358,6 +461,9 @@ export function validateCreatePoll(
       resultVisibility: draft.resultVisibility as ResultVisibility,
       deadlineMs,
       customLink,
+      multiSelect: facts.value.multiSelect,
+      minSelections: facts.value.minSelections,
+      maxSelections: facts.value.maxSelections,
     },
   };
 }
@@ -374,6 +480,9 @@ export type PollPersistenceRows = {
     resultVisibility: ResultVisibility;
     discoveryState: "unlisted";
     sessionChecksEnabled: true;
+    multiSelectEnabled: boolean;
+    minSelections: number | null;
+    maxSelections: number | null;
     deadlineMs: number | null;
     representationVersion: 1;
     createdAtMs: number;
@@ -422,6 +531,9 @@ export type ExistingPollSnapshot = {
   description: string | null;
   resultVisibility: ResultVisibility;
   deadlineMs: number | null;
+  multiSelectEnabled: boolean;
+  minSelections: number | null;
+  maxSelections: number | null;
   options: { label: string; position: number }[];
   canonicalReference: string;
   canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
@@ -469,13 +581,24 @@ function matchesExistingPoll(
       ? existing.canonicalReferenceKind === "generated"
       : existing.canonicalReferenceKind === "custom" &&
         validated.customLink === existing.canonicalReference;
+  // Compare effective selection policy, not stored NULL-vs-number encoding:
+  // blank defaults persist as NULL (min 1 / max all), while an explicit
+  // min=1 / max=option-count is the same 1-to-all policy.
+  const optionCount = validated.options.length;
+  const effectiveMin = (value: number | null): number => value ?? 1;
+  const effectiveMax = (value: number | null): number => value ?? optionCount;
   return (
     referenceMatches &&
     validated.question === existing.question &&
     validated.description === existing.description &&
     validated.resultVisibility === existing.resultVisibility &&
     validated.deadlineMs === existing.deadlineMs &&
-    validated.options.length === existing.options.length &&
+    validated.multiSelect === existing.multiSelectEnabled &&
+    effectiveMin(validated.minSelections) ===
+      effectiveMin(existing.minSelections) &&
+    effectiveMax(validated.maxSelections) ===
+      effectiveMax(existing.maxSelections) &&
+    optionCount === existing.options.length &&
     validated.options.every(
       (option, index) =>
         option.label === existing.options[index]?.label &&
@@ -514,6 +637,9 @@ function draftContentForCompare(
     return null;
   }
   const description = draft.description.trim();
+  const multiSelect = draft.multiSelect === "true";
+  const rawMinSelections = draft.minSelections.trim();
+  const rawMaxSelections = draft.maxSelections.trim();
   return {
     question: draft.question.trim(),
     description: description.length > 0 ? description : null,
@@ -524,6 +650,15 @@ function draftContentForCompare(
     resultVisibility: draft.resultVisibility as ResultVisibility,
     deadlineMs,
     customLink: normalizeCustomLink(draft.customLink),
+    multiSelect,
+    minSelections:
+      multiSelect && rawMinSelections.length > 0
+        ? Number(rawMinSelections)
+        : null,
+    maxSelections:
+      multiSelect && rawMaxSelections.length > 0
+        ? Number(rawMaxSelections)
+        : null,
   };
 }
 
@@ -648,6 +783,9 @@ export async function createPoll(
       resultVisibility: validated.value.resultVisibility,
       discoveryState: "unlisted",
       sessionChecksEnabled: true,
+      multiSelectEnabled: validated.value.multiSelect,
+      minSelections: validated.value.minSelections,
+      maxSelections: validated.value.maxSelections,
       deadlineMs: validated.value.deadlineMs,
       representationVersion: 1,
       createdAtMs: nowMs,

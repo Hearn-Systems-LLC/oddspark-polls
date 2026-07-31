@@ -67,6 +67,24 @@ describe("polls D1 schema (migration 0004)", () => {
           notnull: 1,
           dflt_value: "1",
         }),
+        expect.objectContaining({
+          name: "multi_select_enabled",
+          type: "INTEGER",
+          notnull: 1,
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "min_selections",
+          type: "INTEGER",
+          notnull: 0,
+          dflt_value: null,
+        }),
+        expect.objectContaining({
+          name: "max_selections",
+          type: "INTEGER",
+          notnull: 0,
+          dflt_value: null,
+        }),
         expect.objectContaining({ name: "deadline_ms", type: "INTEGER", notnull: 0 }),
         expect.objectContaining({ name: "closed_at_ms", type: "INTEGER", notnull: 0 }),
         expect.objectContaining({

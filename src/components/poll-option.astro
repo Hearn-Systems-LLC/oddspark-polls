@@ -28,10 +28,17 @@ const {
 
 {
   readOnly ? (
-    <div class:list={["poll-option", "poll-option-readonly", className]}>
-      {/* UX-DR2: the voter's own cast selection is marked with the ◆ glyph.
-          The marker span renders on EVERY read-only row (the uncast rows
-          stay · so rows keep their alignment); the glyph is aria-hidden, so
+    <div
+      class:list={[
+        "poll-option",
+        "poll-option-readonly",
+        type === "checkbox" && "poll-option-checkbox",
+        className,
+      ]}
+    >
+      {/* UX-DR2: the voter's own cast selection is marked with ◆ for radio
+          rows and [×] for checkbox rows. The marker span renders on EVERY
+          read-only row so alignment is stable; the glyph is aria-hidden, so
           the cast row also carries visually-hidden text a screen reader can
           announce. */}
       <span
@@ -125,6 +132,22 @@ const {
 
   .poll-option-readonly .poll-option-marker.is-cast::before {
     content: "◆";
+    color: var(--poll-option-marker-selected);
+  }
+
+  .poll-option-input[type="checkbox"] + .poll-option-marker,
+  .poll-option-checkbox .poll-option-marker {
+    width: 3ch;
+  }
+
+  .poll-option-input[type="checkbox"] + .poll-option-marker::before,
+  .poll-option-checkbox .poll-option-marker::before {
+    content: "[ ]";
+  }
+
+  .poll-option-input[type="checkbox"]:checked + .poll-option-marker::before,
+  .poll-option-checkbox .poll-option-marker.is-cast::before {
+    content: "[×]";
     color: var(--poll-option-marker-selected);
   }
 </style>

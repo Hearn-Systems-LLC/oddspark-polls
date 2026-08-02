@@ -84,7 +84,8 @@
   --type-caption-size: 12px;
   --type-caption-lh: 1.5;
 
-  /* Motion (defined now; nothing animates in story 1.1) */
+  /* Motion — the five primitives (UX-DR4); consumed by the results bar
+     and live reconciler from Story 1.10 on */
   --motion-bar-transition: 480ms;
   --motion-spark: 180ms;
   --motion-count-up: 400ms;
@@ -142,11 +143,17 @@
   --results-bar-height: 34px;
   --results-bar-height-desktop: 38px;
   --results-bar-leading-edge-width: 2px;
+  --results-bar-leading-edge-width-spark: 4px;
   --results-bar-fill: var(--color-entropy-wash);
   --results-bar-fill-leader: var(--color-solar-wash);
   --results-bar-edge: var(--color-entropy);
   --results-bar-edge-leader: var(--color-solar-ink);
   --results-bar-leader-marker-color: var(--color-solar-ink);
+  --chart-form-toggle-separator: "·";
+  --chart-form-toggle-gap: var(--space-2);
+  --chart-form-toggle-padding-y: var(--space-2);
+  --chart-form-toggle-min-height: 48px;
+  --chart-form-toggle-focus-outline-offset: 2px;
   --overlay-scrim: var(--color-overlay-scrim);
   --focus-outline: 2px solid var(--color-focus-ring);
   --focus-outline-offset: 2px;
@@ -173,6 +180,10 @@
   --color-alarm: var(--color-alarm-dark);
   --color-overlay-scrim: var(--color-overlay-scrim-dark);
   --results-bar-leader-marker-color: var(--color-solar-ink-dark);
+  --chart-form-toggle-color: var(--color-dim-dark);
+  --chart-form-toggle-color-current: var(--color-solar-ink-dark);
+  --chart-form-toggle-border-bottom: var(--space-hairline) solid var(--color-rule-dark);
+  --chart-form-toggle-focus-outline: 2px solid var(--color-focus-ring-dark);
 }
 
 /* ── Light mode runtime ── */
@@ -197,6 +208,10 @@
   --color-overlay-scrim: var(--color-overlay-scrim-light);
   /* Exception: results-bar.leaderMarkerColorLight */
   --results-bar-leader-marker-color: var(--color-results-bar-leader-marker-light);
+  --chart-form-toggle-color: var(--color-dim-light);
+  --chart-form-toggle-color-current: var(--color-solar-ink-light);
+  --chart-form-toggle-border-bottom: var(--space-hairline) solid var(--color-rule-light);
+  --chart-form-toggle-focus-outline: 2px solid var(--color-focus-ring-light);
 }
 
 /* OS preference when no manual override (applied via html without data-mode) */
@@ -220,6 +235,10 @@
     --color-alarm: var(--color-alarm-light);
     --color-overlay-scrim: var(--color-overlay-scrim-light);
     --results-bar-leader-marker-color: var(--color-results-bar-leader-marker-light);
+    --chart-form-toggle-color: var(--color-dim-light);
+    --chart-form-toggle-color-current: var(--color-solar-ink-light);
+    --chart-form-toggle-border-bottom: var(--space-hairline) solid var(--color-rule-light);
+    --chart-form-toggle-focus-outline: 2px solid var(--color-focus-ring-light);
   }
 }
 
@@ -243,6 +262,10 @@
     --color-alarm: var(--color-alarm-dark);
     --color-overlay-scrim: var(--color-overlay-scrim-dark);
     --results-bar-leader-marker-color: var(--color-solar-ink-dark);
+    --chart-form-toggle-color: var(--color-dim-dark);
+    --chart-form-toggle-color-current: var(--color-solar-ink-dark);
+    --chart-form-toggle-border-bottom: var(--space-hairline) solid var(--color-rule-dark);
+    --chart-form-toggle-focus-outline: 2px solid var(--color-focus-ring-dark);
   }
 }
 

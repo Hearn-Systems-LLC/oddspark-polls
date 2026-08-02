@@ -42,6 +42,7 @@ import {
 } from "../modules/voting/index";
 import {
   effectivePollStatus,
+  type PollOptionId,
   type PollStatus,
   type PollType,
   type UserId,
@@ -574,6 +575,7 @@ if (poll && method === "POST") {
 // for a hidden After Close or unauthorized Creator-Only outcome (AD-21).
 let postVoteResults: PostVoteResultsView | null = null;
 let yourBallotLabels: string[] = [];
+let yourBallotOptionIds: PollOptionId[] = [];
 const resultsRenderedAtMs = Date.now();
 if (poll && readOnly) {
   try {
@@ -615,10 +617,14 @@ if (poll && readOnly) {
           ballotDigest,
         ),
       );
-      // Stored option order, never submission order.
-      return poll.options
-        .filter((option) => castSelectionIds.has(option.id))
-        .map((option) => option.label);
+      // Stored option order, never submission order. The IDs flow to the
+      // confirmation render's own-vote spark (Story 1.10); the labels stay
+      // the text-only YOUR BALLOT line.
+      const selections = poll.options.filter((option) =>
+        castSelectionIds.has(option.id),
+      );
+      yourBallotOptionIds = selections.map((option) => option.id);
+      return selections.map((option) => option.label);
     },
   );
 
@@ -905,6 +911,9 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
               tally={postVoteResults.tally}
               status={postVoteResults.status}
               yourBallotLabels={yourBallotLabels}
+              yourBallotOptionIds={
+                outcome?.code === "counted" ? yourBallotOptionIds : undefined
+              }
               loading
               liveEndpoint={
                 postVoteResults.status === "open"
@@ -921,6 +930,11 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     }
   </main>
   {poll && <script src="../scripts/vote-form.ts"></script>}
+  {
+    showTally && postVoteResults?.kind === "visible" && (
+      <script src="../scripts/chart-form-toggle.ts"></script>
+    )
+  }
   {
     showTally &&
       postVoteResults?.kind === "visible" &&
@@ -1129,9 +1143,18 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
       grid-row: 3;
     }
 
-    .poll-shell[data-post-vote="true"] :global(.results-tally-bars) {
+    /* The final region dissolves (display: contents), so the toggle and the
+       pie mount are direct grid items and need explicit placement — the
+       toggle above the bar group, the pie where the bars sit. */
+    .poll-shell[data-post-vote="true"] :global(.chart-form-toggle) {
       grid-column: 2;
       grid-row: 4;
+    }
+
+    .poll-shell[data-post-vote="true"] :global(.results-tally-bars),
+    .poll-shell[data-post-vote="true"] :global(.chart-form-pie) {
+      grid-column: 2;
+      grid-row: 5;
     }
   }
 </style>

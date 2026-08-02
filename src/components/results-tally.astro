@@ -3,8 +3,10 @@
  * The one static Tally renderer (Story 1.8) — reused by the direct Results
  * route and the post-vote surface. Owns creator-authored option order, the
  * `N VOTERS · M SELECTIONS` multi-select summary, the optional `TIED` line,
- * the all-zero empty copy, the bar group, and the optional text-only
- * `YOUR BALLOT` block. Gold belongs to the unique leader alone: a tied or
+ * the all-zero empty copy, the single-select-only `BARS · PIE` chart-form
+ * toggle (Story 1.10, server-rendered hidden and revealed by its script),
+ * the bar group, and the optional text-only `YOUR BALLOT` block. Gold
+ * belongs to the unique leader alone: a tied or
  * empty Tally carries none, and a voter's own ballot never adds a second
  * gold or ◆.
  *
@@ -19,7 +21,8 @@
  * the complete server-rendered Tally exists.
  */
 import { RESULTS_COPY, type ResultsTallyView } from "../modules/results/index";
-import type { PollStatus } from "../shared/domain/index";
+import type { PollOptionId, PollStatus } from "../shared/domain/index";
+import ChartFormToggle from "./chart-form-toggle.astro";
 import LiveIndicator from "./live-indicator.astro";
 import { formatVoteTotal } from "./live-indicator";
 import ResultsBar from "./results-bar.astro";
@@ -32,6 +35,10 @@ interface Props {
   /** The viewer's own selected labels in stored option order — text only,
    * never a second gold. Omit entirely when no claim resolved. */
   yourBallotLabels?: string[];
+  /** The viewer's own selected option IDs (Story 1.10) — marks their bar(s)
+   * with data-your-option on the counted confirmation render only; absent
+   * for every other surface and never on hidden branches. */
+  yourBallotOptionIds?: PollOptionId[];
   /** Present the cold-load skeleton first, resolving on the first frame. */
   loading?: boolean;
   /** Exact private/no-store endpoint for the open progressive enhancer. */
@@ -45,6 +52,7 @@ const {
   tally,
   status,
   yourBallotLabels = [],
+  yourBallotOptionIds = [],
   loading = false,
   liveEndpoint,
   initialRenderAtMs = Date.now(),
@@ -91,7 +99,14 @@ const {
     >
       <span data-live-status-content>
         <LiveIndicator status={status}>
-          <span data-live-total>{formatVoteTotal(tally.voterCount)}</span>
+          {
+            /* The visible total ticks inside an aria-hidden span (Story 1.10
+               count-up) while the announced copy is written once per
+               reconcile with the final value — a tween must never spam the
+               one polite region. */
+          }
+          <span data-live-total-visual aria-hidden="true">{formatVoteTotal(tally.voterCount)}</span>
+          <span class="visually-hidden" data-live-total>{formatVoteTotal(tally.voterCount)}</span>
           <span aria-hidden="true"> · </span>
         </LiveIndicator>
       </span>
@@ -102,6 +117,13 @@ const {
       </span>
       <span class="visually-hidden" data-live-announcement></span>
     </p>
+    {
+      /* Multi-select Polls are bars-only (ratified, Story 1.10): per-option
+         shares of VOTERS sum past 100% and cannot form an honest pie, so
+         the toggle is not emitted at all. Sits immediately before the bar
+         group — above it in reading order and in the desktop grid. */
+    }
+    {!tally.multiSelectEnabled && <ChartFormToggle />}
     <div class="results-tally-bars" data-tally-final>
       {
         tally.options.map((option) => (
@@ -109,8 +131,10 @@ const {
             optionId={option.id}
             label={option.label}
             percent={option.percent}
+            pieShare={option.pieShare}
             count={option.count}
             leader={option.leading}
+            yourOption={yourBallotOptionIds.includes(option.id)}
           />
         ))
       }

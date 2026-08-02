@@ -244,8 +244,65 @@ describe("queryResults tally view", () => {
     }
     // 57/122 = 46.7…% rounds to 47; the denominator is Voters, not selections.
     expect(view.tally.options.map(({ percent }) => percent)).toEqual([47, 53]);
+    expect(view.tally.options.map(({ pieShare }) => pieShare)).toEqual([
+      57 / 122,
+      65 / 122,
+    ]);
     expect(view.tally.voterCount).toBe(122);
     expect(view.tally.selectionCount).toBe(122);
+  });
+
+  it("keeps exact positive PIE shares when rounded display percentages overshoot", async () => {
+    const counts = [...Array(24).fill(2), ...Array(6).fill(1)];
+    const visiblePorts = ports(
+      envelope(),
+      tally({
+        options: counts.map((count, position) => ({
+          id: `results-option-${position}` as PollOptionId,
+          label: `Option ${position + 1}`,
+          position,
+          count,
+        })),
+        voterCount: 54,
+        selectionCount: 54,
+      }),
+    );
+    const view = await queryResults(visiblePorts, "team-lunch", ANONYMOUS, NOW);
+    if (view.kind !== "visible") {
+      throw new Error("expected a visible tally");
+    }
+    expect(view.tally.options.map(({ percent }) => percent)).toEqual([
+      ...Array(24).fill(4),
+      ...Array(6).fill(2),
+    ]);
+    expect(view.tally.options).toHaveLength(30);
+    expect(view.tally.options.every(({ pieShare }) => pieShare > 0)).toBe(true);
+    expect(
+      view.tally.options.reduce((sum, { pieShare }) => sum + pieShare, 0),
+    ).toBeCloseTo(1, 12);
+  });
+
+  it("keeps a positive PIE share when its display percentage rounds to zero", async () => {
+    const visiblePorts = ports(
+      envelope(),
+      tally({
+        options: [
+          { id: OPTION_A, label: "Pizza", position: 0, count: 200 },
+          { id: OPTION_B, label: "Sushi", position: 1, count: 1 },
+        ],
+        voterCount: 201,
+        selectionCount: 201,
+      }),
+    );
+    const view = await queryResults(visiblePorts, "team-lunch", ANONYMOUS, NOW);
+    if (view.kind !== "visible") {
+      throw new Error("expected a visible tally");
+    }
+    expect(view.tally.options.map(({ percent }) => percent)).toEqual([100, 0]);
+    expect(view.tally.options.map(({ pieShare }) => pieShare)).toEqual([
+      200 / 201,
+      1 / 201,
+    ]);
   });
 
   it("yields exactly 0 for every option when no one has voted", async () => {
@@ -255,6 +312,7 @@ describe("queryResults tally view", () => {
       throw new Error("expected a visible tally");
     }
     expect(view.tally.options.map(({ percent }) => percent)).toEqual([0, 0]);
+    expect(view.tally.options.map(({ pieShare }) => pieShare)).toEqual([0, 0]);
     expect(view.tally.empty).toBe(true);
     expect(view.tally.tied).toBe(false);
     expect(view.tally.options.every(({ leading }) => !leading)).toBe(true);

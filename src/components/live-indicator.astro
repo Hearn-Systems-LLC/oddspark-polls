@@ -48,7 +48,9 @@ const state = liveIndicatorState(status);
     color: var(--color-dim);
   }
 
-  .live-indicator.is-closed {
+  /* Only the CLOSED word steps up a type size; the totals slot stays
+     label-caps — LIVE=11px and CLOSED=12px are different steps by spec. */
+  .live-indicator.is-closed .live-indicator-state {
     font-size: var(--type-label-caps-lg-size);
   }
 

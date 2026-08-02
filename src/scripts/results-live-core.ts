@@ -3,6 +3,11 @@ import type { PollStatus } from "../shared/domain/index";
 export const RESULTS_POLL_CADENCE_MS = 3_000;
 export const RESULTS_POLL_MAX_BACKOFF_MS = 30_000;
 
+// Page-reload recovery (structural DOM/payload mismatch, lost entitlement,
+// version regression) is capped per tab: beyond the cap the poller gives up
+// and presents the last known Tally as stale instead of reloading forever.
+export const RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS = 2;
+
 export type ResultsLiveConnection =
   | { kind: "live"; lastSuccessAtMs: number }
   | { kind: "stale"; lastSuccessAtMs: number }

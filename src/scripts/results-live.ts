@@ -2,6 +2,7 @@ import { barAccessibleName, barWidthPercent } from "../components/results-bar";
 import { formatVoteTotal } from "../components/live-indicator";
 import type { LiveResultsPayload } from "../modules/results/index";
 import {
+  RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS,
   createResultsLiveState,
   markResultsLiveFailure,
   markResultsLiveSuccess,
@@ -64,6 +65,29 @@ const localRefreshTime = (timestampMs: number): string =>
     hourCycle: "h23",
   }).format(new Date(timestampMs));
 
+// Reload recovery is bounded per tab: the count survives the reload it
+// triggers, so a persistent cause degrades to the stale presentation instead
+// of reloading every poll cycle.
+const RELOAD_COUNT_STORAGE_KEY = "oddspark.results-live.reload-count";
+
+const readReloadCount = (): number => {
+  try {
+    const raw = window.sessionStorage.getItem(RELOAD_COUNT_STORAGE_KEY);
+    const parsed = raw === null ? 0 : Number(raw);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const writeReloadCount = (count: number): void => {
+  try {
+    window.sessionStorage.setItem(RELOAD_COUNT_STORAGE_KEY, String(count));
+  } catch {
+    // Storage can be unavailable (private mode); the cap then holds per load.
+  }
+};
+
 const enhanceResultsTally = (root: HTMLElement): void => {
   if (root.dataset.liveEnhanced === "true") {
     return;
@@ -117,6 +141,13 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   let controller: AbortController | null = null;
   let requestGeneration = 0;
   let reloadStarted = false;
+  let reloadCount = readReloadCount();
+  const resetReloadCount = (): void => {
+    if (reloadCount !== 0) {
+      reloadCount = 0;
+      writeReloadCount(0);
+    }
+  };
   const announcementQueue: string[] = [];
   let announcementActive = false;
   let announcementRevision = 0;
@@ -227,13 +258,23 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   };
 
   const reloadOnce = (): void => {
-    if (!reloadStarted) {
-      reloadStarted = true;
-      clearTimer();
-      abortRefresh();
-      clearAnnouncements();
-      window.location.reload();
+    if (reloadStarted) {
+      return;
     }
+    reloadStarted = true;
+    clearTimer();
+    abortRefresh();
+    if (reloadCount >= RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS) {
+      // The cause survived repeated reloads — stop polling and present the
+      // last known Tally as stale rather than reloading every poll cycle.
+      state = markResultsLiveFailure(state);
+      showStale();
+      return;
+    }
+    reloadCount += 1;
+    writeReloadCount(reloadCount);
+    clearAnnouncements();
+    window.location.reload();
   };
 
   const reconcile = (payload: LiveResultsPayload): boolean => {
@@ -428,6 +469,13 @@ const enhanceResultsTally = (root: HTMLElement): void => {
         return;
       }
 
+      // Lost entitlement (204) and a vanished Poll (404) are terminal for
+      // this page, not transient failures — reload into the truthful page
+      // state instead of polling forever under a misleading stale notice.
+      if (response.status === 204 || response.status === 404) {
+        reloadOnce();
+        return;
+      }
       if (response.status !== 200 || incomingValidator === null) {
         throw new Error("Live Results refresh failed");
       }
@@ -439,8 +487,11 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       if (!parsedValidator || parsedValidator.status !== payload.status) {
         throw new Error("Mismatched live Results validator");
       }
+      // A version regression means the server's world moved backwards (e.g.
+      // a D1 Time Travel restore) — reload to snap to its reality rather
+      // than ignoring healthy responses and staying stale forever.
       if (!shouldAdoptResultsValidator(validator, incomingValidator)) {
-        schedule();
+        reloadOnce();
         return;
       }
       if (payload.status === "closed") {
@@ -453,10 +504,11 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       const wasStale = state.connection.kind === "stale";
       validator = incomingValidator;
       state = markResultsLiveSuccess(state, Date.now(), payload.status);
+      resetReloadCount();
       if (wasStale || root.dataset.liveStatus !== payload.status) {
         showConnected(payload.status);
       }
-      if (wasStale) {
+      if (wasStale && payload.status !== "closed") {
         announce("Updates resumed.");
       }
       schedule();

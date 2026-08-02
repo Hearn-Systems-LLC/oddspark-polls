@@ -67,6 +67,12 @@ describe("live indicator component contract", () => {
     expect(indicatorSource).toContain("color: var(--color-dim)");
     expect(indicatorSource).not.toContain("--color-faint");
   });
+
+  it("steps only the CLOSED word up to label-caps-lg, not the totals slot", () => {
+    expect(indicatorSource).toMatch(
+      /\.live-indicator\.is-closed \.live-indicator-state\s*\{[^}]*var\(--type-label-caps-lg-size\)/,
+    );
+  });
 });
 
 describe("Results Tally live region contract", () => {

@@ -4,7 +4,7 @@ baseline_commit: b0cafe64a37adf95f8bd085299757015c927936e
 
 # Story 1.9: Live-Updating Results
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Branch provenance: cut the story branch from fetched `origin/main`. At story creation, `origin/main` is `b0cafe64a37adf95f8bd085299757015c927936e` (the merge of Story 1.8); if main has moved by dev start, record the actual branch-cut SHA here. -->
@@ -75,6 +75,15 @@ so that I never reach for refresh and never trust stale numbers unknowingly.
   - [x] Browser proof is mandatory: capture the live Tally at 375px dark and ≥1024px light showing the pulsing dot + `LIVE`, the stale notice state, and the `CLOSED` state; record a clean console. Do not ask Justin to perform the visual check
   - [x] UPDATE `CHANGELOG.md` under `## [Unreleased]` with the live-updating behavior. Consider noting in `deferred-work.md` that polling multiplies the per-request D1 read volume already flagged there (line 36) — no caching decision is being made in this story
   - [x] Run narrow red/green tests during each task, then the repository gate in documented order: `pnpm migrations:guard`, `pnpm test`, `pnpm check`, `pnpm test:e2e`, `pnpm types`, `git diff --exit-code worker-configuration.d.ts`, `pnpm build:production`. No migration, dependency, binding, or token change is expected; the drift assertion stays in the gate
+
+### Review Findings
+
+- [x] [Review][Patch] Reload loop has no circuit breaker — a persistent DOM/payload structural mismatch (e.g. an open tab across a tally-markup deploy) reloads the page every poll cycle forever, hammering the endpoint; `reloadStarted` resets on each load and there is no cap or give-up-to-stale path [src/scripts/results-live.ts:229-237]
+- [x] [Review][Patch] 204/404 responses are treated as transient fetch failures — a viewer who loses entitlement mid-poll (expired creator session → `creator_only_hidden` 204) polls at ≤30s backoff forever under the misleading `Not receiving updates` notice instead of being taken to the truthful page state [src/scripts/results-live.ts:431-432]
+- [x] [Review][Patch] `Updates resumed.` is announced even when the recovery payload reports `closed` — a viewer whose poll crossed its Deadline during the outage hears "Updates resumed." for a poll that will never update again; AC #5 binds the announcement to reconnection restoring the live indicator [src/scripts/results-live.ts:446-461]
+- [x] [Review][Patch] Closed state upsizes the whole totals line, not just the `CLOSED` word — `.live-indicator.is-closed` applies `label-caps-lg` 12px to the outer span including the `{n} VOTES ·` slot, which spec Task 4 pins to label-caps 11px ("LIVE=11px and CLOSED=12px are different type steps by spec") [src/components/live-indicator.astro:51-53]
+- [x] [Review][Patch] A 200 whose validator is older than the client's is skipped without marking success — after a D1 Time Travel restore (docs/recovery.md) every healthy response is ignored and the client stays in the stale state forever despite a recovering service [src/scripts/results-live.ts:442-445]
+- [x] [Review][Defer] Multi-select summary never pluralizes — `1 VOTERS · 1 SELECTIONS` renders on both the SSR summary and the poller patch path [src/components/results-tally.astro:77, src/scripts/results-live.ts:323] — deferred, pre-existing (SSR line shipped in Story 1.8; the poller mirrors it)
 
 ## Dev Notes
 

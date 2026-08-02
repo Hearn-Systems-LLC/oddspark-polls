@@ -7,6 +7,11 @@ const baseURL = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: "tests/e2e",
   fullyParallel: true,
+  // Every E2E worker talks to the same Wrangler local-persistence directory.
+  // A per-file serial describe does not prevent other files from writing the
+  // shared D1 concurrently, so keep the documented `pnpm test:e2e` command
+  // deterministic instead of relying on retries for SQLite contention.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   use: {

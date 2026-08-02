@@ -75,6 +75,11 @@ function d1Execute(sql) {
   wrangler(["d1", "execute", "DB", "--local", "--command", sql]);
 }
 
+// Results-route fixtures seed polls/votes directly (the route under test is
+// read-only), so the execute half of the D1 pair is exported alongside the
+// query half. All interpolated IDs must pass assertUuid first.
+export { d1Execute };
+
 export function d1Query(sql) {
   const out = wrangler([
     "d1",

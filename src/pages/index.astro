@@ -41,8 +41,8 @@ if (!solarHex) throw new Error("tokens.css: --color-solar-dark not found");
       <section class="section">
         <h2 class="section-title">Foundation status</h2>
         <p>
-          Deployable skeleton, creator sign-in, and multiple-choice poll
-          creation are live. Voting and results land in later stories. This
+          Deployable skeleton, creator sign-in, multiple-choice poll
+          creation, voting, and visibility-aware results are live. This
           page proves the design-token system, primitives, and deploy gate.
         </p>
         <!-- Token-derived smoke marker asserted by the staging smoke check -->
@@ -89,7 +89,7 @@ if (!solarHex) throw new Error("tokens.css: --color-solar-dark not found");
 
       <section class="section">
         <h2 class="section-title">Results bars</h2>
-        <div class="stack" style="gap: 0;">
+        <div class="stack" style="gap: var(--space-1);">
           <ResultsBar label="Multiple choice" percent={47} count={122} leader />
           <ResultsBar label="Ranked choice" percent={31} count={80} />
           <ResultsBar label="Image poll" percent={22} count={57} />

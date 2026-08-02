@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   assertUuid,
   cleanupCreator,
+  d1Execute,
   d1Query,
   deletePoll,
   hasBetterAuthSecret,
@@ -200,13 +201,42 @@ test.describe("public voting flow", () => {
     return { submissionId, optionId, response };
   }
 
-  // The ◆ glyph itself is aria-hidden; the cast row carries visually-hidden
-  // "Your vote" text (a11y), which is also the reliable cast-state hook:
-  // every read-only row renders a marker span for alignment, cast or not.
-  const castMarker = (page, optionLabel) =>
-    page
-      .locator(".poll-option-readonly", { hasText: optionLabel })
-      .getByText("Your vote");
+  // Read-only rows never carry cast markers (Story 1.8 two-golds rule): the
+  // voter's own choice is the text-only YOUR BALLOT line, and a `.is-cast`
+  // marker must not appear anywhere. The Counted composition is compact —
+  // no option rows at all — while already-voted/closed keep the full list.
+  const yourBallot = (page) => page.locator("[data-your-ballot]");
+
+  async function expectYourBallot(page, labelsText) {
+    const ballot = yourBallot(page);
+    await expect(
+      ballot.locator(".results-tally-ballot-label"),
+    ).toHaveText("YOUR BALLOT");
+    await expect(
+      ballot.locator(".results-tally-ballot-value"),
+    ).toHaveText(labelsText);
+  }
+
+  async function expectNoPrivateResultShape(page) {
+    const main = page.locator("main");
+    await expect(
+      main.locator(
+        [
+          "[data-results-tally]",
+          "[data-your-ballot]",
+          "[data-tally-final]",
+          "[data-tally-skeleton]",
+          ".results-bar-track",
+          ".results-tally-summary",
+          ".results-tally-tied",
+          ".results-bar-leader-mark",
+        ].join(", "),
+      ),
+    ).toHaveCount(0);
+    const text = await main.innerText();
+    expect(text).not.toMatch(/\b\d+\s*(?:%|votes?|voters?|selections?)\b/iu);
+    expect(text).not.toMatch(/\bTIED\b|◆/u);
+  }
 
   const markerGlyph = (page, optionLabel) =>
     page
@@ -541,16 +571,30 @@ test.describe("public voting flow", () => {
     ).toEqual([{ votes: 1, selections: 2, representation_version: 2 }]);
 
     await page.goto(created.path);
+    // Counted composition: compact — no option rows; the multi-select ballot
+    // joins the selected labels in stored option order; the summary line
+    // explains percentages that total past 100.
     await expect(page.getByRole("checkbox")).toHaveCount(0);
-    await expect(page.getByText("Your vote")).toHaveCount(2);
-    expect(await markerGlyph(page, "Alpha")).toBe('"[×]"');
-    expect(await markerGlyph(page, "Beta")).toBe('"[×]"');
-    expect(await markerGlyph(page, "Gamma")).toBe('"[ ]"');
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(0);
+    await expectYourBallot(page, "Alpha · Beta");
+    await expect(page.locator(".results-tally-summary")).toHaveText(
+      "1 VOTERS · 2 SELECTIONS",
+    );
+    await expect(
+      page.getByRole("img", { name: "Alpha, 100 percent, 1 vote" }),
+    ).toBeVisible();
+    // Two options tied at one vote apiece: TIED, no gold, no ◆ anywhere.
+    await expect(page.locator(".results-tally-tied")).toHaveText("TIED");
+    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(0);
     await page.reload();
     await expect(page).toHaveTitle(`Already voted — ${question}`);
-    expect(await markerGlyph(page, "Alpha")).toBe('"[×]"');
-    expect(await markerGlyph(page, "Beta")).toBe('"[×]"');
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(3);
+    await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
+    expect(await markerGlyph(page, "Alpha")).toBe('"[ ]"');
+    expect(await markerGlyph(page, "Beta")).toBe('"[ ]"');
     expect(await markerGlyph(page, "Gamma")).toBe('"[ ]"');
+    await expectYourBallot(page, "Alpha · Beta");
+    await expect(page.locator(".results-tally-tied")).toHaveText("TIED");
   });
 
   test("renders deadlines locally and adds a countdown only inside 24 hours", async ({
@@ -636,18 +680,39 @@ test.describe("public voting flow", () => {
     await expect(page.locator("[data-vote-outcome]")).toContainText(
       "Counted. Results are live, updating as they arrive.",
     );
-    // The Counted read-only state marks the voter's own cast selection.
-    await expect(castMarker(page, "Beta")).toHaveCount(1);
-    await expect(castMarker(page, "Alpha")).toHaveCount(0);
+    // The Counted composition is compact: no option rows, the voter's own
+    // choice as the text-only YOUR BALLOT line, and the authorized Tally
+    // with exactly one gold leader — never a second gold on the ballot.
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(0);
+    await expectYourBallot(page, "Beta");
+    await expect(
+      page.getByRole("img", { name: "Beta, 100 percent, 1 vote, leading" }),
+    ).toBeVisible();
+    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(1);
+    await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
 
     await page.reload();
     await expect(page).toHaveTitle(`Already voted — ${question}`);
     await expect(page.locator("[data-vote-outcome]")).toBeFocused();
     await expect(page.getByText("You've already voted here.")).toBeVisible();
-    await expect(page.getByText("Alpha")).toBeVisible();
-    await expect(page.getByText("Beta")).toBeVisible();
-    await expect(castMarker(page, "Beta")).toHaveCount(1);
-    await expect(castMarker(page, "Alpha")).toHaveCount(0);
+    await expect(
+      page.locator(".poll-option-readonly", { hasText: "Alpha" }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".poll-option-readonly", { hasText: "Beta" }),
+    ).toBeVisible();
+    // Already-voted keeps the full read-only option list — with every
+    // selected/gold marker suppressed — plus the Tally and YOUR BALLOT.
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(2);
+    await expect(
+      page.locator(".poll-option-readonly").getByText("Your vote"),
+    ).toHaveCount(0);
+    await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
+    await expectYourBallot(page, "Beta");
+    await expect(
+      page.getByRole("img", { name: "Beta, 100 percent, 1 vote, leading" }),
+    ).toBeVisible();
+    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(1);
     await expect(page.getByRole("radio")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "VOTE" })).toHaveCount(0);
 
@@ -798,7 +863,14 @@ test.describe("public voting flow", () => {
     await expect(noJsPage.locator("[data-vote-outcome]")).toContainText(
       "Counted. Results are live, updating as they arrive.",
     );
-    await expect(castMarker(noJsPage, "Alpha")).toHaveCount(1);
+    // No-JS floor: the final authorized Tally and YOUR BALLOT render in the
+    // server HTML; the skeleton stays hidden without the enhancer.
+    await expectYourBallot(noJsPage, "Alpha");
+    await expect(noJsPage.locator("[data-tally-final]")).toBeVisible();
+    await expect(noJsPage.locator("[data-tally-skeleton]")).toBeHidden();
+    await expect(
+      noJsPage.getByRole("img", { name: "Alpha, 100 percent, 1 vote, leading" }),
+    ).toBeVisible();
     expect(
       d1Query(
         `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
@@ -1435,10 +1507,17 @@ test.describe("public voting flow", () => {
       /^This Poll closed while you were deciding — .+\.\s+Your Vote wasn't recorded\.$/u,
     );
     await expect(page.getByRole("radio")).toHaveCount(0);
-    // The submitted ballot was REJECTED — never recorded — so the read-only
-    // state marks nothing: the ◆ marks only a vote that actually landed.
-    await expect(castMarker(page, "Beta")).toHaveCount(0);
-    await expect(castMarker(page, "Alpha")).toHaveCount(0);
+    // The submitted ballot was REJECTED — never recorded — so nothing is
+    // marked and no YOUR BALLOT line appears: only a vote that actually
+    // landed renders one. The empty Tally still shows (Live, closed).
+    await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
+    await expect(
+      page.locator(".poll-option-readonly").getByText("Your vote"),
+    ).toHaveCount(0);
+    await expect(yourBallot(page)).toHaveCount(0);
+    await expect(page.locator(".results-tally-empty")).toHaveText(
+      "No Votes yet. Yours would be the first, which is a kind of power.",
+    );
     expect(
       d1Query(
         `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
@@ -1469,6 +1548,22 @@ test.describe("public voting flow", () => {
     await expect(page.locator("[data-vote-outcome]")).toContainText(
       "Counted. These results go to the Creator only.",
     );
+    // Hidden Creator-Only leaks no aggregate result facts. Option labels stay
+    // intentionally public on full read-only outcomes, so the guard targets
+    // tally structure/counts rather than banning Creator-authored labels.
+    await expectNoPrivateResultShape(page);
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(0);
+    await page.reload();
+    await expect(page).toHaveTitle("Already voted — Creator only copy?");
+    await expect(page.locator("[data-results-explanation]")).toHaveText(
+      "These results go to the Creator only.",
+    );
+    await expect(page.locator("[data-results-explanation]")).toHaveAttribute(
+      "data-results-state",
+      "creator_only_hidden",
+    );
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(2);
+    await expectNoPrivateResultShape(page);
 
     const afterClose = await publishPoll(
       page,
@@ -1485,11 +1580,109 @@ test.describe("public voting flow", () => {
     );
     expect(afterCloseVote.response.status()).toBe(303);
     await page.goto(afterClose.path);
-    // No deadline: the em-dash deadline clause is dropped entirely.
-    await expect(page.locator("[data-vote-outcome]")).toContainText(
-      "Counted. Results open when the Poll closes. You'll find out when everyone else does.",
+    // No deadline uses the exact shared hidden-results sentence.
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      "Counted. Results open when the Poll closes.",
     );
     await expect(page.locator("[data-vote-outcome]")).not.toContainText("—");
+    // Open After Close leaks no aggregate result facts either.
+    await expectNoPrivateResultShape(page);
+    await page.reload();
+    await expect(page).toHaveTitle("Already voted — After close copy?");
+    await expect(page.locator("[data-results-explanation]")).toHaveText(
+      "Results open when the Poll closes.",
+    );
+    await expect(page.locator("[data-results-explanation]")).toHaveAttribute(
+      "data-results-state",
+      "after_close_hidden",
+    );
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(2);
+    await expectNoPrivateResultShape(page);
+  });
+
+  test("derives Counted visibility after an After Close deadline passes", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const question = "Results after the bell?";
+    const created = await publishPoll(page, context, baseURL, question);
+    setResultVisibility(created.pollId, "after_close");
+    setPollDeadline(created.pollId, Date.now() + 48 * 60 * 60 * 1000);
+
+    const { response } = await castVoteViaRequest(
+      page,
+      baseURL,
+      created.path,
+      "Beta",
+    );
+    expect(response.status()).toBe(303);
+
+    // The vote committed while Results were hidden. Before the flash GET, the
+    // deadline passes: the Counted body and Tally must both use the fresh,
+    // authorized Results decision from that GET.
+    setPollDeadline(created.pollId, Date.now() - 1_000);
+    await page.goto(created.path);
+    await expect(page).toHaveTitle(`Counted — ${question}`);
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      "Counted. Results are live, updating as they arrive.",
+    );
+    await expect(page.locator("[data-vote-outcome]")).not.toContainText(
+      "Results open when the Poll closes",
+    );
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(0);
+    await expectYourBallot(page, "Beta");
+    await expect(
+      page.getByRole("img", { name: "Beta, 100 percent, 1 vote, leading" }),
+    ).toBeVisible();
+  });
+
+  test("preserves Counted and read-only outcomes when Results are unavailable", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const question = "Still counted?";
+    const created = await publishPoll(page, context, baseURL, question);
+    const { response } = await castVoteViaRequest(
+      page,
+      baseURL,
+      created.path,
+      "Alpha",
+    );
+    expect(response.status()).toBe(303);
+
+    // Keep the accepted Vote and identity claim, but make its tally projection
+    // internally inconsistent. The adapter fails closed on one Voter with zero
+    // selections, exercising the additive Results failure path without a test
+    // hook or shared-schema mutation.
+    d1Execute(
+      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${created.pollId}')`,
+    );
+
+    const countedResponse = await page.goto(created.path);
+    expect(countedResponse?.status()).toBe(200);
+    await expect(page).toHaveTitle(`Counted — ${question}`);
+    await expect(page.locator("[data-vote-outcome]")).toHaveText(
+      "Counted. Results are unavailable right now.",
+    );
+    await expect(page.locator("[data-results-tally]")).toHaveCount(0);
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(0);
+
+    await page.reload();
+    await expect(page).toHaveTitle(`Already voted — ${question}`);
+    await expect(page.locator("[data-vote-outcome]")).toContainText(
+      "You've already voted here.",
+    );
+    await expect(page.locator("[data-results-explanation]")).toHaveText(
+      "Results are unavailable right now.",
+    );
+    await expect(page.locator("[data-results-explanation]")).toHaveAttribute(
+      "data-results-state",
+      "unavailable",
+    );
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(2);
+    await expect(page.locator("[data-results-tally]")).toHaveCount(0);
   });
 
   test("shows the closed state with the cast selection marked after a voted Poll closes", async ({
@@ -1519,8 +1712,17 @@ test.describe("public voting flow", () => {
       "This Poll closed",
     );
     await expect(page.getByRole("radio")).toHaveCount(0);
-    await expect(castMarker(page, "Beta")).toHaveCount(1);
-    await expect(castMarker(page, "Alpha")).toHaveCount(0);
+    // Closed + Live: the full read-only option list stays, markers
+    // suppressed, and the Tally renders with the voter's text-only ballot.
+    await expect(page.locator(".poll-option-readonly")).toHaveCount(2);
+    await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
+    await expect(
+      page.locator(".poll-option-readonly").getByText("Your vote"),
+    ).toHaveCount(0);
+    await expectYourBallot(page, "Beta");
+    await expect(
+      page.getByRole("img", { name: "Beta, 100 percent, 1 vote, leading" }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "VOTE" })).toHaveCount(0);
   });
 
@@ -1611,14 +1813,20 @@ test.describe("public voting flow", () => {
       new Date(closedDeadline).toISOString(),
     );
     await expect(page.locator("time[data-deadline]")).not.toContainText("UTC");
-    await expect(page.getByText("Alpha")).toBeVisible();
-    await expect(page.getByText("Beta")).toBeVisible();
+    await expect(
+      page.locator(".poll-option-readonly", { hasText: "Alpha" }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".poll-option-readonly", { hasText: "Beta" }),
+    ).toBeVisible();
     await expect(page.getByRole("radio")).toHaveCount(0);
     // Every read-only row renders a marker span (alignment), but nothing was
     // cast — so no ◆ state and no "Your vote" text anywhere.
     await expect(page.locator(".poll-option-marker")).toHaveCount(2);
     await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
-    await expect(page.getByText("Your vote")).toHaveCount(0);
+    await expect(
+      page.locator(".poll-option-readonly").getByText("Your vote"),
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "VOTE" })).toHaveCount(0);
   });
 
@@ -1651,8 +1859,8 @@ test.describe("public voting flow", () => {
     await expect(page).toHaveTitle(`Counted — ${question}`);
 
     // Tab B submits option 2 (Beta): rejected as already-voted. The
-    // read-only re-render must mark the CAST selection (Alpha) — never the
-    // just-submitted, rejected one (Beta).
+    // read-only re-render must show the CAST selection (Alpha) as the
+    // YOUR BALLOT line — never the just-submitted, rejected one (Beta).
     const duplicate = await tabB.request.post(created.path, {
       form: { submission_id: submissionIdB, option_id: betaOptionId },
       headers: formHeaders(baseURL),
@@ -1663,8 +1871,11 @@ test.describe("public voting flow", () => {
     await expect(tabB.locator("[data-vote-outcome]")).toContainText(
       "You've already voted here.",
     );
-    await expect(castMarker(tabB, "Alpha")).toHaveCount(1);
-    await expect(castMarker(tabB, "Beta")).toHaveCount(0);
+    await expectYourBallot(tabB, "Alpha");
+    await expect(tabB.locator(".poll-option-marker.is-cast")).toHaveCount(0);
+    await expect(
+      tabB.getByRole("img", { name: "Alpha, 100 percent, 1 vote, leading" }),
+    ).toBeVisible();
 
     expect(
       d1Query(

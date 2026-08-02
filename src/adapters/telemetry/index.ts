@@ -85,18 +85,42 @@ export function isForbiddenTelemetryKey(
 }
 
 /**
- * The single status → result mapping for the per-request record. Vote
- * rejections (422) and rate limits (429) are errors ONLY when the vote
- * route flagged the request (`voteRejection`) — recording them as "ok"
- * would make the two rejection signals invisible, but an unflagged 422
- * (creator-surface validation) is an ordinary outcome.
+ * Builds a stable operation name without putting a public Poll reference in
+ * Workers Logs. `hasPollReferenceParam` comes from Astro's matched route
+ * params; the reference value itself never crosses this boundary.
+ */
+export function telemetryOperationForRoute(
+  method: string,
+  pathname: string,
+  hasPollReferenceParam: boolean,
+): string {
+  if (!hasPollReferenceParam) {
+    return `${method} ${pathname}`;
+  }
+
+  const segments = pathname.split("/").filter(Boolean);
+  const normalizedPathname =
+    segments.length === 2 && segments[1] === "results"
+      ? "/:reference/results"
+      : "/:reference";
+  return `${method} ${normalizedPathname}`;
+}
+
+/**
+ * The single status → result mapping for the per-request record. A failed
+ * session or Results lookup overrides an otherwise successful response. Vote
+ * rejections (422) and rate limits (429) are errors ONLY when the vote route
+ * flagged the request (`voteRejection`) — recording them as "ok" would make
+ * the two rejection signals invisible, but an unflagged 422 (creator-surface
+ * validation) is an ordinary outcome.
  */
 export function telemetryResultForStatus(
   status: number,
   sessionLookupFailed = false,
   voteRejection = false,
+  resultsLookupFailed = false,
 ): TelemetryResultCode {
-  if (sessionLookupFailed || status >= 500) {
+  if (sessionLookupFailed || resultsLookupFailed || status >= 500) {
     return "error";
   }
   if (status === 403) {

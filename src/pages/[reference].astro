@@ -3,9 +3,12 @@ import { env } from "cloudflare:workers";
 import { z } from "zod";
 import ButtonPrimary from "../components/button-primary.astro";
 import PollOption from "../components/poll-option.astro";
+import ResultsTally from "../components/results-tally.astro";
 import BaseLayout from "../layouts/base-layout.astro";
+import { formatUtc } from "../lib/datetime";
 import {
   createPollPersistence,
+  createResultsPersistence,
   createVotePersistence,
   type PollPage,
 } from "../adapters/d1/index";
@@ -25,12 +28,23 @@ import {
 } from "../modules/polls/index";
 import { multipleChoiceStrategy } from "../modules/polls/types/multiple-choice";
 import {
+  queryResults,
+  RESULTS_COPY,
+  type ResultsTallyView,
+  type ResultsView,
+} from "../modules/results/index";
+import { resolveAuthorizedBallotLabels } from "../modules/results/post-vote";
+import {
   VOTE_COPY,
   castVote,
   type VoteApplicationError,
   type VotingPollTypeStrategy,
 } from "../modules/voting/index";
-import { effectivePollStatus, type PollType } from "../shared/domain/index";
+import {
+  effectivePollStatus,
+  type PollType,
+  type UserId,
+} from "../shared/domain/index";
 
 // Root-path poll page (AD-13): the canonical reference resolves here.
 // Story 1.5 keeps the public surface SSR/progressive-enhancement only: native
@@ -107,41 +121,67 @@ type VoteOutcomeView = {
   tone: "confirmation" | "rejection";
 };
 
-const formatUtc = (timestampMs: number): string =>
-  new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-    timeZoneName: "short",
-  }).format(timestampMs);
+type ResultsExplanationView = {
+  body: string;
+  time: VoteOutcomeView["time"];
+};
 
-const countedBody = (
-  currentPoll: PollPage,
-): Pick<VoteOutcomeView, "body" | "time"> => {
-  if (currentPoll.resultVisibility === "live") {
-    return { body: VOTE_COPY.countedLive, time: null };
+type PostVoteResultsView =
+  | {
+      kind: "visible";
+      tally: ResultsTallyView;
+    }
+  | ({
+      kind:
+        | "after_close_hidden"
+        | "creator_only_hidden"
+        | "unavailable";
+    } & ResultsExplanationView);
+
+const assertExhaustiveResultsView = (_view: never): never => {
+  throw new Error("Unhandled Results view.");
+};
+
+// Delivery maps every authorized Results outcome into one render shape. This
+// switch is deliberately exhaustive: adding a Results union member cannot
+// silently turn into an empty post-vote surface.
+const postVoteResultsFrom = (view: ResultsView): PostVoteResultsView => {
+  switch (view.kind) {
+    case "visible":
+      return { kind: view.kind, tally: view.tally };
+    case "after_close_hidden":
+      return view.deadlineMs === null
+        ? {
+            kind: view.kind,
+            body: RESULTS_COPY.afterCloseHiddenNoDeadline,
+            time: null,
+          }
+        : {
+            kind: view.kind,
+            body: RESULTS_COPY.afterCloseHidden,
+            time: {
+              placeholder: "{deadline}",
+              timestampMs: view.deadlineMs,
+            },
+          };
+    case "creator_only_hidden":
+      return {
+        kind: view.kind,
+        body: RESULTS_COPY.creatorOnlyHidden,
+        time: null,
+      };
+    case "not_found":
+      // The Poll resolved for the vote surface immediately before this query;
+      // a disappearing Results envelope is therefore an unavailable additive
+      // view, not permission to erase the committed vote/read-only outcome.
+      return {
+        kind: "unavailable",
+        body: RESULTS_COPY.unavailable,
+        time: null,
+      };
+    default:
+      return assertExhaustiveResultsView(view);
   }
-  if (currentPoll.resultVisibility === "creator_only") {
-    return { body: VOTE_COPY.countedCreatorOnly, time: null };
-  }
-  if (currentPoll.deadlineMs === null) {
-    // No deadline: substituting "the Poll closes" for {deadline} rendered
-    // "the Poll closes — the Poll closes." Drop the deadline clause instead.
-    return {
-      body: VOTE_COPY.countedAfterClose.replace(" — {deadline}", ""),
-      time: null,
-    };
-  }
-  return {
-    body: VOTE_COPY.countedAfterClose,
-    time: {
-      placeholder: "{deadline}",
-      timestampMs: currentPoll.deadlineMs,
-    },
-  };
 };
 
 // VOTE_COPY is the single source for outcome strings. Each catalog entry is
@@ -446,27 +486,10 @@ if (poll && method === "POST") {
 
   if (readOnly) {
     // already_voted / poll_closed re-renders are read-only — but the ballot
-    // just submitted was REJECTED, so it must never be marked as cast.
-    // Resolve the voter's actual cast selection through the claim → vote →
-    // selection chain exactly as the GET path does; no stored vote means no
-    // marker.
+    // just submitted was REJECTED, so it must never be marked as cast. The
+    // voter's actual cast selection is resolved below, only when the Results
+    // outcome is visible, for the text-only YOUR BALLOT line.
     selectedOptionIds = [];
-    if (voterToken !== null) {
-      try {
-        const voterDigest = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
-          pollId: poll.pollId,
-          checkKind: "session",
-          token: voterToken,
-        });
-        selectedOptionIds = await votePersistence.findVoteSelectionByClaim(
-          poll.pollId,
-          "session",
-          voterDigest,
-        );
-      } catch {
-        // No marker; the state itself still renders.
-      }
-    }
   }
 } else if (poll && (method === "GET" || method === "HEAD")) {
   if (method === "GET" && voterToken === null) {
@@ -500,7 +523,8 @@ if (poll && method === "POST") {
           outcome = {
             code: "counted",
             heading: VOTE_COPY.counted,
-            ...countedBody(poll),
+            body: "",
+            time: null,
             titlePrefix: "Counted",
             tone: "confirmation",
           };
@@ -539,26 +563,88 @@ if (poll && method === "POST") {
       // Degrades to the open form; a submission surfaces the real outcome.
     }
   }
+}
 
-  // Read-only GET states mark the voter's own cast selection (UX-DR2 ◆):
-  // resolve it through the claim → vote → selection chain. Read-only POST
-  // re-renders resolve the same way in the POST branch above.
-  if (readOnly && voterDigest !== null) {
-    try {
-      selectedOptionIds = await votePersistence.findVoteSelectionByClaim(
-        poll.pollId,
-        "session",
-        voterDigest,
-      );
-    } catch {
-      // No marker; the state itself still renders.
+// Story 1.8: every read-only outcome (counted/replayed/already-voted/closed)
+// renders the same authorized Results union through the one application
+// query — no visibility policy or count queries duplicated in this route.
+// The claim → selection lookup runs ONLY after a `visible` decision, never
+// for a hidden After Close or unauthorized Creator-Only outcome (AD-21).
+let postVoteResults: PostVoteResultsView | null = null;
+let yourBallotLabels: string[] = [];
+if (poll && readOnly) {
+  try {
+    const principalId = Astro.locals.principal?.userId;
+    postVoteResults = postVoteResultsFrom(
+      await queryResults(
+        createResultsPersistence(env.DB),
+        reference,
+        { userId: principalId === undefined ? null : (principalId as UserId) },
+        Date.now(),
+      ),
+    );
+  } catch {
+    // Results are additive: preserve the committed vote/read-only outcome,
+    // render a truthful unavailable line, and let the outer middleware mark
+    // its existing single telemetry record. Do not emit a second record here.
+    postVoteResults = {
+      kind: "unavailable",
+      body: RESULTS_COPY.unavailable,
+      time: null,
+    };
+    if (Astro.locals.requestContext) {
+      Astro.locals.requestContext.resultsLookupFailed = true;
     }
+  }
+  yourBallotLabels = await resolveAuthorizedBallotLabels(
+    postVoteResults,
+    voterToken,
+    async (authorizedVoterToken) => {
+      const ballotDigest = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
+        pollId: poll.pollId,
+        checkKind: "session",
+        token: authorizedVoterToken,
+      });
+      const castSelectionIds = new Set(
+        await votePersistence.findVoteSelectionByClaim(
+          poll.pollId,
+          "session",
+          ballotDigest,
+        ),
+      );
+      // Stored option order, never submission order.
+      return poll.options
+        .filter((option) => castSelectionIds.has(option.id))
+        .map((option) => option.label);
+    },
+  );
+
+  if (outcome?.code === "counted") {
+    outcome = {
+      ...outcome,
+      ...(postVoteResults.kind === "visible"
+        ? { body: VOTE_COPY.countedLive, time: null }
+        : { body: postVoteResults.body, time: postVoteResults.time }),
+    };
   }
 }
 
 if (!poll) {
   Astro.response.status = 404;
 }
+
+// The Counted confirmation uses the compact confirmation/ballot/Tally
+// composition; already-voted and closed surfaces keep the full read-only
+// option list (with every selected/gold marker suppressed — the two-golds
+// rule) and add the Tally when the Visibility Setting allows.
+const compactCounted = readOnly && outcome?.code === "counted";
+const showReadOnlyOptions = readOnly && !compactCounted;
+const showTally = readOnly && postVoteResults?.kind === "visible";
+const resultsExplanation =
+  !compactCounted && postVoteResults?.kind !== "visible"
+    ? postVoteResults
+    : null;
+const postVoteComposition = compactCounted && showTally;
 
 const selected = new Set(selectedOptionIds);
 const multiSelect =
@@ -610,11 +696,17 @@ const outcomeHeadingTime = outcome
 const outcomeBodyTime = outcome
   ? splitTimedText(outcome.body, outcome.time)
   : null;
+const resultsExplanationTime = resultsExplanation
+  ? splitTimedText(resultsExplanation.body, resultsExplanation.time)
+  : null;
 const offlineCopy = splitCopy(VOTE_COPY.offline);
 ---
 
 <BaseLayout title={title}>
-  <main class="poll-shell">
+  <main
+    class="poll-shell"
+    data-post-vote={postVoteComposition ? "true" : undefined}
+  >
     {
       poll ? (
         <>
@@ -696,23 +788,52 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
           )}
           <h1 class="poll-question">{poll.question}</h1>
           {poll.description && <p class="poll-description">{poll.description}</p>}
-          {readOnly ? (
+          {resultsExplanation && (
+            <p
+              class="results-explanation"
+              data-results-explanation
+              data-results-state={resultsExplanation.kind}
+            >
+              {resultsExplanationTime && resultsExplanation.time ? (
+                <>
+                  {resultsExplanationTime[0]}
+                  <time
+                    datetime={new Date(
+                      resultsExplanation.time.timestampMs,
+                    ).toISOString()}
+                    data-deadline={resultsExplanation.time.timestampMs}
+                  >
+                    {formatUtc(resultsExplanation.time.timestampMs)}
+                  </time>
+                  {resultsExplanationTime[1]}
+                </>
+              ) : (
+                stripTimedToken(resultsExplanation.body)
+              )}
+            </p>
+          )}
+          {showReadOnlyOptions ? (
             <ul class="poll-options">
               {poll.options.map((option) => (
                 <li>
+                  {/* Read-only rows never carry a selected/gold marker: on a
+                      Tally surface the leader owns gold and the voter's own
+                      choice is the text-only YOUR BALLOT line (two-golds
+                      rule). The compact Counted composition omits this list
+                      entirely. */}
                   <PollOption
                     id={`option-${option.id}`}
                     name="option_id"
                     value={option.id}
                     label={option.label}
-                    checked={selected.has(option.id)}
+                    checked={false}
                     type={multiSelect ? "checkbox" : "radio"}
                     readOnly
                   />
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : compactCounted ? null : (
             <form
               method="post"
               action={`/${reference}`}
@@ -776,6 +897,13 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
               </div>
             </form>
           )}
+          {showTally && postVoteResults?.kind === "visible" && (
+            <ResultsTally
+              tally={postVoteResults.tally}
+              yourBallotLabels={yourBallotLabels}
+              loading
+            />
+          )}
         </>
       ) : (
         <h1 class="not-found" tabindex="-1" autofocus>This Poll doesn't exist.</h1>
@@ -821,6 +949,7 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     font-size: var(--type-poll-question-size);
     font-weight: 400;
     line-height: var(--type-poll-question-lh);
+    overflow-wrap: anywhere;
   }
 
   .poll-description {
@@ -829,6 +958,13 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     font-size: var(--type-body-size);
     line-height: var(--type-body-lh);
     white-space: pre-wrap;
+  }
+
+  .results-explanation {
+    margin: 0 0 var(--space-6);
+    color: var(--color-text);
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
   }
 
   .poll-options {
@@ -919,6 +1055,61 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
   @media (min-width: 640px) {
     .poll-shell {
       padding-inline: var(--space-margin-desktop);
+    }
+  }
+
+  /* Story 1.8: the compact post-vote composition splits at lg — outcome,
+     question, and the text-only YOUR BALLOT block on the left, the Tally on
+     the right. Below lg it stays one reading-order column (the DOM order is
+     unchanged). The results-tally root dissolves into the grid so its own
+     blocks can occupy both columns. */
+  @media (min-width: 1024px) {
+    .poll-shell[data-post-vote="true"] {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      column-gap: var(--space-8);
+      align-items: start;
+      width: 100%;
+    }
+
+    .poll-shell[data-post-vote="true"] > .vote-outcome {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .poll-shell[data-post-vote="true"] > .poll-question {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .poll-shell[data-post-vote="true"] > .poll-description {
+      grid-column: 1;
+      grid-row: 3;
+    }
+
+    .poll-shell[data-post-vote="true"] > :global(.results-tally) {
+      display: contents;
+    }
+
+    .poll-shell[data-post-vote="true"] :global(.results-tally-ballot) {
+      grid-column: 1;
+      grid-row: 4;
+    }
+
+    .poll-shell[data-post-vote="true"] :global(.results-tally-summary) {
+      grid-column: 2;
+      grid-row: 1;
+    }
+
+    .poll-shell[data-post-vote="true"] :global(.results-tally-tied),
+    .poll-shell[data-post-vote="true"] :global(.results-tally-empty) {
+      grid-column: 2;
+      grid-row: 2;
+    }
+
+    .poll-shell[data-post-vote="true"] :global(.results-tally-bars) {
+      grid-column: 2;
+      grid-row: 3 / span 2;
     }
   }
 </style>

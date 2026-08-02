@@ -54,4 +54,15 @@ production on every merge, but no version has been cut or tagged.
 - Bounded multi-select polls: creators can allow several choices with optional
   minimum and maximum limits; voter pages enforce the limits accessibly and
   preserve the complete ballot when a submission is rejected.
+- Poll results at `/{link}/results`: a server-rendered Tally that honors each
+  poll's visibility setting — live results for anyone with the link, results
+  that open when the poll closes (with only the question and a local
+  closing-time note while open), and creator-only results served to the owning
+  creator alone. Counts are computed server-side from accepted votes; exact
+  ties are called out as `TIED` with no gold leader, empty polls show labelled
+  zero-width bars, and every response is `private, no-store`.
+- Post-vote surfaces now render the same authorized Tally beside the
+  confirmation on large screens and below it on smaller screens, with the
+  voter's own choice shown as a text-only `YOUR BALLOT` line instead of
+  gold-marked option rows.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

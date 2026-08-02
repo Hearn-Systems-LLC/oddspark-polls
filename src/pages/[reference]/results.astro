@@ -1,0 +1,185 @@
+---
+import { env } from "cloudflare:workers";
+import ResultsTally from "../../components/results-tally.astro";
+import BaseLayout from "../../layouts/base-layout.astro";
+import {
+  createPollPersistence,
+  createResultsPersistence,
+} from "../../adapters/d1/index";
+import { formatUtc } from "../../lib/datetime";
+import {
+  isCustomSlugCaseVariant,
+  POLL_CAPS,
+} from "../../modules/polls/index";
+import { isReservedSlug } from "../../modules/polls/reserved-slugs";
+import { queryResults, RESULTS_COPY } from "../../modules/results/index";
+import type { UserId } from "../../shared/domain/index";
+
+// Direct Results route (Story 1.8): a thin inbound adapter over the Results
+// application query. Delivery composes status/headers/templates only — no
+// visibility, closure, leader, percentage, or ownership rule lives here
+// (AD-1, AD-19). Safe GET/HEAD navigation; every response is
+// `private, no-store` and never touches the Cache API (AD-21/AR-17). No
+// polling, ETag, chart toggle, or animation — Stories 1.9/1.10 own those.
+
+const reference = Astro.params.reference ?? "";
+const method = Astro.request.method;
+
+Astro.response.headers.set("cache-control", "private, no-store");
+
+// Reject unsupported methods before any private tally read.
+if (method !== "GET" && method !== "HEAD") {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: {
+      allow: "GET, HEAD",
+      "cache-control": "private, no-store",
+    },
+  });
+}
+
+// Routing shares the one reserved-slug registry (AD-13).
+const reserved = isReservedSlug(reference);
+const resultsPersistence = createResultsPersistence(env.DB);
+
+// The Results access read IS the exact reference lookup — no preliminary
+// PollPage existence read, no second query. The ViewerContext carries only
+// the internal Oddspark user ID from middleware, never a provider identity.
+const principalId = Astro.locals.principal?.userId;
+const view = reserved
+  ? ({ kind: "not_found" } as const)
+  : await queryResults(
+      resultsPersistence,
+      reference,
+      { userId: principalId === undefined ? null : (principalId as UserId) },
+      Date.now(),
+    );
+
+// Only a not_found Results outcome may fall through to the bounded
+// case-folded custom-link fallback; a hit 301s to the canonical /results
+// URL with the query string preserved, a generated-reference miss stays 404.
+if (view.kind === "not_found" && !reserved && isCustomSlugCaseVariant(reference)) {
+  const canonical = await createPollPersistence(
+    env.DB,
+  ).findCanonicalCustomReference(reference);
+  if (
+    canonical &&
+    canonical.length <= POLL_CAPS.maxCustomLinkLength &&
+    /^[a-z0-9-]+$/.test(canonical)
+  ) {
+    return new Response(null, {
+      status: 301,
+      headers: {
+        location: `/${canonical}/results${Astro.url.search}`,
+        "cache-control": "private, no-store",
+      },
+    });
+  }
+}
+
+// Telemetry carries the internal Poll ID only after a real Poll resolved;
+// a missing/deleted reference leaves it unset (voter-blind telemetry, AD-4).
+if (view.kind !== "not_found" && Astro.locals.requestContext) {
+  Astro.locals.requestContext.pollId = view.pollId;
+}
+
+if (view.kind === "not_found") {
+  Astro.response.status = 404;
+}
+
+const title =
+  view.kind === "not_found"
+    ? "Not found — Oddspark Polls"
+    : `Results — ${view.question}`;
+
+// The hidden After Close explanation splits its copy around {deadline} so
+// the timestamp renders as a localizable <time> element; the no-deadline
+// variant is the complete sentence with no hole.
+const afterCloseParts =
+  view.kind === "after_close_hidden" && view.deadlineMs !== null
+    ? RESULTS_COPY.afterCloseHidden.split("{deadline}")
+    : null;
+---
+
+<BaseLayout title={title}>
+  <main class="results-shell">
+    {
+      view.kind === "not_found" ? (
+        <h1 class="not-found" tabindex="-1" autofocus>
+          This Poll doesn't exist.
+        </h1>
+      ) : (
+        <>
+          <h1 class="results-question">{view.question}</h1>
+          {view.kind === "visible" && (
+            <ResultsTally tally={view.tally} loading />
+          )}
+          {view.kind === "after_close_hidden" && (
+            <p class="results-explanation">
+              {afterCloseParts && view.deadlineMs !== null ? (
+                <>
+                  {afterCloseParts[0]}
+                  <time
+                    datetime={new Date(view.deadlineMs).toISOString()}
+                    data-deadline={view.deadlineMs}
+                  >
+                    {formatUtc(view.deadlineMs)}
+                  </time>
+                  {afterCloseParts[1]}
+                </>
+              ) : (
+                RESULTS_COPY.afterCloseHiddenNoDeadline
+              )}
+            </p>
+          )}
+          {view.kind === "creator_only_hidden" && (
+            <p class="results-explanation">{RESULTS_COPY.creatorOnlyHidden}</p>
+          )}
+        </>
+      )
+    }
+  </main>
+  {
+    view.kind === "after_close_hidden" && view.deadlineMs !== null && (
+      <script src="../../scripts/results-page.ts"></script>
+    )
+  }
+</BaseLayout>
+
+<style>
+  .results-shell {
+    width: min(100%, var(--space-measure));
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  .results-question {
+    margin: 0 0 var(--space-6);
+    font-family: var(--font-human);
+    font-size: var(--type-poll-question-size);
+    font-weight: 400;
+    line-height: var(--type-poll-question-lh);
+    overflow-wrap: anywhere;
+  }
+
+  .results-explanation {
+    margin: 0;
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
+    color: var(--color-text);
+  }
+
+  .not-found {
+    margin: var(--space-4) 0 0;
+    color: var(--color-dim);
+    font-size: var(--type-caption-size);
+    font-weight: 400;
+    line-height: var(--type-caption-lh);
+  }
+
+  @media (min-width: 640px) {
+    .results-shell {
+      padding-inline: var(--space-margin-desktop);
+    }
+  }
+</style>

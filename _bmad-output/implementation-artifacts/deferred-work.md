@@ -1,5 +1,13 @@
 # Deferred Work
 
+## Deferred from: code review of 1-9-live-updating-results (2026-08-02)
+
+- **Multi-select summary never pluralizes** — `1 VOTERS · 1 SELECTIONS` renders verbatim for singular counts on both the SSR summary and the live poller patch path. Deferred, pre-existing: the SSR line shipped in Story 1.8 and the 1.9 poller deliberately mirrors it so the reconciliation diff-check stays in sync; fixing one side without the other breaks that check [src/components/results-tally.astro:77, src/scripts/results-live.ts:323].
+
+## Deferred from: implementation of 1-9-live-updating-results (2026-08-02)
+
+- Visible open Tallies now add one Results-envelope read every three seconds and, after the first response, a cheap `representation_version` read on unchanged snapshots. This multiplies the per-viewer D1 read volume already accepted for public Poll traffic; conditional 304s, visible-only polling, pause/abort on hide, and capped failure backoff are the current cost controls. Shared caching remains deliberately out of scope because entitled Results must never cross authorization boundaries [src/scripts/results-live.ts, src/pages/[reference]/results/live.ts, src/adapters/d1/index.ts].
+
 ## Deferred from: code review of 1-8-results-view-with-visibility-settings (2026-08-02)
 
 - **Transient option-label editing can silently clamp multi-select bounds** — with three nonblank options and a maximum of three, clearing one label while replacing its text briefly reduces `nonBlankRows()` to two and immediately clamps the maximum to two; restoring the label does not restore the bound. Deferred, pre-existing on the actual Story 1.8 branch-cut baseline; fix by clamping only on explicit row removal or after a stable count change [src/scripts/create-poll-form.ts:103-120,210-214].

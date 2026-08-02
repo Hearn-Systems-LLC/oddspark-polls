@@ -14,25 +14,40 @@
  * no shimmer, no animation. When JS runs, the inline enhancer presents the
  * skeleton immediately, lets it paint, then reveals the already-rendered
  * final Tally with no transition. If the enhancer fails, the final Tally
- * stays available. No client-side fetch, no embedded result JSON.
+ * stays available. That cold-load transition performs no fetch and embeds no
+ * result JSON; Story 1.9's separate optional live endpoint starts only after
+ * the complete server-rendered Tally exists.
  */
 import { RESULTS_COPY, type ResultsTallyView } from "../modules/results/index";
+import type { PollStatus } from "../shared/domain/index";
+import LiveIndicator from "./live-indicator.astro";
+import { formatVoteTotal } from "./live-indicator";
 import ResultsBar from "./results-bar.astro";
 
 interface Props {
   tally: ResultsTallyView;
+  /** Effective request-time state; entitled surfaces render LIVE or CLOSED
+   * correctly even without JavaScript. */
+  status: PollStatus;
   /** The viewer's own selected labels in stored option order — text only,
    * never a second gold. Omit entirely when no claim resolved. */
   yourBallotLabels?: string[];
   /** Present the cold-load skeleton first, resolving on the first frame. */
   loading?: boolean;
+  /** Exact private/no-store endpoint for the open progressive enhancer. */
+  liveEndpoint?: string;
+  /** Server render time used until the first successful refresh. */
+  initialRenderAtMs?: number;
   class?: string;
 }
 
 const {
   tally,
+  status,
   yourBallotLabels = [],
   loading = false,
+  liveEndpoint,
+  initialRenderAtMs = Date.now(),
   class: className = "",
 } = Astro.props;
 ---
@@ -41,6 +56,9 @@ const {
   class:list={["results-tally", className]}
   data-results-tally
   data-loading={loading ? "true" : "false"}
+  data-live-endpoint={liveEndpoint}
+  data-live-initial-render-at={initialRenderAtMs}
+  data-live-status={status}
 >
   {
     yourBallotLabels.length > 0 && (
@@ -55,17 +73,40 @@ const {
   <div class="results-tally-final-region" data-tally-final-region>
     {
       tally.multiSelectEnabled && (
-        <p class="results-tally-summary">
+        <p class="results-tally-summary" data-live-summary>
           {tally.voterCount} VOTERS · {tally.selectionCount} SELECTIONS
         </p>
       )
     }
-    {tally.tied && <p class="results-tally-tied">{RESULTS_COPY.tied}</p>}
-    {tally.empty && <p class="results-tally-empty">{RESULTS_COPY.empty}</p>}
+    <p class="results-tally-tied" data-live-tied hidden={!tally.tied}>
+      {RESULTS_COPY.tied}
+    </p>
+    <p class="results-tally-empty" data-live-empty hidden={!tally.empty}>
+      {RESULTS_COPY.empty}
+    </p>
+    <p
+      class="results-tally-live"
+      data-results-live-region
+      aria-live="polite"
+    >
+      <span data-live-status-content>
+        <LiveIndicator status={status}>
+          <span data-live-total>{formatVoteTotal(tally.voterCount)}</span>
+          <span aria-hidden="true"> · </span>
+        </LiveIndicator>
+      </span>
+      <span class="results-tally-stale" data-live-stale hidden>
+        Not receiving updates. The counts shown are from <span
+          data-live-stale-time
+        ></span>.
+      </span>
+      <span class="visually-hidden" data-live-announcement></span>
+    </p>
     <div class="results-tally-bars" data-tally-final>
       {
         tally.options.map((option) => (
           <ResultsBar
+            optionId={option.id}
             label={option.label}
             percent={option.percent}
             count={option.count}
@@ -183,6 +224,19 @@ const {
     color: var(--color-text);
   }
 
+  .results-tally-live {
+    margin: 0 0 var(--space-3);
+  }
+
+  .results-tally-stale {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-text);
+  }
+
   .results-tally-bars {
     display: flex;
     flex-direction: column;
@@ -191,7 +245,11 @@ const {
 
   /* `hidden` loses to author display rules without an explicit guard. */
   .results-tally-final-region[hidden],
-  .results-tally-bars[hidden] {
+  .results-tally-bars[hidden],
+  .results-tally-tied[hidden],
+  .results-tally-empty[hidden],
+  .results-tally-stale[hidden],
+  [data-live-status-content][hidden] {
     display: none;
   }
 </style>

@@ -110,6 +110,18 @@ describe("telemetry adapter", () => {
       "HEAD /:reference/results",
     ],
     ["GET", "/team-lunch/results/", true, "GET /:reference/results"],
+    [
+      "GET",
+      "/team-lunch/results/live",
+      true,
+      "GET /:reference/results/live",
+    ],
+    [
+      "HEAD",
+      "/GenRef-AbC123-xYz_9/results/live/",
+      true,
+      "HEAD /:reference/results/live",
+    ],
     ["GET", "/results", true, "GET /:reference"],
     ["POST", "/creator/new", false, "POST /creator/new"],
     ["GET", "/creator/results", false, "GET /creator/results"],

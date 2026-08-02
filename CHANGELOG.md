@@ -65,4 +65,9 @@ production on every merge, but no version has been cut or tagged.
   confirmation on large screens and below it on smaller screens, with the
   voter's own choice shown as a text-only `YOUR BALLOT` line instead of
   gold-marked option rows.
+- Open Tallies now update automatically while visible, with a pulsing `LIVE`
+  indicator, privacy-preserving conditional refreshes, immediate catch-up
+  after returning to the page, and an explicit last-known-time notice when
+  updates cannot be received. A closing Poll applies its final snapshot and
+  switches permanently to `CLOSED`.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  composeResultsValidator,
+  queryLiveResults,
   queryResults,
+  type LiveResultsPorts,
   type ResultsAccessEnvelope,
   type ResultsPorts,
   type ResultsTallyProjection,
@@ -62,6 +65,25 @@ function ports(
   return {
     findAccessEnvelope: vi.fn(async () => access),
     projectTally: vi.fn(async () => projection),
+  };
+}
+
+function livePorts(
+  access: ResultsAccessEnvelope | null,
+  representationVersion: number | null = 1,
+  projection: ResultsTallyProjection = tally(),
+): LiveResultsPorts & {
+  readRepresentationVersion: ReturnType<typeof vi.fn>;
+  projectVersionedTally: ReturnType<typeof vi.fn>;
+} {
+  return {
+    findAccessEnvelope: vi.fn(async () => access),
+    readRepresentationVersion: vi.fn(async () => representationVersion),
+    projectVersionedTally: vi.fn(async () =>
+      representationVersion === null
+        ? null
+        : { ...projection, representationVersion },
+    ),
   };
 }
 
@@ -130,6 +152,7 @@ describe("queryResults visibility matrix", () => {
       NOW,
     );
     expect(atDeadline.kind).toBe("visible");
+    expect(atDeadline).toMatchObject({ status: "closed" });
 
     const openPorts = ports(
       envelope({ resultVisibility: "after_close", deadlineMs: NOW + 1 }),
@@ -142,6 +165,13 @@ describe("queryResults visibility matrix", () => {
     );
     expect(beforeDeadline.kind).toBe("after_close_hidden");
     expect(openPorts.projectTally).not.toHaveBeenCalled();
+  });
+
+  it("exposes effective open status only on an entitled full Results view", async () => {
+    const visiblePorts = ports(envelope({ deadlineMs: NOW + 1 }));
+    await expect(
+      queryResults(visiblePorts, "team-lunch", ANONYMOUS, NOW),
+    ).resolves.toMatchObject({ kind: "visible", status: "open" });
   });
 
   it("opens After Close once closed_at is set", async () => {
@@ -354,5 +384,307 @@ describe("queryResults tally view", () => {
     expect(view.tally.empty).toBe(true);
     expect(view.tally.tied).toBe(false);
     expect(view.tally.options[0]?.leading).toBe(false);
+  });
+});
+
+describe("live Results validator", () => {
+  it("changes when the effective status changes at the same version", () => {
+    expect(composeResultsValidator(7, "open")).not.toBe(
+      composeResultsValidator(7, "closed"),
+    );
+  });
+
+  it("changes when the version changes at the same effective status", () => {
+    expect(composeResultsValidator(7, "open")).not.toBe(
+      composeResultsValidator(8, "open"),
+    );
+  });
+
+  it("is equal only when both version and effective status are equal", () => {
+    expect(composeResultsValidator(7, "closed")).toBe(
+      composeResultsValidator(7, "closed"),
+    );
+    expect(composeResultsValidator(7, "closed")).not.toBe(
+      composeResultsValidator(8, "open"),
+    );
+    expect(composeResultsValidator(7, "open")).toBe('"7:open"');
+  });
+
+  it.each([NaN, Infinity, -Infinity, 0, -1, 1.5])(
+    "rejects malformed representation version %s",
+    (version) => {
+      expect(() => composeResultsValidator(version, "open")).toThrow(
+        "Invalid representation version",
+      );
+    },
+  );
+});
+
+describe("queryLiveResults authorization and projection", () => {
+  it.each([
+    {
+      name: "open After Close for an anonymous viewer",
+      access: envelope({
+        resultVisibility: "after_close",
+        deadlineMs: NOW + 1,
+      }),
+      viewer: ANONYMOUS,
+      expected: "after_close_hidden",
+    },
+    {
+      name: "open After Close for a signed-in viewer",
+      access: envelope({
+        resultVisibility: "after_close",
+        deadlineMs: NOW + 1,
+      }),
+      viewer: NON_OWNER,
+      expected: "after_close_hidden",
+    },
+    {
+      name: "open After Close for the owning Creator",
+      access: envelope({
+        resultVisibility: "after_close",
+        deadlineMs: NOW + 1,
+      }),
+      viewer: OWNER,
+      expected: "after_close_hidden",
+    },
+    {
+      name: "Creator-Only for an anonymous viewer",
+      access: envelope({ resultVisibility: "creator_only" }),
+      viewer: ANONYMOUS,
+      expected: "creator_only_hidden",
+    },
+    {
+      name: "Creator-Only for a non-owner",
+      access: envelope({ resultVisibility: "creator_only" }),
+      viewer: NON_OWNER,
+      expected: "creator_only_hidden",
+    },
+  ])("never resolves a version or tally for $name", async ({
+    access,
+    viewer,
+    expected,
+  }) => {
+    const hiddenPorts = livePorts(access, 17);
+    const view = await queryLiveResults(
+      hiddenPorts,
+      "team-lunch",
+      viewer,
+      NOW,
+      null,
+    );
+    expect(view).toEqual({
+      kind: expected,
+      pollId: POLL_ID,
+      canonicalReference: "team-lunch",
+    });
+    expect(hiddenPorts.readRepresentationVersion).not.toHaveBeenCalled();
+    expect(hiddenPorts.projectVersionedTally).not.toHaveBeenCalled();
+    expect(view).not.toHaveProperty("representationVersion");
+    expect(view).not.toHaveProperty("validator");
+    expect(view).not.toHaveProperty("tally");
+  });
+
+  it.each([
+    { name: "anonymous", viewer: ANONYMOUS },
+    { name: "signed-in non-owner", viewer: NON_OWNER },
+    { name: "owning Creator", viewer: OWNER },
+  ])("shows closed After Close Results to a $name viewer", async ({ viewer }) => {
+    const visiblePorts = livePorts(
+      envelope({ resultVisibility: "after_close", deadlineMs: NOW }),
+      17,
+    );
+    const view = await queryLiveResults(
+      visiblePorts,
+      "team-lunch",
+      viewer,
+      NOW,
+      null,
+    );
+    expect(view).toMatchObject({
+      kind: "visible",
+      status: "closed",
+      validator: '"17:closed"',
+    });
+  });
+
+  it("shows Creator-Only Results to the owning Creator", async () => {
+    const visiblePorts = livePorts(
+      envelope({ resultVisibility: "creator_only" }),
+      17,
+    );
+    await expect(
+      queryLiveResults(
+        visiblePorts,
+        "team-lunch",
+        OWNER,
+        NOW,
+        null,
+      ),
+    ).resolves.toMatchObject({ kind: "visible", status: "open" });
+  });
+
+  it("never resolves a version or tally for a missing Poll", async () => {
+    const missingPorts = livePorts(null, 17);
+    const view = await queryLiveResults(
+      missingPorts,
+      "not-there",
+      ANONYMOUS,
+      NOW,
+      null,
+    );
+    expect(view).toEqual({ kind: "not_found" });
+    expect(missingPorts.readRepresentationVersion).not.toHaveBeenCalled();
+    expect(missingPorts.projectVersionedTally).not.toHaveBeenCalled();
+  });
+
+  it("returns the versioned Tally and open status from one full projection", async () => {
+    const visiblePorts = livePorts(
+      envelope(),
+      17,
+      tally({
+        options: [
+          { id: OPTION_A, label: "Pizza", position: 0, count: 2 },
+          { id: OPTION_B, label: "Sushi", position: 1, count: 1 },
+        ],
+        voterCount: 3,
+        selectionCount: 3,
+      }),
+    );
+    const view = await queryLiveResults(
+      visiblePorts,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+      null,
+    );
+    expect(view).toMatchObject({
+      kind: "visible",
+      pollId: POLL_ID,
+      canonicalReference: "team-lunch",
+      representationVersion: 17,
+      status: "open",
+      validator: '"17:open"',
+      tally: {
+        voterCount: 3,
+        selectionCount: 3,
+        empty: false,
+      },
+    });
+    expect(visiblePorts.readRepresentationVersion).not.toHaveBeenCalled();
+    expect(visiblePorts.projectVersionedTally).toHaveBeenCalledWith(POLL_ID);
+  });
+
+  it("uses the cheap version read and skips the Tally when the validator matches", async () => {
+    const visiblePorts = livePorts(envelope(), 17);
+    const view = await queryLiveResults(
+      visiblePorts,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+      '"17:open"',
+    );
+    expect(view).toEqual({
+      kind: "not_modified",
+      pollId: POLL_ID,
+      canonicalReference: "team-lunch",
+      status: "open",
+      validator: '"17:open"',
+    });
+    expect(visiblePorts.projectVersionedTally).not.toHaveBeenCalled();
+  });
+
+  it("treats now equal to the deadline as closed in the validator", async () => {
+    const visiblePorts = livePorts(envelope({ deadlineMs: NOW }), 17);
+    const view = await queryLiveResults(
+      visiblePorts,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+      null,
+    );
+    expect(view).toMatchObject({
+      kind: "visible",
+      status: "closed",
+      validator: '"17:closed"',
+    });
+  });
+
+  it("mints a full response from the projection snapshot when a Vote lands after the cheap read", async () => {
+    const racingPorts = livePorts(envelope(), 17);
+    racingPorts.projectVersionedTally.mockResolvedValueOnce({
+      ...tally({
+        options: [
+          { id: OPTION_A, label: "Pizza", position: 0, count: 1 },
+          { id: OPTION_B, label: "Sushi", position: 1, count: 0 },
+        ],
+        voterCount: 1,
+        selectionCount: 1,
+      }),
+      representationVersion: 18,
+    });
+    await expect(
+      queryLiveResults(
+        racingPorts,
+        "team-lunch",
+        ANONYMOUS,
+        NOW,
+        '"16:open"',
+      ),
+    ).resolves.toMatchObject({
+      kind: "visible",
+      representationVersion: 18,
+      validator: '"18:open"',
+      tally: { voterCount: 1 },
+    });
+  });
+
+  it.each([NaN, Infinity, -Infinity, 0, -1, 1.5])(
+    "fails closed when the version read is malformed: %s",
+    async (version) => {
+      const malformedPorts = livePorts(envelope(), version);
+      await expect(
+        queryLiveResults(
+          malformedPorts,
+          "team-lunch",
+          ANONYMOUS,
+          NOW,
+          '"999:open"',
+        ),
+      ).rejects.toThrow("Invalid representation version");
+      expect(malformedPorts.projectVersionedTally).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed when the full projection disappears after authorization", async () => {
+    const inconsistentPorts = livePorts(envelope(), 17);
+    inconsistentPorts.projectVersionedTally.mockResolvedValueOnce(null);
+    await expect(
+      queryLiveResults(
+        inconsistentPorts,
+        "team-lunch",
+        ANONYMOUS,
+        NOW,
+        null,
+      ),
+    ).rejects.toThrow("Live Results projection unavailable");
+  });
+
+  it("fails closed when the full projection carries a malformed version", async () => {
+    const malformedPorts = livePorts(envelope(), 17);
+    malformedPorts.projectVersionedTally.mockResolvedValueOnce({
+      ...tally(),
+      representationVersion: Number.NaN,
+    });
+    await expect(
+      queryLiveResults(
+        malformedPorts,
+        "team-lunch",
+        ANONYMOUS,
+        NOW,
+        '"16:open"',
+      ),
+    ).rejects.toThrow("Invalid representation version");
   });
 });

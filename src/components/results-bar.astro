@@ -9,11 +9,14 @@
  * Initial/final width carries no CSS transition in this story.
  */
 import { barAccessibleName, barWidthPercent } from "./results-bar";
+import type { PollOptionId } from "../shared/domain/index";
 
 interface Props {
   label: string;
   percent: number;
   count: number;
+  /** Stable live-reconciliation key. Loading/demo bars intentionally omit it. */
+  optionId?: PollOptionId;
   leader?: boolean;
   /** Cold-load skeleton row: label on its baseline at zero width, named as
    * loading — never announced as a real "0 percent, 0 votes" result. */
@@ -25,6 +28,7 @@ const {
   label,
   percent,
   count,
+  optionId,
   leader = false,
   loading = false,
   class: className = "",
@@ -46,6 +50,7 @@ const accessibleName = loading
   ]}
   role="img"
   aria-label={accessibleName}
+  data-option-id={optionId}
 >
   <div class="results-bar-track" style={`--bar-width: ${width}%`}>
     <div class="results-bar-fill"></div>
@@ -54,11 +59,11 @@ const accessibleName = loading
       {
         !loading && (
           <span class="results-bar-value">
-            {leader && (
-              <span class="results-bar-leader-mark" aria-hidden="true">
-                ◆
-              </span>
-            )}
+            <span
+              class="results-bar-leader-mark"
+              aria-hidden="true"
+              hidden={!leader}
+            >◆</span>
             <span class="results-bar-pct">{normalizedPercent}%</span>
             <span class="results-bar-count"> · {count}</span>
           </span>
@@ -131,6 +136,10 @@ const accessibleName = loading
   .results-bar-leader-mark {
     color: var(--results-bar-leader-marker-color);
     margin-right: var(--space-2);
+  }
+
+  .results-bar-leader-mark[hidden] {
+    display: none;
   }
 
   .results-bar-pct {

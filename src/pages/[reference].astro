@@ -42,6 +42,7 @@ import {
 } from "../modules/voting/index";
 import {
   effectivePollStatus,
+  type PollStatus,
   type PollType,
   type UserId,
 } from "../shared/domain/index";
@@ -129,6 +130,7 @@ type ResultsExplanationView = {
 type PostVoteResultsView =
   | {
       kind: "visible";
+      status: PollStatus;
       tally: ResultsTallyView;
     }
   | ({
@@ -148,7 +150,7 @@ const assertExhaustiveResultsView = (_view: never): never => {
 const postVoteResultsFrom = (view: ResultsView): PostVoteResultsView => {
   switch (view.kind) {
     case "visible":
-      return { kind: view.kind, tally: view.tally };
+      return { kind: view.kind, status: view.status, tally: view.tally };
     case "after_close_hidden":
       return view.deadlineMs === null
         ? {
@@ -572,6 +574,7 @@ if (poll && method === "POST") {
 // for a hidden After Close or unauthorized Creator-Only outcome (AD-21).
 let postVoteResults: PostVoteResultsView | null = null;
 let yourBallotLabels: string[] = [];
+const resultsRenderedAtMs = Date.now();
 if (poll && readOnly) {
   try {
     const principalId = Astro.locals.principal?.userId;
@@ -580,7 +583,7 @@ if (poll && readOnly) {
         createResultsPersistence(env.DB),
         reference,
         { userId: principalId === undefined ? null : (principalId as UserId) },
-        Date.now(),
+        resultsRenderedAtMs,
       ),
     );
   } catch {
@@ -900,8 +903,15 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
           {showTally && postVoteResults?.kind === "visible" && (
             <ResultsTally
               tally={postVoteResults.tally}
+              status={postVoteResults.status}
               yourBallotLabels={yourBallotLabels}
               loading
+              liveEndpoint={
+                postVoteResults.status === "open"
+                  ? `/${encodeURIComponent(reference)}/results/live`
+                  : undefined
+              }
+              initialRenderAtMs={resultsRenderedAtMs}
             />
           )}
         </>
@@ -911,6 +921,13 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     }
   </main>
   {poll && <script src="../scripts/vote-form.ts"></script>}
+  {
+    showTally &&
+      postVoteResults?.kind === "visible" &&
+      postVoteResults.status === "open" && (
+        <script src="../scripts/results-live.ts"></script>
+      )
+  }
 </BaseLayout>
 
 <style>
@@ -1107,9 +1124,14 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
       grid-row: 2;
     }
 
+    .poll-shell[data-post-vote="true"] :global(.results-tally-live) {
+      grid-column: 2;
+      grid-row: 3;
+    }
+
     .poll-shell[data-post-vote="true"] :global(.results-tally-bars) {
       grid-column: 2;
-      grid-row: 3 / span 2;
+      grid-row: 4;
     }
   }
 </style>

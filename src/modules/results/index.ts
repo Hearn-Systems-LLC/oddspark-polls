@@ -9,6 +9,7 @@ import {
   effectivePollStatus,
   type PollId,
   type PollOptionId,
+  type PollStatus,
   type ResultVisibility,
   type UserId,
 } from "../../shared/domain/index";
@@ -58,6 +59,21 @@ export type ResultsPorts = {
   projectTally: (pollId: PollId) => Promise<ResultsTallyProjection>;
 };
 
+export type VersionedResultsTallyProjection = ResultsTallyProjection & {
+  representationVersion: number;
+};
+
+// Live Results keeps the cheap validator read separate from the full Tally
+// projection so authorization always happens first and a matching validator
+// can avoid the heavier projection. The full projection carries its own
+// version so the response body and ETag describe one D1 snapshot (AD-24).
+export type LiveResultsPorts = Pick<ResultsPorts, "findAccessEnvelope"> & {
+  readRepresentationVersion: (pollId: PollId) => Promise<number | null>;
+  projectVersionedTally: (
+    pollId: PollId,
+  ) => Promise<VersionedResultsTallyProjection | null>;
+};
+
 // Results-owned copy for the hidden shapes and Tally annotations. The voting
 // module's VOTE_COPY covers the post-vote confirmation; these strings cover
 // the direct Results surface.
@@ -94,12 +110,20 @@ export type ResultsTallyView = {
   empty: boolean;
 };
 
+// Public JSON contract consumed by the isolated Tally enhancer. Internal
+// Poll identifiers and representation versions stay in the HTTP validator,
+// never in the payload.
+export type LiveResultsPayload = ResultsTallyView & {
+  status: PollStatus;
+};
+
 export type ResultsView =
   | {
       kind: "visible";
       pollId: PollId;
       question: string;
       canonicalReference: string;
+      status: PollStatus;
       tally: ResultsTallyView;
     }
   | {
@@ -113,6 +137,38 @@ export type ResultsView =
       kind: "creator_only_hidden";
       pollId: PollId;
       question: string;
+      canonicalReference: string;
+    }
+  | { kind: "not_found" };
+
+// The live query owns a narrower outward union than the full page query.
+// Hidden and absent outcomes structurally cannot carry a version, validator,
+// or Tally; only an entitled outcome can expose those representation facts.
+export type LiveResultsView =
+  | {
+      kind: "visible";
+      pollId: PollId;
+      canonicalReference: string;
+      representationVersion: number;
+      status: PollStatus;
+      validator: string;
+      tally: ResultsTallyView;
+    }
+  | {
+      kind: "not_modified";
+      pollId: PollId;
+      canonicalReference: string;
+      status: PollStatus;
+      validator: string;
+    }
+  | {
+      kind: "after_close_hidden";
+      pollId: PollId;
+      canonicalReference: string;
+    }
+  | {
+      kind: "creator_only_hidden";
+      pollId: PollId;
       canonicalReference: string;
     }
   | { kind: "not_found" };
@@ -161,6 +217,33 @@ function projectTallyView(
   };
 }
 
+function resultsAreVisible(
+  envelope: ResultsAccessEnvelope,
+  viewer: ViewerContext,
+  status: PollStatus,
+): boolean {
+  return (
+    envelope.resultVisibility === "live" ||
+    (envelope.resultVisibility === "after_close" && status === "closed") ||
+    (envelope.resultVisibility === "creator_only" &&
+      viewer.userId !== null &&
+      viewer.userId === envelope.ownerUserId)
+  );
+}
+
+export function composeResultsValidator(
+  representationVersion: number,
+  status: PollStatus,
+): string {
+  if (
+    !Number.isSafeInteger(representationVersion) ||
+    representationVersion < 1
+  ) {
+    throw new Error("Invalid representation version");
+  }
+  return `"${representationVersion}:${status}"`;
+}
+
 // The one Results application query. Observable two-step order: resolve the
 // access envelope → authorize → and only for `visible` call the private
 // tally projection. Never fetch-then-redact (AD-21/AR-17). Effective closure
@@ -177,13 +260,8 @@ export async function queryResults(
     return { kind: "not_found" };
   }
 
-  const visible =
-    envelope.resultVisibility === "live" ||
-    (envelope.resultVisibility === "after_close" &&
-      effectivePollStatus(envelope, nowMs) === "closed") ||
-    (envelope.resultVisibility === "creator_only" &&
-      viewer.userId !== null &&
-      viewer.userId === envelope.ownerUserId);
+  const status = effectivePollStatus(envelope, nowMs);
+  const visible = resultsAreVisible(envelope, viewer, status);
 
   if (!visible) {
     return envelope.resultVisibility === "after_close"
@@ -208,6 +286,73 @@ export async function queryResults(
     pollId: envelope.pollId,
     question: envelope.question,
     canonicalReference: envelope.canonicalReference,
+    status,
+    tally: projectTallyView(envelope, projection),
+  };
+}
+
+// Conditional live projection: resolve the safe envelope, authorize through
+// the exact same decision as queryResults, then and only then read a version
+// or Tally. The effective status is derived for every request, so crossing a
+// Deadline changes the validator even when no mutation increments the Poll.
+export async function queryLiveResults(
+  ports: LiveResultsPorts,
+  reference: string,
+  viewer: ViewerContext,
+  nowMs: number,
+  currentValidator: string | null = null,
+): Promise<LiveResultsView> {
+  const envelope = await ports.findAccessEnvelope(reference);
+  if (!envelope) {
+    return { kind: "not_found" };
+  }
+
+  const status = effectivePollStatus(envelope, nowMs);
+  if (!resultsAreVisible(envelope, viewer, status)) {
+    return {
+      kind:
+        envelope.resultVisibility === "after_close"
+          ? "after_close_hidden"
+          : "creator_only_hidden",
+      pollId: envelope.pollId,
+      canonicalReference: envelope.canonicalReference,
+    };
+  }
+
+  if (currentValidator !== null) {
+    const representationVersion = await ports.readRepresentationVersion(
+      envelope.pollId,
+    );
+    if (representationVersion === null) {
+      throw new Error("Live Results version unavailable");
+    }
+    const validator = composeResultsValidator(representationVersion, status);
+    if (currentValidator === validator) {
+      return {
+        kind: "not_modified",
+        pollId: envelope.pollId,
+        canonicalReference: envelope.canonicalReference,
+        status,
+        validator,
+      };
+    }
+  }
+
+  const projection = await ports.projectVersionedTally(envelope.pollId);
+  if (projection === null) {
+    throw new Error("Live Results projection unavailable");
+  }
+  const snapshotValidator = composeResultsValidator(
+    projection.representationVersion,
+    status,
+  );
+  return {
+    kind: "visible",
+    pollId: envelope.pollId,
+    canonicalReference: envelope.canonicalReference,
+    representationVersion: projection.representationVersion,
+    status,
+    validator: snapshotValidator,
     tally: projectTallyView(envelope, projection),
   };
 }

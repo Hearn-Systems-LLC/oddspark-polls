@@ -280,6 +280,13 @@ test.describe("direct results route", () => {
       "results-bar-leader-mark",
       "--bar-width",
       "representation",
+      // Story 1.10: the chart-form toggle, pie mount, and own-vote marker
+      // are visible-Tally artifacts and never leak onto hidden surfaces.
+      "data-chart-form-toggle",
+      "data-chart-form-pie",
+      "chart-form-toggle-option",
+      "data-your-option",
+      "data-pie-share",
     ]) {
       expect(html).not.toContain(forbidden);
     }

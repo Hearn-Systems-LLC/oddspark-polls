@@ -317,6 +317,31 @@ test.describe("live-updating results", () => {
           element.style.getPropertyValue("--bar-width"),
         ),
       ).toBe("67%");
+      // Story 1.10 splits the snap-era assertion in two: armed (AC #1), the
+      // fill transitions width over 480ms and the leader cross-fade over
+      // 240ms; under reduced motion (AC #4) the same update still lands —
+      // the duration just reads 0s while the value moved.
+      await page.emulateMedia({
+        colorScheme: "dark",
+        reducedMotion: "no-preference",
+      });
+      const armedMotion = await betaTrack
+        .locator(".results-bar-fill")
+        .evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            duration: style.transitionDuration,
+            property: style.transitionProperty,
+          };
+        });
+      expect(armedMotion).toEqual({
+        duration: "0.48s, 0.24s, 0.24s",
+        property: "width, background-color, border-right-color",
+      });
+      await page.emulateMedia({
+        colorScheme: "dark",
+        reducedMotion: "reduce",
+      });
       expect(
         await betaTrack
           .locator(".results-bar-fill")
@@ -330,9 +355,12 @@ test.describe("live-updating results", () => {
         tally.locator('[aria-live="polite"]'),
       ).toHaveCount(1);
       await expect(tally.locator('[role="img"] [aria-live]')).toHaveCount(0);
-      await expect(tally.locator("button, input, select, textarea, a")).toHaveCount(
+      await expect(tally.locator("input, select, textarea, a")).toHaveCount(
         0,
       );
+      // Story 1.10 (AC #5): exactly the two chart-form toggle buttons.
+      await expect(tally.locator("button")).toHaveCount(2);
+      await expect(tally.locator("button[data-chart-form]")).toHaveCount(2);
       await expect(page.locator(".results-bar-leader-mark:visible")).toHaveCount(
         1,
       );

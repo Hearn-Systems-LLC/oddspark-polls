@@ -1,0 +1,184 @@
+---
+/**
+ * BARS · PIE chart-form toggle (Story 1.10, UX-DR5) — two label-caps words
+ * with an aria-hidden middot and a hairline beneath: the current form is
+ * solar-ink, the other dim, and the state is the color swap alone (never
+ * opacity, no icon, no pill, no box). BARS is the default on every load and
+ * the choice is per-viewer, never persisted. The server renders the control
+ * hidden — a no-JS visitor gets the complete bar Tally and never a dead
+ * control — and chart-form-toggle.ts reveals it and owns the in-place view
+ * swap. Multi-select Polls never render it (gated in results-tally.astro):
+ * per-option shares of VOTERS sum past 100% and cannot form an honest pie.
+ * [data-chart-form-pie] is the mount point the pie renderer fills; it stays
+ * hidden until PIE is active.
+ */
+---
+
+<div
+  class="chart-form-toggle"
+  data-chart-form-toggle
+  role="group"
+  aria-label="Chart form"
+  hidden
+>
+  <button
+    type="button"
+    class="chart-form-toggle-option is-current"
+    data-chart-form="bars"
+    aria-pressed="true"
+  >BARS</button>
+  <span class="chart-form-toggle-separator" aria-hidden="true"></span>
+  <button
+    type="button"
+    class="chart-form-toggle-option"
+    data-chart-form="pie"
+    aria-pressed="false"
+  >PIE</button>
+</div>
+<div class="chart-form-pie" data-chart-form-pie hidden></div>
+
+<style>
+  .chart-form-toggle {
+    display: flex;
+    align-items: stretch;
+    gap: var(--chart-form-toggle-gap);
+    margin: 0 0 var(--space-3);
+    border-bottom: var(--chart-form-toggle-border-bottom);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  /* `hidden` loses to author display rules without an explicit guard. */
+  .chart-form-toggle[hidden],
+  .chart-form-pie[hidden] {
+    display: none;
+  }
+
+  .chart-form-toggle-option {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--chart-form-toggle-min-height);
+    padding: var(--chart-form-toggle-padding-y) 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    color: var(--chart-form-toggle-color);
+    cursor: pointer;
+  }
+
+  /* The state is the color swap: current form solar-ink, other dim. */
+  .chart-form-toggle-option.is-current {
+    color: var(--chart-form-toggle-color-current);
+  }
+
+  .chart-form-toggle-option:focus-visible {
+    outline: var(--chart-form-toggle-focus-outline);
+    outline-offset: var(--chart-form-toggle-focus-outline-offset);
+  }
+
+  .chart-form-toggle-separator {
+    display: inline-flex;
+    align-items: center;
+    color: var(--chart-form-toggle-color);
+  }
+
+  .chart-form-toggle-separator::before {
+    content: var(--chart-form-toggle-separator);
+  }
+
+  .chart-form-pie {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin: 0 0 var(--space-3);
+    padding-block: var(--space-3);
+  }
+
+  /* The pie is drawn geometry with token-bound slices and a 1px rule
+     hairline on every boundary — square, shadowless, gradient-free, and
+     motionless by contract. Descendants are script-created, so these rules
+     are global by design. */
+  :global(.chart-form-pie-svg) {
+    width: 160px;
+    height: 160px;
+  }
+
+  :global(.chart-form-pie-svg[hidden]) {
+    display: none;
+  }
+
+  :global(.chart-form-pie-slice) {
+    stroke: var(--color-rule);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  :global(.chart-form-pie-slice-entropy) {
+    fill: var(--color-entropy-wash);
+  }
+
+  :global(.chart-form-pie-slice-panel) {
+    fill: var(--color-panel);
+  }
+
+  :global(.chart-form-pie-slice-leader) {
+    fill: var(--color-solar-wash);
+  }
+
+  :global(.chart-form-pie-legend) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  :global(.chart-form-pie-legend-row) {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-1);
+    font-family: var(--font-machine);
+  }
+
+  :global(.chart-form-pie-legend-mark) {
+    color: var(--results-bar-leader-marker-color);
+    margin-right: var(--space-2);
+  }
+
+  :global(.chart-form-pie-legend-label) {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-text);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :global(.chart-form-pie-legend-value) {
+    flex: 0 0 auto;
+    color: var(--color-text);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  :global(.chart-form-pie-legend-pct) {
+    font-size: var(--type-data-size);
+    font-weight: 700;
+    line-height: var(--type-data-lh);
+  }
+
+  :global(.chart-form-pie-legend-count) {
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+</style>

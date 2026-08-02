@@ -1,6 +1,7 @@
 import { barAccessibleName, barWidthPercent } from "../components/results-bar";
 import { formatVoteTotal } from "../components/live-indicator";
 import type { LiveResultsPayload } from "../modules/results/index";
+import { RESULTS_CHART_FORM_CHANGE_EVENT } from "./chart-form-contract";
 import {
   RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS,
   createResultsLiveState,
@@ -11,6 +12,26 @@ import {
   shouldAdoptResultsValidator,
   shouldPollResults,
 } from "./results-live-core";
+import {
+  RESULTS_COUNT_UP_DEFAULT_DURATION_MS,
+  LINEAR_MOTION_EASE,
+  countUpDisplayValue,
+  isCountUpComplete,
+  parseLeadingInteger,
+  parseMotionDurationMs,
+  parseMotionEasing,
+  resolveCountUpDurationMs,
+  retargetCountUp,
+  shouldSnapResultsMotion,
+  shouldSparkOnCountChange,
+  startCountUp,
+  type CountUpTween,
+  type ResultsRefreshTrigger,
+} from "./results-motion-core";
+import {
+  clearResultsSparks,
+  prepareResultsSparks,
+} from "./results-spark";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -23,6 +44,12 @@ const isPercent = (value: unknown): value is number =>
   Number.isFinite(value) &&
   value >= 0 &&
   value <= 100;
+
+const isUnitShare = (value: unknown): value is number =>
+  typeof value === "number" &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= 1;
 
 const isLiveResultsPayload = (value: unknown): value is LiveResultsPayload => {
   if (!isRecord(value) || !Array.isArray(value.options)) {
@@ -46,6 +73,7 @@ const isLiveResultsPayload = (value: unknown): value is LiveResultsPayload => {
       isNonNegativeSafeInteger(option.position) &&
       isNonNegativeSafeInteger(option.count) &&
       isPercent(option.percent) &&
+      isUnitShare(option.pieShare) &&
       typeof option.leading === "boolean",
   );
   return (
@@ -111,6 +139,9 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   );
   const indicatorLabel = root.querySelector<HTMLElement>("[data-live-label]");
   const total = root.querySelector<HTMLElement>("[data-live-total]");
+  const totalVisual = root.querySelector<HTMLElement>(
+    "[data-live-total-visual]",
+  );
   const tied = root.querySelector<HTMLElement>("[data-live-tied]");
   const empty = root.querySelector<HTMLElement>("[data-live-empty]");
   const summary = root.querySelector<HTMLElement>("[data-live-summary]");
@@ -124,6 +155,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     !indicatorDot ||
     !indicatorLabel ||
     !total ||
+    !totalVisual ||
     !tied ||
     !empty ||
     !barsContainer
@@ -132,6 +164,40 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   }
 
   root.dataset.liveEnhanced = "true";
+
+  // Motion arms lazily, in the same task as the first animated reconcile
+  // (Story 1.10): the server-rendered state never animates, and neither
+  // does an idle warm load — arming on a post-paint timer would arm a
+  // tally that has nothing to move yet and break the executable
+  // initial-paint guard for no user's benefit. The first in-cadence update
+  // arms and animates in one task (a transition starts from the previously
+  // computed value when the gate and the write land together).
+  let motionArmed = false;
+  const armMotion = (): void => {
+    if (motionArmed) {
+      return;
+    }
+    motionArmed = true;
+    root.classList.add("is-motion-armed");
+  };
+
+  const reducedMotionQuery = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  );
+  const countUpDurationMs =
+    parseMotionDurationMs(
+      getComputedStyle(root).getPropertyValue("--motion-count-up"),
+    ) ?? RESULTS_COUNT_UP_DEFAULT_DURATION_MS;
+  const countUpEasing =
+    parseMotionEasing(
+      getComputedStyle(root).getPropertyValue("--motion-ease"),
+    ) ?? LINEAR_MOTION_EASE;
+
+  // Last reconciled count per option — the spark's increase detector. The
+  // first reconcile seeds from the server-rendered text, so a Vote that
+  // landed between paint and the first poll still reads as an increase.
+  const previousCounts = new Map<string, number>();
+
   const initialRenderAtMs = Number(root.dataset.liveInitialRenderAt);
   let state = createResultsLiveState(
     Number.isFinite(initialRenderAtMs) ? initialRenderAtMs : Date.now(),
@@ -277,7 +343,160 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     window.location.reload();
   };
 
-  const reconcile = (payload: LiveResultsPayload): boolean => {
+  type CountUpSlot = {
+    set(target: number, animate: boolean, startedAtMs: number): void;
+    snap(): void;
+  };
+
+  // One rAF count-up per element (Story 1.10). New data retargets the tween
+  // from wherever it currently is — never a restart, never a queue — and the
+  // exact final value is written on completion. animate=false (snap contexts,
+  // the pre-arm window) or reduced motion lands the value instantly.
+  const createCountUpSlot = (
+    element: HTMLElement,
+    format: (value: number) => string,
+  ): CountUpSlot => {
+    let displayed: number | null = null;
+    let tween: CountUpTween | null = null;
+    let frame: number | null = null;
+    let reservedCharacters = element.textContent?.length ?? 0;
+
+    const cancel = (): void => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+      tween = null;
+    };
+
+    const write = (value: number): void => {
+      displayed = value;
+      const text = format(value);
+      if (element.textContent !== text) {
+        element.textContent = text;
+      }
+    };
+
+    const reserveTargetWidth = (target: number): void => {
+      const characters = format(target).length;
+      if (characters > reservedCharacters) {
+        reservedCharacters = characters;
+        element.style.minInlineSize = `${characters}ch`;
+      }
+    };
+
+    const step = (nowMs: number): void => {
+      frame = null;
+      if (tween === null) {
+        return;
+      }
+      if (isCountUpComplete(tween, nowMs)) {
+        const finalValue = tween.to;
+        tween = null;
+        write(finalValue);
+        return;
+      }
+      write(countUpDisplayValue(tween, nowMs));
+      frame = window.requestAnimationFrame(step);
+    };
+
+    return {
+      set(target, animate, startedAtMs) {
+        if (displayed === null) {
+          displayed = parseLeadingInteger(element.textContent) ?? target;
+        }
+        // Reserve the target column before any tick. Monotonic growth means
+        // a 9→10 boundary cannot make the neighbouring label walk per frame.
+        reserveTargetWidth(target);
+        const durationMs = resolveCountUpDurationMs(
+          countUpDurationMs,
+          reducedMotionQuery.matches,
+        );
+        if (!animate || durationMs === 0) {
+          cancel();
+          if (displayed !== target) {
+            write(target);
+          }
+          return;
+        }
+        if (tween !== null) {
+          if (tween.to === target) {
+            return;
+          }
+          tween = retargetCountUp(
+            tween,
+            target,
+            startedAtMs,
+            durationMs,
+          );
+        } else {
+          if (displayed === target) {
+            return;
+          }
+          tween = startCountUp(
+            displayed,
+            target,
+            startedAtMs,
+            durationMs,
+            countUpEasing,
+          );
+        }
+        if (frame === null) {
+          frame = window.requestAnimationFrame(step);
+        }
+      },
+      snap() {
+        if (tween === null) {
+          return;
+        }
+        const target = tween.to;
+        cancel();
+        reserveTargetWidth(target);
+        write(target);
+      },
+    };
+  };
+
+  // The one snap mechanism (UX-DR15 — "snap to current on resume"): strip
+  // the arming class, apply the final values, flush, re-arm. Every recovery
+  // path lands instantly; only ordinary in-cadence reconciles animate.
+  const withSnappedMotion = <T>(apply: () => T): T => {
+    if (motionArmed) {
+      root.classList.remove("is-motion-armed");
+    }
+    clearResultsSparks(root);
+    const result = apply();
+    if (motionArmed) {
+      void root.offsetWidth;
+      root.classList.add("is-motion-armed");
+    }
+    return result;
+  };
+
+  let barSlots: { percent: CountUpSlot; count: CountUpSlot }[] | null = null;
+  let totalSlot: CountUpSlot | null = null;
+
+  const snapMotionState = (): void => {
+    withSnappedMotion(() => {
+      for (const slot of barSlots ?? []) {
+        slot.percent.snap();
+        slot.count.snap();
+      }
+      totalSlot?.snap();
+    });
+  };
+
+  root.addEventListener(RESULTS_CHART_FORM_CHANGE_EVENT, snapMotionState);
+  reducedMotionQuery.addEventListener("change", (event) => {
+    if (event.matches) {
+      snapMotionState();
+    }
+  });
+
+  const reconcile = (
+    payload: LiveResultsPayload,
+    animate: boolean,
+  ): boolean => {
     const bars = Array.from(
       barsContainer.querySelectorAll<HTMLElement>("[data-option-id]"),
     );
@@ -301,6 +520,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     const barHooks: {
       bar: HTMLElement;
       track: HTMLElement;
+      fill: HTMLElement;
       label: HTMLElement;
       percent: HTMLElement;
       count: HTMLElement;
@@ -308,23 +528,61 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     }[] = [];
     for (const bar of bars) {
       const track = bar.querySelector<HTMLElement>(".results-bar-track");
+      const fill = bar.querySelector<HTMLElement>(".results-bar-fill");
       const label = bar.querySelector<HTMLElement>(".results-bar-label");
       const percent = bar.querySelector<HTMLElement>(".results-bar-pct");
       const count = bar.querySelector<HTMLElement>(".results-bar-count");
       const leaderMark = bar.querySelector<HTMLElement>(
         ".results-bar-leader-mark",
       );
-      if (!track || !label || !percent || !count || !leaderMark) {
+      if (!track || !fill || !label || !percent || !count || !leaderMark) {
         reloadOnce();
         return false;
       }
-      barHooks.push({ bar, track, label, percent, count, leaderMark });
+      barHooks.push({ bar, track, fill, label, percent, count, leaderMark });
     }
 
-    for (const [index, option] of payload.options.entries()) {
-      const { bar, track, label, percent, count, leaderMark } =
-        barHooks[index];
+    let slots = barSlots;
+    let totals = totalSlot;
+    if (slots === null || totals === null) {
+      slots = barHooks.map((hooks) => ({
+        percent: createCountUpSlot(hooks.percent, (value) => `${value}%`),
+        count: createCountUpSlot(hooks.count, (value) => ` · ${value}`),
+      }));
+      totals = createCountUpSlot(totalVisual, formatVoteTotal);
+      barSlots = slots;
+      totalSlot = totals;
+    }
+
+    const shouldAnimate =
+      animate && root.dataset.chartFormState !== "pie";
+    const startedAtMs = performance.now();
+    const plans = payload.options.map((option, index) => {
+      const hooks = barHooks[index];
+      const slot = slots[index];
       const normalizedPercent = barWidthPercent(option.percent);
+      const previousCount =
+        previousCounts.get(option.id) ??
+        parseLeadingInteger(hooks.count.textContent) ??
+        option.count;
+      return {
+        option,
+        hooks,
+        slot,
+        normalizedPercent,
+        spark:
+          shouldAnimate &&
+          !reducedMotionQuery.matches &&
+          shouldSparkOnCountChange(previousCount, option.count),
+      };
+    });
+    const sparkFills = plans.flatMap(({ hooks, spark }) =>
+      spark ? [hooks.fill] : []
+    );
+    const startSparks = prepareResultsSparks(sparkFills);
+
+    for (const { option, hooks, slot, normalizedPercent } of plans) {
+      const { bar, track, label, leaderMark } = hooks;
       const width = `${normalizedPercent}%`;
       if (track.style.getPropertyValue("--bar-width") !== width) {
         track.style.setProperty("--bar-width", width);
@@ -332,13 +590,25 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       if (label.textContent !== option.label) {
         label.textContent = option.label;
       }
-      if (percent.textContent !== width) {
-        percent.textContent = width;
+      slot.percent.set(normalizedPercent, shouldAnimate, startedAtMs);
+      slot.count.set(option.count, shouldAnimate, startedAtMs);
+      // The pie view's one coherent source (Story 1.10): display values and
+      // exact server-owned geometry land on the bar root in this same batch.
+      const percentData = String(normalizedPercent);
+      if (bar.dataset.percent !== percentData) {
+        bar.dataset.percent = percentData;
       }
-      const countText = ` · ${option.count}`;
-      if (count.textContent !== countText) {
-        count.textContent = countText;
+      const countData = String(option.count);
+      if (bar.dataset.count !== countData) {
+        bar.dataset.count = countData;
       }
+      const pieShareData = String(option.pieShare);
+      if (bar.dataset.pieShare !== pieShareData) {
+        bar.dataset.pieShare = pieShareData;
+      }
+      previousCounts.set(option.id, option.count);
+      // The accessible name stays immediate and final-valued — a ticking
+      // name would spam AT and break role/name locators.
       const accessibleName = barAccessibleName(
         option.label,
         normalizedPercent,
@@ -351,7 +621,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       if (bar.classList.contains("is-leader") !== option.leading) {
         bar.classList.toggle("is-leader", option.leading);
       }
-      const zero = normalizedPercent === 0;
+      const zero = option.count === 0;
       if (bar.classList.contains("is-zero") !== zero) {
         bar.classList.toggle("is-zero", zero);
       }
@@ -374,7 +644,18 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     }
     const totalText = formatVoteTotal(payload.voterCount);
     if (total.textContent !== totalText) {
+      // The announced copy: final value, exactly once per reconcile. The
+      // tick lives on the aria-hidden visual span beside it.
       total.textContent = totalText;
+    }
+    totals.set(payload.voterCount, shouldAnimate, startedAtMs);
+
+    // All bar widths, leader colors/markers, data attributes, and numeric
+    // targets are now staged. One shared flush starts every CSS settle; the
+    // changed fills join it together and remove themselves on animationend.
+    if (sparkFills.length > 0) {
+      void root.offsetWidth;
+      startSparks();
     }
 
     const nextLeader = payload.options.find((option) => option.leading);
@@ -408,11 +689,11 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     }
     timer = window.setTimeout(() => {
       timer = null;
-      void refresh();
+      void refresh("cadence");
     }, nextResultsPollDelayMs(state));
   };
 
-  const refresh = async (): Promise<void> => {
+  const refresh = async (trigger: ResultsRefreshTrigger): Promise<void> => {
     clearTimer();
     if (reloadStarted) {
       return;
@@ -459,6 +740,17 @@ const enhanceResultsTally = (root: HTMLElement): void => {
           throw new Error("Invalid live Results validator");
         }
         const wasStale = state.connection.kind === "stale";
+        if (
+          shouldSnapResultsMotion({
+            trigger,
+            wasStale,
+            nextStatus: parsed.status,
+          })
+        ) {
+          // A recovery can truthfully return no body. Snap the latest known
+          // targets anyway; otherwise a paused pre-recovery tween resumes.
+          snapMotionState();
+        }
         validator = incomingValidator;
         state = markResultsLiveSuccess(state, Date.now(), parsed.status);
         if (wasStale) {
@@ -497,11 +789,25 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       if (payload.status === "closed") {
         clearAnnouncements();
       }
-      if (!reconcile(payload)) {
+      const wasStale = state.connection.kind === "stale";
+      const snap =
+        root.dataset.chartFormState === "pie" ||
+        shouldSnapResultsMotion({
+          trigger,
+          wasStale,
+          nextStatus: payload.status,
+        });
+      let reconciled: boolean;
+      if (snap) {
+        reconciled = withSnappedMotion(() => reconcile(payload, false));
+      } else {
+        armMotion();
+        reconciled = reconcile(payload, true);
+      }
+      if (!reconciled) {
         return;
       }
 
-      const wasStale = state.connection.kind === "stale";
       validator = incomingValidator;
       state = markResultsLiveSuccess(state, Date.now(), payload.status);
       resetReloadCount();
@@ -539,7 +845,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       return;
     }
     if (navigator.onLine) {
-      void refresh();
+      void refresh("visibility-return");
     } else {
       enterStale();
     }
@@ -552,7 +858,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     abortRefresh();
     enterStale();
   });
-  window.addEventListener("online", () => void refresh());
+  window.addEventListener("online", () => void refresh("online"));
   window.addEventListener("pageshow", (event) => {
     if (
       !event.persisted ||
@@ -562,7 +868,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       return;
     }
     if (navigator.onLine) {
-      void refresh();
+      void refresh("pageshow");
     } else {
       enterStale();
     }

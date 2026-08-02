@@ -93,6 +93,8 @@ export type ResultsTallyOptionView = {
   position: number;
   count: number;
   percent: number;
+  /** Unrounded share of Voters, supplied for exact PIE geometry. */
+  pieShare: number;
   leading: boolean;
 };
 
@@ -179,11 +181,11 @@ export type LiveResultsView =
 // may intentionally total above 100; the `N VOTERS · M SELECTIONS` line
 // explains the shape. A zero-Voter denominator yields exactly 0 — never
 // NaN/Infinity (resolves the deferred Story 1.1 input-safety item).
-function percentOfVoters(optionCount: number, voterCount: number): number {
+function shareOfVoters(optionCount: number, voterCount: number): number {
   if (voterCount <= 0) {
     return 0;
   }
-  return Math.round((optionCount / voterCount) * 100);
+  return optionCount / voterCount;
 }
 
 // Leader/tie derives from positive counts only: one unique positive maximum
@@ -201,15 +203,19 @@ function projectTallyView(
   const tied = positiveMax > 0 && leaders.length > 1;
   return {
     multiSelectEnabled: envelope.multiSelectEnabled,
-    options: ordered.map((option) => ({
-      ...option,
-      percent: percentOfVoters(option.count, projection.voterCount),
-      leading:
-        positiveMax > 0 &&
-        !tied &&
-        leaders.length === 1 &&
-        option.count === positiveMax,
-    })),
+    options: ordered.map((option) => {
+      const pieShare = shareOfVoters(option.count, projection.voterCount);
+      return {
+        ...option,
+        percent: Math.round(pieShare * 100),
+        pieShare,
+        leading:
+          positiveMax > 0 &&
+          !tied &&
+          leaders.length === 1 &&
+          option.count === positiveMax,
+      };
+    }),
     voterCount: projection.voterCount,
     selectionCount: projection.selectionCount,
     tied,

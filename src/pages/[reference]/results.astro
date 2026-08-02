@@ -20,8 +20,8 @@ import type { UserId } from "../../shared/domain/index";
 // visibility, closure, leader, percentage, or ownership rule lives here
 // (AD-1, AD-19). Safe GET/HEAD navigation; every response is
 // `private, no-store` and never touches the Cache API (AD-21/AR-17). Live
-// polling is an isolated progressive enhancer; chart toggling and bar
-// motion remain Story 1.10 scope.
+// polling and the chart-form toggle are isolated progressive enhancers
+// layered on the server-rendered Tally (Story 1.9/1.10).
 
 const reference = Astro.params.reference ?? "";
 const method = Astro.request.method;
@@ -154,6 +154,11 @@ const afterCloseParts =
   {
     view.kind === "after_close_hidden" && view.deadlineMs !== null && (
       <script src="../../scripts/results-page.ts"></script>
+    )
+  }
+  {
+    view.kind === "visible" && (
+      <script src="../../scripts/chart-form-toggle.ts"></script>
     )
   }
   {

@@ -70,4 +70,19 @@ production on every merge, but no version has been cut or tagged.
   after returning to the page, and an explicit last-known-time notice when
   updates cannot be received. A closing Poll applies its final snapshot and
   switches permanently to `CLOSED`.
+- Live Tallies now move: an arriving Vote transitions every bar's width in
+  one synchronized settle, the changed bar's leading edge sparks, counts and
+  percentages tick up in place without reflow, and a leadership change
+  cross-fades the gold between bars while the `◆` moves with it. Rapid
+  updates coalesce into a single settle to the latest value, refreshes after
+  returning to the page or reconnecting snap straight to current values, and
+  under `prefers-reduced-motion` every state change lands instantly with no
+  information lost. A voter's own bar sparks once as their `Counted.`
+  confirmation renders.
+- `BARS · PIE` chart-form toggle above the Tally: exact server-computed Voter
+  shares shape every static slice while the `◆`-marked legend carries the
+  same rounded percentage and raw count shown by BARS. The pie never
+  animates, and the choice resets to bars on every load. Multi-select polls
+  stay bars-only, since per-option shares of voters can sum past 100% and
+  cannot form an honest pie.
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

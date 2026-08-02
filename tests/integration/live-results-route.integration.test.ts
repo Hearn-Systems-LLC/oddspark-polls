@@ -204,6 +204,7 @@ describe("live Results endpoint", () => {
           position: 0,
           count: 0,
           percent: 0,
+          pieShare: 0,
           leading: false,
         },
         {
@@ -212,6 +213,7 @@ describe("live Results endpoint", () => {
           position: 1,
           count: 0,
           percent: 0,
+          pieShare: 0,
           leading: false,
         },
       ],
@@ -254,7 +256,12 @@ describe("live Results endpoint", () => {
       selectionCount: number;
       empty: boolean;
       status: string;
-      options: { id: string; count: number; percent: number }[];
+      options: {
+        id: string;
+        count: number;
+        percent: number;
+        pieShare: number;
+      }[];
     };
     expect(payload).toMatchObject({
       voterCount: 1,
@@ -268,6 +275,7 @@ describe("live Results endpoint", () => {
           id: `${POLL_ID}-option-a`,
           count: 1,
           percent: 100,
+          pieShare: 1,
         }),
       ]),
     );

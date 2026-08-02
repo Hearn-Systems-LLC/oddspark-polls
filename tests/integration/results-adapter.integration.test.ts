@@ -4,7 +4,12 @@ import {
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createResultsPersistence } from "../../src/adapters/d1/index";
+import {
+  createResultsPersistence,
+  createVotePersistence,
+} from "../../src/adapters/d1/index";
+import type { VotePersistenceBatch } from "../../src/modules/voting/index";
+import { incrementRepresentationVersion } from "../../src/shared/application/index";
 import type { PollId, PollOptionId } from "../../src/shared/domain/index";
 
 type MigrationTestEnv = Cloudflare.Env & {
@@ -266,5 +271,106 @@ describe("createResultsPersistence tally projection", () => {
     await expect(persistence.projectTally(POLL_ID)).rejects.toThrow(
       /resolved Poll has no options/,
     );
+  });
+});
+
+describe("createResultsPersistence live projection", () => {
+  it("reads version 1 for a fresh Poll and carries it with the Tally snapshot", async () => {
+    await insertPoll();
+    const persistence = createResultsPersistence(testEnv.DB);
+
+    await expect(
+      persistence.readRepresentationVersion(POLL_ID),
+    ).resolves.toBe(1);
+    await expect(persistence.projectVersionedTally(POLL_ID)).resolves.toEqual({
+      representationVersion: 1,
+      options: [
+        { id: OPTION_A, label: "Alpha", position: 0, count: 0 },
+        { id: OPTION_B, label: "Beta", position: 1, count: 0 },
+        { id: OPTION_C, label: "Gamma", position: 2, count: 0 },
+      ],
+      voterCount: 0,
+      selectionCount: 0,
+    });
+  });
+
+  it("observes one representation-version increment in the same accepted Vote batch", async () => {
+    await insertPoll();
+    const persistence = createResultsPersistence(testEnv.DB);
+    const votePersistence = createVotePersistence(testEnv.DB);
+    const vote: VotePersistenceBatch = {
+      vote: {
+        id: "live-results-vote-1",
+        pollId: POLL_ID,
+        submissionId: "live-results-submission-1",
+        payloadHash: "live-results-hash-1",
+        createdAtMs: NOW,
+      },
+      contributions: [
+        {
+          kind: "vote_selection",
+          voteId: "live-results-vote-1",
+          pollOptionId: OPTION_A,
+        },
+        {
+          kind: "voter_claim",
+          pollId: POLL_ID,
+          checkKind: "session",
+          digest: "live-results-digest-1",
+          voteId: "live-results-vote-1",
+          createdAtMs: NOW,
+        },
+      ],
+      representationVersion: incrementRepresentationVersion(POLL_ID, NOW),
+    };
+
+    await expect(
+      persistence.readRepresentationVersion(POLL_ID),
+    ).resolves.toBe(1);
+    await votePersistence.insertVote(vote);
+    await expect(
+      persistence.readRepresentationVersion(POLL_ID),
+    ).resolves.toBe(2);
+    await expect(
+      persistence.projectVersionedTally(POLL_ID),
+    ).resolves.toMatchObject({
+      representationVersion: 2,
+      voterCount: 1,
+      selectionCount: 1,
+      options: [
+        { id: OPTION_A, count: 1 },
+        { id: OPTION_B, count: 0 },
+        { id: OPTION_C, count: 0 },
+      ],
+    });
+  });
+
+  it("returns null for both post-authorization reads when the Poll is missing", async () => {
+    const persistence = createResultsPersistence(testEnv.DB);
+    const missing = "results-it-missing" as PollId;
+
+    await expect(
+      persistence.readRepresentationVersion(missing),
+    ).resolves.toBeNull();
+    await expect(
+      persistence.projectVersionedTally(missing),
+    ).resolves.toBeNull();
+  });
+
+  it("fails closed when D1 contains a malformed representation version", async () => {
+    await insertPoll();
+    await testEnv.DB.prepare(
+      "UPDATE poll SET representation_version = 0 WHERE id = ?1",
+    )
+      .bind(POLL_ID)
+      .run();
+    const persistence = createResultsPersistence(testEnv.DB);
+
+    await expect(
+      persistence.readRepresentationVersion(POLL_ID),
+    ).rejects.toThrow("Malformed representation version");
+    await expect(
+      persistence.projectVersionedTally(POLL_ID),
+    ).rejects.toThrow("Malformed representation version");
   });
 });

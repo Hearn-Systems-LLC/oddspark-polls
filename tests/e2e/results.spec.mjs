@@ -320,7 +320,9 @@ test.describe("direct results route", () => {
       await expect(
         page.getByRole("img", { name: "Beta, 33 percent, 1 vote" }),
       ).toBeVisible();
-      await expect(page.locator(".results-bar-leader-mark")).toHaveCount(1);
+      await expect(
+        page.locator(".results-bar-leader-mark:not([hidden])"),
+      ).toHaveCount(1);
     };
 
     // Anonymous, owner, and signed-in non-owner all receive the open Tally.
@@ -564,9 +566,11 @@ test.describe("direct results route", () => {
       page.getByRole("img", { name: "Alpha, 0 percent, 0 votes" }),
     ).toBeVisible();
     // All-zero is the empty state: no TIED, no gold, no diamond.
-    await expect(page.locator(".results-tally-tied")).toHaveCount(0);
+    await expect(page.locator(".results-tally-tied")).toBeHidden();
     await expect(page.locator(".results-bar.is-leader")).toHaveCount(0);
-    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(0);
+    await expect(
+      page.locator(".results-bar-leader-mark:not([hidden])"),
+    ).toHaveCount(0);
     // Zero-width bars keep their baseline rules and suppress the 2px edge.
     const edges = await page
       .locator("[data-tally-final] .results-bar-fill")
@@ -596,7 +600,9 @@ test.describe("direct results route", () => {
     // TIED is visible text — the absence of gold is never the only signal.
     await expect(page.locator(".results-tally-tied")).toHaveText("TIED");
     await expect(page.locator(".results-bar.is-leader")).toHaveCount(0);
-    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(0);
+    await expect(
+      page.locator(".results-bar-leader-mark:not([hidden])"),
+    ).toHaveCount(0);
     // No accessible name claims leadership; the diamond is excluded from
     // every name.
     for (const name of [
@@ -613,7 +619,7 @@ test.describe("direct results route", () => {
       votes: [[0], [0], [1]],
     });
     await page.goto(leading.path);
-    await expect(page.locator(".results-tally-tied")).toHaveCount(0);
+    await expect(page.locator(".results-tally-tied")).toBeHidden();
     await expect(page.locator(".results-bar.is-leader")).toHaveCount(1);
     // The leader is named semantically; the ◆ is decorative only.
     await expect(
@@ -1100,7 +1106,9 @@ test.describe("direct results route", () => {
     await expect(
       page.getByRole("img", { name: "Beta, 67 percent, 2 votes, leading" }),
     ).toBeVisible();
-    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(1);
+    await expect(
+      page.locator(".results-bar-leader-mark:not([hidden])"),
+    ).toHaveCount(1);
     const [ballotBox, barsBox] = await Promise.all([
       ballot.boundingBox(),
       bars.boundingBox(),
@@ -1132,7 +1140,7 @@ test.describe("direct results route", () => {
     });
   });
 
-  test("sets requestContext.pollId only for resolved Polls and keeps result facts out of telemetry", async ({
+  test("sets requestContext.pollId for Results operations and keeps result facts out of telemetry", async ({
     baseURL,
   }) => {
     requireBaseUrl(baseURL);
@@ -1254,12 +1262,15 @@ test.describe("direct results route", () => {
       }
 
       const visibleResponse = await fetch(`${origin}${visible.path}`);
+      const liveResponse = await fetch(`${origin}${visible.path}/live`);
       const hiddenResponse = await fetch(`${origin}${hidden.path}`);
       const missingResponse = await fetch(`${origin}${missingPath}`);
       const unavailableResponse = await fetch(
         `${origin}${unavailable.pollPath}`,
       );
       expect(visibleResponse.status).toBe(200);
+      expect(liveResponse.status).toBe(200);
+      expect(liveResponse.headers.get("etag")).toBeTruthy();
       expect(hiddenResponse.status).toBe(200);
       expect(missingResponse.status).toBe(404);
       expect(unavailableResponse.status).toBe(200);
@@ -1273,6 +1284,7 @@ test.describe("direct results route", () => {
       };
       requestIds = {
         visible: responseRequestId(visibleResponse, "visible"),
+        live: responseRequestId(liveResponse, "live"),
         hidden: responseRequestId(hiddenResponse, "hidden"),
         missing: responseRequestId(missingResponse, "missing"),
         unavailable: responseRequestId(
@@ -1324,18 +1336,22 @@ test.describe("direct results route", () => {
     );
 
     const visibleRecord = byRequestId.get(requestIds.visible);
+    const liveRecord = byRequestId.get(requestIds.live);
     const hiddenRecord = byRequestId.get(requestIds.hidden);
     const missingRecord = byRequestId.get(requestIds.missing);
     const unavailableRecord = byRequestId.get(requestIds.unavailable);
     expect(visibleRecord?.pollId).toBe(visible.pollId);
+    expect(liveRecord?.pollId).toBe(visible.pollId);
     expect(hiddenRecord?.pollId).toBe(hidden.pollId);
     expect(missingRecord?.pollId).toBeNull();
     expect(unavailableRecord?.pollId).toBe(unavailable.pollId);
     expect(visibleRecord?.result).toBe("ok");
+    expect(liveRecord?.result).toBe("ok");
     expect(hiddenRecord?.result).toBe("ok");
     expect(missingRecord?.result).toBe("not_found");
     expect(unavailableRecord?.result).toBe("error");
     expect(visibleRecord?.operation).toBe("GET /:reference/results");
+    expect(liveRecord?.operation).toBe("GET /:reference/results/live");
     expect(hiddenRecord?.operation).toBe("GET /:reference/results");
     expect(missingRecord?.operation).toBe("GET /:reference/results");
     expect(unavailableRecord?.operation).toBe("GET /:reference");
@@ -1350,6 +1366,7 @@ test.describe("direct results route", () => {
     ];
     for (const record of [
       visibleRecord,
+      liveRecord,
       hiddenRecord,
       missingRecord,
       unavailableRecord,

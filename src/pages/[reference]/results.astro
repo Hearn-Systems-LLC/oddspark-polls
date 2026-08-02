@@ -19,8 +19,9 @@ import type { UserId } from "../../shared/domain/index";
 // application query. Delivery composes status/headers/templates only — no
 // visibility, closure, leader, percentage, or ownership rule lives here
 // (AD-1, AD-19). Safe GET/HEAD navigation; every response is
-// `private, no-store` and never touches the Cache API (AD-21/AR-17). No
-// polling, ETag, chart toggle, or animation — Stories 1.9/1.10 own those.
+// `private, no-store` and never touches the Cache API (AD-21/AR-17). Live
+// polling is an isolated progressive enhancer; chart toggling and bar
+// motion remain Story 1.10 scope.
 
 const reference = Astro.params.reference ?? "";
 const method = Astro.request.method;
@@ -46,13 +47,14 @@ const resultsPersistence = createResultsPersistence(env.DB);
 // PollPage existence read, no second query. The ViewerContext carries only
 // the internal Oddspark user ID from middleware, never a provider identity.
 const principalId = Astro.locals.principal?.userId;
+const resultsRenderedAtMs = Date.now();
 const view = reserved
   ? ({ kind: "not_found" } as const)
   : await queryResults(
       resultsPersistence,
       reference,
       { userId: principalId === undefined ? null : (principalId as UserId) },
-      Date.now(),
+      resultsRenderedAtMs,
     );
 
 // Only a not_found Results outcome may fall through to the bounded
@@ -112,7 +114,17 @@ const afterCloseParts =
         <>
           <h1 class="results-question">{view.question}</h1>
           {view.kind === "visible" && (
-            <ResultsTally tally={view.tally} loading />
+            <ResultsTally
+              tally={view.tally}
+              status={view.status}
+              loading
+              liveEndpoint={
+                view.status === "open"
+                  ? `/${encodeURIComponent(view.canonicalReference)}/results/live`
+                  : undefined
+              }
+              initialRenderAtMs={resultsRenderedAtMs}
+            />
           )}
           {view.kind === "after_close_hidden" && (
             <p class="results-explanation">
@@ -142,6 +154,11 @@ const afterCloseParts =
   {
     view.kind === "after_close_hidden" && view.deadlineMs !== null && (
       <script src="../../scripts/results-page.ts"></script>
+    )
+  }
+  {
+    view.kind === "visible" && view.status === "open" && (
+      <script src="../../scripts/results-live.ts"></script>
     )
   }
 </BaseLayout>

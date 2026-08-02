@@ -100,7 +100,11 @@ export function telemetryOperationForRoute(
 
   const segments = pathname.split("/").filter(Boolean);
   const normalizedPathname =
-    segments.length === 2 && segments[1] === "results"
+    segments.length === 3 &&
+    segments[1] === "results" &&
+    segments[2] === "live"
+      ? "/:reference/results/live"
+      : segments.length === 2 && segments[1] === "results"
       ? "/:reference/results"
       : "/:reference";
   return `${method} ${normalizedPathname}`;

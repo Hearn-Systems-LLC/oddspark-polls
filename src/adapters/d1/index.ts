@@ -11,6 +11,7 @@ import {
 import type {
   ResultsAccessEnvelope,
   ResultsTallyProjection,
+  VersionedResultsTallyProjection,
 } from "../../modules/results/index";
 import {
   AlreadyVotedError,
@@ -453,17 +454,33 @@ export function createResultsPersistence(db: D1Database) {
       };
     },
 
-    // The one accepted-fact Tally projection (AD-9, NFR-6): a single
-    // prepared statement over committed vote/vote_selection rows — never a
-    // JavaScript fold over all Votes. Every poll_option survives the left
-    // join at zero count; selections are scoped through vote.poll_id AND
-    // option Poll ownership so independently valid cross-Poll foreign keys
-    // contaminate neither Tally; Voter and selection totals come from the
-    // same statement/snapshot; rows order by poll_option.position. The query
-    // starts from target-Poll Votes so the existing vote(poll_id) and
-    // vote_selection(vote_id, poll_option_id) indexes bound work to this Poll
-    // instead of building an automatic index over every Poll's selections.
-    async projectTally(pollId: PollId): Promise<ResultsTallyProjection> {
+    // Cheap conditional path after Results authorization. The access envelope
+    // intentionally does not carry this value (AD-21/AR-17).
+    async readRepresentationVersion(pollId: PollId): Promise<number | null> {
+      const row = await db
+        .prepare(
+          "SELECT representation_version FROM poll WHERE id = ?1",
+        )
+        .bind(pollId)
+        .first<{ representation_version: number }>();
+      if (!row) {
+        return null;
+      }
+      if (
+        !Number.isSafeInteger(row.representation_version) ||
+        row.representation_version < 1
+      ) {
+        throw new Error("Malformed representation version");
+      }
+      return row.representation_version;
+    },
+
+    // The one accepted-fact Tally projection (AD-9, NFR-6): body counts and
+    // representation_version come from this same statement/snapshot, so a
+    // concurrent Vote can never give an older Tally a newer validator.
+    async projectVersionedTally(
+      pollId: PollId,
+    ): Promise<VersionedResultsTallyProjection | null> {
       const rows = await db
         .prepare(
           `WITH target_votes AS MATERIALIZED (
@@ -490,7 +507,8 @@ export function createResultsPersistence(db: D1Database) {
            SELECT po.id AS id, po.label AS label, po.position AS position,
              COALESCE(oc.option_count, 0) AS option_count,
              totals.voter_count AS voter_count,
-             totals.selection_count AS selection_count
+             totals.selection_count AS selection_count,
+             p.representation_version AS representation_version
            FROM poll p
            CROSS JOIN totals
            LEFT JOIN poll_option po ON po.poll_id = p.id
@@ -506,10 +524,12 @@ export function createResultsPersistence(db: D1Database) {
           option_count: number;
           voter_count: number;
           selection_count: number;
+          representation_version: number;
         }>();
 
-      // Fail closed on malformed rows: a misleading percentage is worse than
-      // an error. Counts must be finite non-negative integers.
+      // Fail closed on malformed rows: a misleading percentage or validator
+      // is worse than an error. Counts are finite non-negative integers and
+      // the monotonic version is a positive safe integer.
       const toCount = (value: number, column: string): number => {
         if (!Number.isSafeInteger(value) || value < 0) {
           throw new Error(`Malformed tally row: ${column} is ${value}`);
@@ -519,7 +539,16 @@ export function createResultsPersistence(db: D1Database) {
 
       const first = rows.results[0];
       if (!first) {
-        return { options: [], voterCount: 0, selectionCount: 0 };
+        return null;
+      }
+      if (
+        !Number.isSafeInteger(first.representation_version) ||
+        first.representation_version < 1 ||
+        rows.results.some(
+          (row) => row.representation_version !== first.representation_version,
+        )
+      ) {
+        throw new Error("Malformed representation version");
       }
       if (first.id === null) {
         throw new Error(
@@ -568,7 +597,24 @@ export function createResultsPersistence(db: D1Database) {
           "Malformed tally projection: option count exceeds Voters",
         );
       }
-      return { options, voterCount, selectionCount };
+      return {
+        representationVersion: first.representation_version,
+        options,
+        voterCount,
+        selectionCount,
+      };
+    },
+
+    // Full-page Results consumes the exact same SQL projection and simply
+    // drops the live-only version after the adapter has validated it.
+    async projectTally(pollId: PollId): Promise<ResultsTallyProjection> {
+      const projection = await this.projectVersionedTally(pollId);
+      if (!projection) {
+        return { options: [], voterCount: 0, selectionCount: 0 };
+      }
+      const { representationVersion: _representationVersion, ...tally } =
+        projection;
+      return tally;
     },
   };
 }

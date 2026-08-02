@@ -585,7 +585,9 @@ test.describe("public voting flow", () => {
     ).toBeVisible();
     // Two options tied at one vote apiece: TIED, no gold, no ◆ anywhere.
     await expect(page.locator(".results-tally-tied")).toHaveText("TIED");
-    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(0);
+    await expect(
+      page.locator(".results-bar-leader-mark:not([hidden])"),
+    ).toHaveCount(0);
     await page.reload();
     await expect(page).toHaveTitle(`Already voted — ${question}`);
     await expect(page.locator(".poll-option-readonly")).toHaveCount(3);
@@ -688,7 +690,9 @@ test.describe("public voting flow", () => {
     await expect(
       page.getByRole("img", { name: "Beta, 100 percent, 1 vote, leading" }),
     ).toBeVisible();
-    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(1);
+    await expect(
+      page.locator(".results-bar-leader-mark:not([hidden])"),
+    ).toHaveCount(1);
     await expect(page.locator(".poll-option-marker.is-cast")).toHaveCount(0);
 
     await page.reload();
@@ -712,7 +716,9 @@ test.describe("public voting flow", () => {
     await expect(
       page.getByRole("img", { name: "Beta, 100 percent, 1 vote, leading" }),
     ).toBeVisible();
-    await expect(page.locator(".results-bar-leader-mark")).toHaveCount(1);
+    await expect(
+      page.locator(".results-bar-leader-mark:not([hidden])"),
+    ).toHaveCount(1);
     await expect(page.getByRole("radio")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "VOTE" })).toHaveCount(0);
 

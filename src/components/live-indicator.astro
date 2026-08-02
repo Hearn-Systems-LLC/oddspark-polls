@@ -1,0 +1,85 @@
+---
+/**
+ * Shared Poll status indicator. The 6px gold-ink dot is decorative and the
+ * text carries the state; this component is never a control. A slot may add
+ * metadata between the dot and LIVE/CLOSED (the Tally uses its Vote total).
+ */
+import type { PollStatus } from "../shared/domain/index";
+import { liveIndicatorState } from "./live-indicator";
+
+interface Props {
+  status: PollStatus;
+  class?: string;
+}
+
+const { status, class: className = "" } = Astro.props;
+const state = liveIndicatorState(status);
+---
+
+<span
+  class:list={[
+    "live-indicator",
+    status === "closed" && "is-closed",
+    className,
+  ]}
+  data-live-indicator
+  data-status={status}
+>
+  {
+    state.showDot && (
+      <span class="live-indicator-dot" aria-hidden="true"></span>
+    )
+  }
+  <span class="live-indicator-copy">
+    <slot />
+    <span class="live-indicator-state" data-live-label>{state.label}</span>
+  </span>
+</span>
+
+<style>
+  .live-indicator {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+  }
+
+  .live-indicator.is-closed {
+    font-size: var(--type-label-caps-lg-size);
+  }
+
+  .live-indicator-dot {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    margin-right: var(--space-2);
+    border-radius: var(--rounded-full);
+    background: var(--color-solar-ink);
+    animation: live-indicator-pulse var(--motion-pulse) ease-in-out infinite;
+  }
+
+  .live-indicator-copy {
+    display: inline;
+  }
+
+  @keyframes live-indicator-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .live-indicator-dot {
+      animation: none;
+      opacity: 1;
+    }
+  }
+</style>

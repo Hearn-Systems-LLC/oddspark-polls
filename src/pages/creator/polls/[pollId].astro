@@ -1,15 +1,23 @@
 ---
 import { env } from "cloudflare:workers";
 import BaseLayout from "../../../layouts/base-layout.astro";
+import ButtonSecondary from "../../../components/button-secondary.astro";
+import LiveIndicator from "../../../components/live-indicator.astro";
+import PollCard from "../../../components/poll-card.astro";
+import { buildPollCardViewModel } from "../../../components/poll-card";
+import { formatVoteTotal } from "../../../components/live-indicator";
 import { createPollPersistence } from "../../../adapters/d1/index";
 import { RECENTLY_CREATED_WINDOW_MS } from "../../../modules/polls/index";
-import type { PollId, UserId } from "../../../shared/domain/index";
+import {
+  effectivePollStatus,
+  type PollId,
+  type UserId,
+} from "../../../shared/domain/index";
 
-// Create-confirmation surface (Story 1.3). Grows into the full poll detail
-// with Stories 1.11/1.12. Creator responses are never cached (AD-21).
+// Create-confirmation / poll detail (Stories 1.3 + 1.11). Creator responses
+// are never cached (AD-21).
 Astro.response.headers.set("cache-control", "private, no-store");
 
-// Only GET/HEAD are meaningful here (same method gate as /creator/new).
 if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") {
   return new Response("Method not allowed.", {
     status: 405,
@@ -30,11 +38,15 @@ if (!principal) {
   });
 }
 
+const nowMs = Date.now();
+const ownerId = principal.userId as UserId;
 const pollId = (Astro.params.pollId ?? "") as PollId;
-const poll = await createPollPersistence(env.DB).findPollForOwner(
-  pollId,
-  principal.userId as UserId,
-);
+const persistence = createPollPersistence(env.DB);
+const poll = await persistence.findPollForOwner(pollId, ownerId);
+// List for the left column (and the selected row's vote count) — one query.
+const ownedPolls = await persistence.listPollsForOwner(ownerId, nowMs);
+const selectedListRow = ownedPolls.find((row) => row.pollId === pollId) ?? null;
+
 if (!poll) {
   Astro.response.status = 404;
 }
@@ -57,6 +69,24 @@ const deadlineNote =
         return `Voting closes ${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC.`;
       })()
     : null;
+
+const detailStatus =
+  poll !== null ? effectivePollStatus(poll, nowMs) : null;
+const voterCount = selectedListRow?.voterCount ?? 0;
+
+const listCards = ownedPolls.map((row) =>
+  buildPollCardViewModel({
+    title: row.question,
+    pollType: row.pollType,
+    voterCount: row.voterCount,
+    status: effectivePollStatus(row, nowMs),
+    deadlineMs: row.deadlineMs,
+    nowMs,
+    href: `/creator/polls/${row.pollId}`,
+    current: poll !== null && row.pollId === pollId,
+  }),
+);
+
 const title = poll
   ? created
     ? "Poll created — Oddspark Polls"
@@ -65,47 +95,170 @@ const title = poll
 ---
 
 <BaseLayout title={title}>
-  <main class="poll-detail-shell">
-    {
-      poll ? (
-        <>
-          {created && (
-            <p class="outcome-line" tabindex="-1" autofocus>
-              Your Poll is live.
+  <main
+    class:list={["creator-surface", { "has-created-outcome": created }]}
+    data-creator-surface
+  >
+    {created && (
+      <p
+        class="outcome-line"
+        data-outcome="created"
+        tabindex="-1"
+        autofocus
+      >
+        Your Poll is live.
+      </p>
+    )}
+
+    <section
+      class="creator-list-region"
+      aria-labelledby="creator-list-heading"
+      data-creator-list
+    >
+      <div class="list-region-header">
+        <h2 id="creator-list-heading" class="list-heading">Your Polls</h2>
+        <a class="list-create-link" href="/creator/new">CREATE A POLL</a>
+      </div>
+      {
+        listCards.length === 0 ? (
+          <p class="empty-state">
+            No Polls yet. The empty state, working as intended.
+          </p>
+        ) : (
+          <ul class="poll-list" data-poll-list>
+            {listCards.map((card) => (
+              <li>
+                <PollCard viewModel={card} />
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section
+      class="creator-detail-region"
+      aria-labelledby="poll-detail-heading"
+      data-creator-detail
+    >
+      {
+        poll && detailStatus ? (
+          <>
+            <p class="detail-status" data-detail-status>
+              <LiveIndicator status={detailStatus}>
+                <span>{formatVoteTotal(voterCount)}</span>
+                <span aria-hidden="true"> · </span>
+              </LiveIndicator>
             </p>
-          )}
-          <h1>{poll.question}</h1>
-          {poll.description && <p class="poll-description">{poll.description}</p>}
-          <section class="link-block" aria-labelledby="poll-link-label">
-            <p class="group-label" id="poll-link-label">POLL LINK</p>
-            <p class="canonical-url">{canonicalUrl}</p>
-            <p class="helper-note">
-              This is the link you'll share when voting opens. Its reference
-              never changes.
+            <h1 id="poll-detail-heading">{poll.question}</h1>
+            {poll.description && (
+              <p class="poll-description">{poll.description}</p>
+            )}
+            <section class="link-block" aria-labelledby="poll-link-label">
+              <p class="group-label" id="poll-link-label">POLL LINK</p>
+              <p class="canonical-url">{canonicalUrl}</p>
+              <p class="helper-note">
+                This is the link you'll share when voting opens. Its reference
+                never changes.
+              </p>
+              {deadlineNote && <p class="helper-note">{deadlineNote}</p>}
+            </section>
+            <p class="results-link-row">
+              <ButtonSecondary
+                href={`/${poll.canonicalReference}/results`}
+              >
+                VIEW LIVE RESULTS
+              </ButtonSecondary>
             </p>
-            {deadlineNote && <p class="helper-note">{deadlineNote}</p>}
-          </section>
-        </>
-      ) : (
-        <h1 class="outcome-line" tabindex="-1" autofocus>
-          This Poll doesn't exist.
-        </h1>
-      )
-    }
+          </>
+        ) : (
+          <h1
+            id="poll-detail-heading"
+            class="outcome-line"
+            tabindex="-1"
+            autofocus
+          >
+            This Poll doesn't exist.
+          </h1>
+        )
+      }
+    </section>
   </main>
+  {
+    listCards.some((card) => card.metadata.closing.kind === "absolute") && (
+      <script src="../../../scripts/creator-dashboard.ts"></script>
+    )
+  }
 </BaseLayout>
 
 <style>
-  .poll-detail-shell {
+  .creator-surface {
     width: min(100%, var(--space-measure));
     margin-inline: auto;
     padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  .creator-list-region {
+    margin-bottom: var(--space-10);
+  }
+
+  .list-region-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+  }
+
+  .list-heading {
+    margin: 0;
+    font-family: var(--font-human);
+    font-size: var(--type-heading-md-size);
+    font-weight: 400;
+    line-height: var(--type-heading-md-lh);
+  }
+
+  .list-create-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    text-decoration: none;
+  }
+
+  .list-create-link:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .empty-state {
+    margin: 0;
+    color: var(--color-dim);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .poll-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
   .outcome-line {
     margin: 0 0 var(--space-6);
     font-size: var(--type-body-lg-size);
     line-height: var(--type-body-lg-lh);
+  }
+
+  .detail-status {
+    margin: 0 0 var(--space-3);
   }
 
   h1 {
@@ -155,9 +308,55 @@ const title = poll
     line-height: var(--type-caption-lh);
   }
 
+  .results-link-row {
+    margin: var(--space-8) 0 0;
+  }
+
   @media (min-width: 640px) {
-    .poll-detail-shell {
+    .creator-surface {
       padding-inline: var(--space-margin-desktop);
+    }
+  }
+
+  /* Creator surface two-column at lg (UX-DR25 / DESIGN.md:507): list left,
+     detail right. Below lg both regions remain in DOM order — nothing hidden. */
+  @media (min-width: 1024px) {
+    .creator-surface {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      column-gap: var(--space-8);
+      align-items: start;
+      width: 100%;
+      max-width: none;
+    }
+
+    .creator-list-region {
+      grid-column: 1;
+      grid-row: 1;
+      margin-bottom: 0;
+    }
+
+    .creator-detail-region {
+      grid-column: 2;
+      grid-row: 1;
+      width: 100%;
+      max-width: var(--space-measure);
+      min-width: 0;
+    }
+
+    .has-created-outcome > .outcome-line {
+      grid-column: 2;
+      grid-row: 1;
+      width: 100%;
+      max-width: var(--space-measure);
+    }
+
+    .has-created-outcome > .creator-list-region {
+      grid-row: 1 / span 2;
+    }
+
+    .has-created-outcome > .creator-detail-region {
+      grid-row: 2;
     }
   }
 </style>

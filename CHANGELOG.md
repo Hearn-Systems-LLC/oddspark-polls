@@ -85,4 +85,10 @@ production on every merge, but no version has been cut or tagged.
   animates, and the choice resets to bars on every load. Multi-select polls
   stay bars-only, since per-option shares of voters can sum past 100% and
   cannot form an honest pie.
+- Creator dashboard at `/creator`: each creator's polls as hairline-separated
+  `poll-card` rows (question, type · votes · closing caption, live/CLOSED
+  status), newest live polls first, empty-state copy when none exist, and a
+  primary create action. Poll detail at `/creator/polls/{id}` splits list left
+  / detail right from the large breakpoint while keeping both regions stacked
+  below it, with a monitor floor (status + vote total + link to live results).
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.

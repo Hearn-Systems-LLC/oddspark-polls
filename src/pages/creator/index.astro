@@ -1,5 +1,163 @@
 ---
-import CreatorPlaceholder from "../../components/creator-placeholder.astro";
+import { env } from "cloudflare:workers";
+import BaseLayout from "../../layouts/base-layout.astro";
+import ButtonPrimary from "../../components/button-primary.astro";
+import PollCard from "../../components/poll-card.astro";
+import { buildPollCardViewModel } from "../../components/poll-card";
+import { createPollPersistence } from "../../adapters/d1/index";
+import {
+  effectivePollStatus,
+  type UserId,
+} from "../../shared/domain/index";
+
+// Creator dashboard (Story 1.11). Private per-creator data — never cache (AD-21).
+Astro.response.headers.set("cache-control", "private, no-store");
+
+if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: { allow: "GET, HEAD", "cache-control": "private, no-store" },
+  });
+}
+
+const principal = Astro.locals.requestContext?.principal ?? null;
+if (!principal) {
+  // Built manually so the no-store header rides along — Astro.redirect does not.
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/sign-in?return=${encodeURIComponent(Astro.url.pathname + Astro.url.search)}`,
+      "cache-control": "private, no-store",
+    },
+  });
+}
+
+const signedIn = Astro.url.searchParams.get("outcome") === "signed-in";
+const nowMs = Date.now();
+const polls = await createPollPersistence(env.DB).listPollsForOwner(
+  principal.userId as UserId,
+  nowMs,
+);
+
+const cards = polls.map((poll) =>
+  buildPollCardViewModel({
+    title: poll.question,
+    pollType: poll.pollType,
+    voterCount: poll.voterCount,
+    status: effectivePollStatus(poll, nowMs),
+    deadlineMs: poll.deadlineMs,
+    nowMs,
+    href: `/creator/polls/${poll.pollId}`,
+  }),
+);
+
+const title = signedIn
+  ? "Signed in — Oddspark Polls"
+  : "Creator — Oddspark Polls";
 ---
 
-<CreatorPlaceholder />
+<BaseLayout title={title}>
+  <main class="site-shell creator-dashboard">
+    {
+      signedIn && (
+        <p
+          class="outcome-line"
+          data-outcome="signed-in"
+          tabindex="-1"
+          autofocus
+        >
+          Signed in.
+        </p>
+      )
+    }
+
+    <header class="dashboard-header">
+      <h1 id="creator-heading">Your Polls</h1>
+      <ButtonPrimary href="/creator/new">CREATE A POLL</ButtonPrimary>
+    </header>
+
+    {
+      cards.length === 0 ? (
+        <p class="empty-state">
+          No Polls yet. The empty state, working as intended.
+        </p>
+      ) : (
+        <section aria-labelledby="creator-heading" data-poll-list>
+          <ul class="poll-list">
+            {cards.map((card) => (
+              <li>
+                <PollCard viewModel={card} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    }
+  </main>
+
+  {
+    signedIn && (
+      <script is:inline>
+        document
+          .querySelector("[data-outcome]")
+          ?.focus({ preventScroll: true });
+      </script>
+    )
+  }
+  {
+    cards.some((card) => card.metadata.closing.kind === "absolute") && (
+      <script src="../../scripts/creator-dashboard.ts"></script>
+    )
+  }
+</BaseLayout>
+
+<style>
+  .creator-dashboard {
+    width: min(100%, var(--space-measure));
+    margin-inline: auto;
+    min-height: 100dvh;
+    padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  .outcome-line {
+    margin: 0 0 var(--space-6);
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
+  }
+
+  .dashboard-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin-bottom: var(--space-8);
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--font-human);
+    font-size: var(--type-heading-lg-size);
+    font-weight: 400;
+    line-height: var(--type-heading-lg-lh);
+  }
+
+  .empty-state {
+    margin: 0;
+    color: var(--color-dim);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .poll-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 640px) {
+    .creator-dashboard {
+      padding-inline: var(--space-margin-desktop);
+    }
+  }
+</style>

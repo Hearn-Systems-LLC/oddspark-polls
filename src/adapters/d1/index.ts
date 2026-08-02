@@ -50,6 +50,18 @@ export type OwnedPoll = PollPage & {
   createdAtMs: number;
 };
 
+/** Dashboard list row — no options, no reference join (Story 1.11). */
+export type OwnerPollListItem = {
+  pollId: PollId;
+  question: string;
+  pollType: PollType;
+  deadlineMs: number | null;
+  closedAtMs: number | null;
+  createdAtMs: number;
+  /** Distinct accepted Vote rows for this poll (voters, not selections). */
+  voterCount: number;
+};
+
 type PollRow = {
   id: PollId;
   question: string;
@@ -225,6 +237,53 @@ export function createPollPersistence(db: D1Database) {
         canonicalReferenceKind: row.canonical_reference_kind,
         createdAtMs: row.created_at_ms,
       };
+    },
+
+    // Creator dashboard list (Story 1.11): one owner-driven statement, no
+    // N+1. The correlated count probes vote_poll_id_idx only for the owner's
+    // polls; COUNT(*) counts vote rows (voters). Sort encodes the same
+    // effective-closed predicate as effectivePollStatus (AD-11) with a bound
+    // nowMs — never Date.now() inside the adapter.
+    async listPollsForOwner(
+      ownerUserId: UserId,
+      nowMs: number,
+    ): Promise<OwnerPollListItem[]> {
+      const result = await db
+        .prepare(
+          `SELECT p.id, p.question, p.poll_type, p.deadline_ms, p.closed_at_ms, p.created_at_ms,
+                  (
+                    SELECT COUNT(*)
+                    FROM vote AS v INDEXED BY vote_poll_id_idx
+                    WHERE v.poll_id = p.id
+                  ) AS voter_count
+           FROM poll p
+           WHERE p.owner_user_id = ?1
+           ORDER BY (
+             p.closed_at_ms IS NOT NULL
+             OR (p.deadline_ms IS NOT NULL AND p.deadline_ms <= ?2)
+           ) ASC,
+           p.created_at_ms DESC`,
+        )
+        .bind(ownerUserId, nowMs)
+        .all<{
+          id: PollId;
+          question: string;
+          poll_type: PollType;
+          deadline_ms: number | null;
+          closed_at_ms: number | null;
+          created_at_ms: number;
+          voter_count: number;
+        }>();
+
+      return result.results.map((row) => ({
+        pollId: row.id,
+        question: row.question,
+        pollType: row.poll_type,
+        deadlineMs: row.deadline_ms,
+        closedAtMs: row.closed_at_ms,
+        createdAtMs: row.created_at_ms,
+        voterCount: row.voter_count,
+      }));
     },
   };
 }

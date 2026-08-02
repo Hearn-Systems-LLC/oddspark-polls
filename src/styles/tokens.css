@@ -154,6 +154,24 @@
   --chart-form-toggle-padding-y: var(--space-2);
   --chart-form-toggle-min-height: 48px;
   --chart-form-toggle-focus-outline-offset: 2px;
+  /* poll-card — a row, not a card (DESIGN.md:310-318, 623). One :root block:
+     every binding resolves to an already-mode-collapsed runtime var. */
+  --poll-card-background: transparent;
+  --poll-card-padding-y: var(--space-6);
+  --poll-card-border-top: var(--space-hairline) solid var(--color-rule);
+  --poll-card-title-font: var(--font-human);
+  --poll-card-title-size: var(--type-poll-question-size);
+  --poll-card-title-weight: 400;
+  --poll-card-title-lh: var(--type-poll-question-lh);
+  --poll-card-meta-font: var(--font-machine);
+  --poll-card-meta-size: var(--type-caption-size);
+  --poll-card-meta-lh: var(--type-caption-lh);
+  --poll-card-meta-color: var(--color-dim);
+  --poll-card-status-font: var(--font-machine);
+  --poll-card-status-size: var(--type-label-caps-lg-size);
+  --poll-card-status-lh: var(--type-label-caps-lh);
+  --poll-card-status-ls: var(--type-label-caps-ls);
+  --poll-card-status-color: var(--color-dim);
   --overlay-scrim: var(--color-overlay-scrim);
   --focus-outline: 2px solid var(--color-focus-ring);
   --focus-outline-offset: 2px;

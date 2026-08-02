@@ -1,0 +1,115 @@
+---
+/**
+ * Poll list row (UX-DR11). Not a card — a full-width row with a top hairline,
+ * title, caption metadata, and status. The whole row is one link to Poll detail.
+ * Props are one structured view model composed beside this component.
+ */
+import LiveIndicator from "./live-indicator.astro";
+import type { PollCardViewModel } from "./poll-card";
+
+interface Props {
+  viewModel: PollCardViewModel;
+  class?: string;
+}
+
+const {
+  viewModel: { title, metadata, status, href, current },
+  class: className = "",
+} = Astro.props;
+---
+
+<a
+  class:list={["poll-card", className]}
+  href={href}
+  data-poll-card
+  data-status={status}
+  aria-current={current ? "page" : undefined}
+>
+  <span class="poll-card-body">
+    <span class="poll-card-title">{title}</span>
+    <span class="poll-card-meta">
+      {metadata.typeLabel}{" · "}{metadata.voteTotal}
+      {metadata.closing.kind === "countdown" && (
+        <>{" · "}{metadata.closing.text}</>
+      )}
+      {
+        metadata.closing.kind === "absolute" && (
+          <>{" · CLOSES "}
+            <time
+              datetime={new Date(metadata.closing.deadlineMs).toISOString()}
+              data-deadline={metadata.closing.deadlineMs}
+            >
+              {metadata.closing.utcFloor}
+            </time>
+          </>
+        )
+      }
+    </span>
+  </span>
+  {
+    status === "open" ? (
+      <LiveIndicator status="open" class="poll-card-status" />
+    ) : (
+      <span class="poll-card-closed">CLOSED</span>
+    )
+  }
+</a>
+
+<style>
+  .poll-card {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    width: 100%;
+    min-height: 44px;
+    padding-block: var(--poll-card-padding-y);
+    border-top: var(--poll-card-border-top);
+    background: var(--poll-card-background);
+    color: inherit;
+    text-decoration: none;
+    box-sizing: border-box;
+  }
+
+  .poll-card:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .poll-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .poll-card-title {
+    font-family: var(--poll-card-title-font);
+    font-size: var(--poll-card-title-size);
+    font-weight: var(--poll-card-title-weight);
+    line-height: var(--poll-card-title-lh);
+    overflow-wrap: anywhere;
+  }
+
+  .poll-card-meta {
+    color: var(--poll-card-meta-color);
+    font-family: var(--poll-card-meta-font);
+    font-size: var(--poll-card-meta-size);
+    line-height: var(--poll-card-meta-lh);
+    text-transform: uppercase;
+  }
+
+  .poll-card-closed {
+    flex: 0 0 auto;
+    color: var(--poll-card-status-color);
+    font-family: var(--poll-card-status-font);
+    font-size: var(--poll-card-status-size);
+    line-height: var(--poll-card-status-lh);
+    letter-spacing: var(--poll-card-status-ls);
+    text-transform: uppercase;
+  }
+
+  .poll-card :global(.poll-card-status) {
+    flex: 0 0 auto;
+  }
+</style>

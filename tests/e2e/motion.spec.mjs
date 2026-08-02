@@ -329,9 +329,10 @@ test.describe("motion system and chart toggle", () => {
       }
     });
 
-    // Five Beta Votes land before the first cadence response.
-    addVotes(poll, [[1], [1]]);
-    addVotes(poll, [[1], [1], [1]]);
+    // Five Beta Votes land in one representation-version change before the
+    // first cadence response. Keep this to one D1 invocation: Wrangler startup
+    // is slow enough in CI for the poller to observe two separate writes.
+    addVotes(poll, [[1], [1], [1], [1], [1]]);
     await waitForWidth(page, "Beta", "83%");
 
     // AC #1: every fill transitions width over 480ms with the leader

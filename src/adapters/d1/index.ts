@@ -8,6 +8,10 @@ import {
   ReferenceTakenError,
   type PollPersistenceRows,
 } from "../../modules/polls/index";
+import type {
+  ResultsAccessEnvelope,
+  ResultsTallyProjection,
+} from "../../modules/results/index";
 import {
   AlreadyVotedError,
   PollClosedError,
@@ -403,3 +407,170 @@ export function createVotePersistence(db: D1Database) {
 
 export type PollPersistence = ReturnType<typeof createPollPersistence>;
 export type VotePersistence = ReturnType<typeof createVotePersistence>;
+
+// Results reads (AD-9, AD-21): the access envelope resolves entitlement with
+// no result-shape fields, and the private tally projection runs only after
+// the Results module has authorized a `visible` outcome. The adapter stays
+// unaware of request context — the inbound caller sets
+// `requestContext.pollId` itself once a real Poll resolves.
+export function createResultsPersistence(db: D1Database) {
+  return {
+    // Safe access read: resolves the exact requested reference, then joins the
+    // Poll's separate canonical row for outward links. It reads only the Poll
+    // metadata the hidden shapes need. It must NOT read options or
+    // join/aggregate vote/vote_selection — hidden responses leak nothing
+    // about the result's shape.
+    async findAccessEnvelope(
+      reference: string,
+    ): Promise<ResultsAccessEnvelope | null> {
+      const row = await db
+        .prepare(
+          "SELECT p.id, p.question, p.result_visibility, p.owner_user_id, p.deadline_ms, p.closed_at_ms, p.multi_select_enabled, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
+        )
+        .bind(reference)
+        .first<{
+          id: PollId;
+          question: string;
+          result_visibility: ResultVisibility;
+          owner_user_id: UserId;
+          deadline_ms: number | null;
+          closed_at_ms: number | null;
+          multi_select_enabled: number;
+          canonical_reference: string;
+        }>();
+      if (!row) {
+        return null;
+      }
+      return {
+        pollId: row.id,
+        question: row.question,
+        resultVisibility: row.result_visibility,
+        ownerUserId: row.owner_user_id,
+        deadlineMs: row.deadline_ms,
+        closedAtMs: row.closed_at_ms,
+        multiSelectEnabled: row.multi_select_enabled === 1,
+        canonicalReference: row.canonical_reference,
+      };
+    },
+
+    // The one accepted-fact Tally projection (AD-9, NFR-6): a single
+    // prepared statement over committed vote/vote_selection rows — never a
+    // JavaScript fold over all Votes. Every poll_option survives the left
+    // join at zero count; selections are scoped through vote.poll_id AND
+    // option Poll ownership so independently valid cross-Poll foreign keys
+    // contaminate neither Tally; Voter and selection totals come from the
+    // same statement/snapshot; rows order by poll_option.position. The query
+    // starts from target-Poll Votes so the existing vote(poll_id) and
+    // vote_selection(vote_id, poll_option_id) indexes bound work to this Poll
+    // instead of building an automatic index over every Poll's selections.
+    async projectTally(pollId: PollId): Promise<ResultsTallyProjection> {
+      const rows = await db
+        .prepare(
+          `WITH target_votes AS MATERIALIZED (
+             SELECT id FROM vote WHERE poll_id = ?1
+           ),
+           valid_selections AS MATERIALIZED (
+             SELECT vs.poll_option_id
+             FROM target_votes tv
+             JOIN vote_selection vs ON vs.vote_id = tv.id
+             JOIN poll_option selected_option
+               ON selected_option.id = vs.poll_option_id
+              AND selected_option.poll_id = ?1
+           ),
+           option_counts AS (
+             SELECT poll_option_id, COUNT(*) AS option_count
+             FROM valid_selections
+             GROUP BY poll_option_id
+           ),
+           totals AS (
+             SELECT
+               (SELECT COUNT(*) FROM target_votes) AS voter_count,
+               (SELECT COUNT(*) FROM valid_selections) AS selection_count
+           )
+           SELECT po.id AS id, po.label AS label, po.position AS position,
+             COALESCE(oc.option_count, 0) AS option_count,
+             totals.voter_count AS voter_count,
+             totals.selection_count AS selection_count
+           FROM poll p
+           CROSS JOIN totals
+           LEFT JOIN poll_option po ON po.poll_id = p.id
+           LEFT JOIN option_counts oc ON oc.poll_option_id = po.id
+           WHERE p.id = ?1
+           ORDER BY po.position`,
+        )
+        .bind(pollId)
+        .all<{
+          id: PollOptionId | null;
+          label: string | null;
+          position: number | null;
+          option_count: number;
+          voter_count: number;
+          selection_count: number;
+        }>();
+
+      // Fail closed on malformed rows: a misleading percentage is worse than
+      // an error. Counts must be finite non-negative integers.
+      const toCount = (value: number, column: string): number => {
+        if (!Number.isSafeInteger(value) || value < 0) {
+          throw new Error(`Malformed tally row: ${column} is ${value}`);
+        }
+        return value;
+      };
+
+      const first = rows.results[0];
+      if (!first) {
+        return { options: [], voterCount: 0, selectionCount: 0 };
+      }
+      if (first.id === null) {
+        throw new Error(
+          "Malformed tally projection: resolved Poll has no options",
+        );
+      }
+
+      const options = rows.results.map((row) => {
+        if (
+          row.id === null ||
+          row.label === null ||
+          row.position === null ||
+          !Number.isSafeInteger(row.position) ||
+          row.position < 0
+        ) {
+          throw new Error("Malformed tally projection: invalid option row");
+        }
+        return {
+          id: row.id,
+          label: row.label,
+          position: row.position,
+          count: toCount(row.option_count, "option_count"),
+        };
+      });
+      const voterCount = toCount(first.voter_count, "voter_count");
+      const selectionCount = toCount(first.selection_count, "selection_count");
+      if (selectionCount < voterCount) {
+        throw new Error(
+          "Malformed tally projection: fewer selections than Voters",
+        );
+      }
+      const optionCountTotal = options.reduce(
+        (total, option) => total + option.count,
+        0,
+      );
+      if (
+        !Number.isSafeInteger(optionCountTotal) ||
+        optionCountTotal !== selectionCount
+      ) {
+        throw new Error(
+          "Malformed tally projection: option counts do not match selections",
+        );
+      }
+      if (options.some((option) => option.count > voterCount)) {
+        throw new Error(
+          "Malformed tally projection: option count exceeds Voters",
+        );
+      }
+      return { options, voterCount, selectionCount };
+    },
+  };
+}
+
+export type ResultsPersistence = ReturnType<typeof createResultsPersistence>;

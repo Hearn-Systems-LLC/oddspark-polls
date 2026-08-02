@@ -5,6 +5,7 @@ import {
   classifyAuthProviderOutcome,
   createRequestId,
   emitTelemetry,
+  telemetryOperationForRoute,
   telemetryResultForStatus,
 } from "./adapters/telemetry/index";
 import {
@@ -100,6 +101,7 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     pollId: null,
     sessionExpired: false,
     sessionLookupFailed: false,
+    resultsLookupFailed: false,
     voteRejection: false,
   };
 
@@ -255,6 +257,11 @@ const creatorGuardMiddleware = defineMiddleware(async (context, next) => {
 const telemetryMiddleware = defineMiddleware(async (context, next) => {
   const rc = context.locals.requestContext;
   const pathname = new URL(context.request.url).pathname;
+  const operation = telemetryOperationForRoute(
+    context.request.method,
+    pathname,
+    context.params?.reference !== undefined,
+  );
   try {
     const response = await next();
     if (rc) {
@@ -279,11 +286,12 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
         status,
         rc.sessionLookupFailed,
         rc.voteRejection,
+        rc.resultsLookupFailed,
       );
 
       emitTelemetry({
         requestId: rc.requestId,
-        operation: `${context.request.method} ${pathname}`,
+        operation,
         result,
         durationMs: Date.now() - rc.startedAtMs,
         providerOutcome: classifyAuthProviderOutcome(
@@ -302,7 +310,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
     if (rc) {
       emitTelemetry({
         requestId: rc.requestId,
-        operation: `${context.request.method} ${pathname}`,
+        operation,
         result: "error",
         durationMs: Date.now() - rc.startedAtMs,
         providerOutcome: classifyAuthProviderOutcome(pathname, 500, null),

@@ -1,0 +1,197 @@
+---
+/**
+ * The one static Tally renderer (Story 1.8) — reused by the direct Results
+ * route and the post-vote surface. Owns creator-authored option order, the
+ * `N VOTERS · M SELECTIONS` multi-select summary, the optional `TIED` line,
+ * the all-zero empty copy, the bar group, and the optional text-only
+ * `YOUR BALLOT` block. Gold belongs to the unique leader alone: a tied or
+ * empty Tally carries none, and a voter's own ballot never adds a second
+ * gold or ◆.
+ *
+ * The `loading` variant is the fail-open cold-load state (UX-DR19): the
+ * server renders the authorized final Tally as the no-JS floor, plus a
+ * hidden skeleton of labelled zero-width bars at the real option count —
+ * no shimmer, no animation. When JS runs, the inline enhancer presents the
+ * skeleton immediately, lets it paint, then reveals the already-rendered
+ * final Tally with no transition. If the enhancer fails, the final Tally
+ * stays available. No client-side fetch, no embedded result JSON.
+ */
+import { RESULTS_COPY, type ResultsTallyView } from "../modules/results/index";
+import ResultsBar from "./results-bar.astro";
+
+interface Props {
+  tally: ResultsTallyView;
+  /** The viewer's own selected labels in stored option order — text only,
+   * never a second gold. Omit entirely when no claim resolved. */
+  yourBallotLabels?: string[];
+  /** Present the cold-load skeleton first, resolving on the first frame. */
+  loading?: boolean;
+  class?: string;
+}
+
+const {
+  tally,
+  yourBallotLabels = [],
+  loading = false,
+  class: className = "",
+} = Astro.props;
+---
+
+<div
+  class:list={["results-tally", className]}
+  data-results-tally
+  data-loading={loading ? "true" : "false"}
+>
+  {
+    yourBallotLabels.length > 0 && (
+      <div class="results-tally-ballot" data-your-ballot>
+        <span class="results-tally-ballot-label">{RESULTS_COPY.yourBallot}</span>
+        <span class="results-tally-ballot-value">
+          {yourBallotLabels.join(" · ")}
+        </span>
+      </div>
+    )
+  }
+  <div class="results-tally-final-region" data-tally-final-region>
+    {
+      tally.multiSelectEnabled && (
+        <p class="results-tally-summary">
+          {tally.voterCount} VOTERS · {tally.selectionCount} SELECTIONS
+        </p>
+      )
+    }
+    {tally.tied && <p class="results-tally-tied">{RESULTS_COPY.tied}</p>}
+    {tally.empty && <p class="results-tally-empty">{RESULTS_COPY.empty}</p>}
+    <div class="results-tally-bars" data-tally-final>
+      {
+        tally.options.map((option) => (
+          <ResultsBar
+            label={option.label}
+            percent={option.percent}
+            count={option.count}
+            leader={option.leading}
+          />
+        ))
+      }
+    </div>
+  </div>
+  {
+    loading && (
+      <div
+        class="results-tally-bars"
+        data-tally-skeleton
+        aria-busy="true"
+        hidden
+      >
+        {tally.options.map((option) => (
+          <ResultsBar label={option.label} percent={0} count={0} loading />
+        ))}
+      </div>
+    )
+  }
+  {
+    loading && (
+      <script is:inline>
+        (function () {
+          var script = document.currentScript;
+          var root = script && script.parentElement;
+          if (!root) {
+            return;
+          }
+          var skeleton = root.querySelector("[data-tally-skeleton]");
+          var finalRegion = root.querySelector("[data-tally-final-region]");
+          if (!skeleton || !finalRegion) {
+            return;
+          }
+          var finish = function () {
+            finalRegion.hidden = false;
+            skeleton.hidden = true;
+            skeleton.removeAttribute("aria-busy");
+            root.setAttribute("data-loading", "false");
+          };
+          try {
+            skeleton.hidden = false;
+            finalRegion.hidden = true;
+            requestAnimationFrame(function () {
+              try {
+                // A second frame guarantees the skeleton received a paint.
+                requestAnimationFrame(finish);
+              } catch (error) {
+                finish();
+              }
+            });
+          } catch (error) {
+            // Fail open: the authorized final Tally must never stay hidden.
+            finish();
+          }
+        })();
+      </script>
+    )
+  }
+</div>
+
+<style>
+  .results-tally {
+    display: block;
+  }
+
+  .results-tally-ballot {
+    display: grid;
+    gap: var(--space-1);
+    margin-bottom: var(--space-6);
+    padding-bottom: var(--space-4);
+    border-bottom: var(--space-hairline) solid var(--color-rule);
+  }
+
+  .results-tally-ballot-label {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+  }
+
+  .results-tally-ballot-value {
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+
+  /* Dissolve the wrapper so the existing post-vote desktop grid continues
+     to place its metadata and bars independently. */
+  .results-tally-final-region {
+    display: contents;
+  }
+
+  .results-tally-summary,
+  .results-tally-tied {
+    margin: 0 0 var(--space-3);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-text);
+  }
+
+  .results-tally-empty {
+    margin: 0 0 var(--space-3);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-text);
+  }
+
+  .results-tally-bars {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  /* `hidden` loses to author display rules without an explicit guard. */
+  .results-tally-final-region[hidden],
+  .results-tally-bars[hidden] {
+    display: none;
+  }
+</style>

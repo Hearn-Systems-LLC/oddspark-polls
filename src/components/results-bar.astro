@@ -1,13 +1,23 @@
 ---
 /**
- * Static token-bound results bar skeleton (Story 1.1).
- * Live data and animation arrive with results stories.
+ * Static token-bound results bar (Story 1.1 skeleton; Story 1.8 live data).
+ * 34px mobile / 38px desktop on a 1px baseline rule, entropy wash fill with
+ * a 2px leading edge, label left, value cluster right (percentage in data
+ * typography, raw count in caption typography). The sole leader swaps to
+ * solar wash/edge and prefixes its value cluster with the decorative ◆;
+ * the marker sits before the value, never the label, and is aria-hidden.
+ * Initial/final width carries no CSS transition in this story.
  */
+import { barAccessibleName, barWidthPercent } from "./results-bar";
+
 interface Props {
   label: string;
   percent: number;
   count: number;
   leader?: boolean;
+  /** Cold-load skeleton row: label on its baseline at zero width, named as
+   * loading — never announced as a real "0 percent, 0 votes" result. */
+  loading?: boolean;
   class?: string;
 }
 
@@ -16,27 +26,44 @@ const {
   percent,
   count,
   leader = false,
+  loading = false,
   class: className = "",
 } = Astro.props;
 
-const width = Math.max(0, Math.min(100, percent));
+const normalizedPercent = barWidthPercent(percent);
+const width = loading ? 0 : normalizedPercent;
+const accessibleName = loading
+  ? `${label}, loading`
+  : barAccessibleName(label, normalizedPercent, count, leader);
 ---
 
 <div
-  class:list={["results-bar", leader && "is-leader", className]}
+  class:list={[
+    "results-bar",
+    leader && !loading && "is-leader",
+    width === 0 && "is-zero",
+    className,
+  ]}
   role="img"
-  aria-label={`${label}: ${percent}% · ${count}`}
+  aria-label={accessibleName}
 >
   <div class="results-bar-track" style={`--bar-width: ${width}%`}>
     <div class="results-bar-fill"></div>
     <div class="results-bar-content">
-      <span class="results-bar-label">
-        {leader && (
-          <span class="results-bar-leader-mark" aria-hidden="true">◆</span>
-        )}
-        {label}
-      </span>
-      <span class="results-bar-value">{percent}% · {count}</span>
+      <span class="results-bar-label">{label}</span>
+      {
+        !loading && (
+          <span class="results-bar-value">
+            {leader && (
+              <span class="results-bar-leader-mark" aria-hidden="true">
+                ◆
+              </span>
+            )}
+            <span class="results-bar-pct">{normalizedPercent}%</span>
+            <span class="results-bar-count"> · {count}</span>
+          </span>
+        )
+      }
     </div>
   </div>
 </div>
@@ -48,7 +75,8 @@ const width = Math.max(0, Math.min(100, percent));
 
   .results-bar-track {
     position: relative;
-    min-height: var(--results-bar-height);
+    height: var(--results-bar-height);
+    overflow: hidden;
     background: var(--color-panel);
   }
 
@@ -58,6 +86,11 @@ const width = Math.max(0, Math.min(100, percent));
     width: var(--bar-width);
     background: var(--results-bar-fill);
     border-right: var(--results-bar-leading-edge-width) solid var(--results-bar-edge);
+  }
+
+  /* Zero width keeps the baseline and label but suppresses the 2px edge. */
+  .results-bar.is-zero .results-bar-fill {
+    border-right: none;
   }
 
   .results-bar.is-leader .results-bar-fill {
@@ -72,15 +105,27 @@ const width = Math.max(0, Math.min(100, percent));
     align-items: center;
     justify-content: space-between;
     gap: var(--space-1);
-    min-height: var(--results-bar-height);
+    height: var(--results-bar-height);
     padding-inline: var(--space-3);
   }
 
   .results-bar-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
     font-family: var(--font-machine);
     font-size: var(--type-body-size);
     line-height: var(--type-body-lh);
     color: var(--color-text);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .results-bar-value {
+    flex: 0 0 auto;
+    font-family: var(--font-machine);
+    color: var(--color-text);
+    white-space: nowrap;
   }
 
   .results-bar-leader-mark {
@@ -88,19 +133,21 @@ const width = Math.max(0, Math.min(100, percent));
     margin-right: var(--space-2);
   }
 
-  .results-bar-value {
-    font-family: var(--font-machine);
+  .results-bar-pct {
     font-size: var(--type-data-size);
     font-weight: 700;
     line-height: var(--type-data-lh);
-    color: var(--color-text);
-    white-space: nowrap;
+  }
+
+  .results-bar-count {
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
   }
 
   @media (min-width: 1024px) {
     .results-bar-track,
     .results-bar-content {
-      min-height: var(--results-bar-height-desktop);
+      height: var(--results-bar-height-desktop);
     }
   }
 </style>

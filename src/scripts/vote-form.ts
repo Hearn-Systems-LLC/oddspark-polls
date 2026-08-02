@@ -2,68 +2,11 @@
 // full submission works without JavaScript; this script supplies UX-DR8's
 // disabled-until-selection affordance when JS is available.
 
-import { countdownLabel } from "../modules/polls/deadline-display";
+import { enhanceDeadlineTimes } from "./deadline-time";
 
-const deadlineTimes = Array.from(
-  document.querySelectorAll<HTMLTimeElement>("time[data-deadline]"),
-);
-
-const deadlineMsFor = (time: HTMLTimeElement): number | null => {
-  const deadlineMs = Number(time.dataset.deadline);
-  return Number.isFinite(deadlineMs) ? deadlineMs : null;
-};
-
-const formatLocalDateTime = (timestampMs: number, nowMs: number): string => {
-  const timestamp = new Date(timestampMs);
-  const now = new Date(nowMs);
-  const options: Intl.DateTimeFormatOptions = {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  };
-  if (timestamp.getFullYear() !== now.getFullYear()) {
-    options.year = "numeric";
-  }
-  return new Intl.DateTimeFormat(undefined, options).format(timestamp);
-};
-
-let deadlineTimer = 0;
-const updateDeadlineDisplays = (): void => {
-  window.clearTimeout(deadlineTimer);
-  const nowMs = Date.now();
-  let hasFutureDeadline = false;
-
-  for (const time of deadlineTimes) {
-    const deadlineMs = deadlineMsFor(time);
-    if (deadlineMs === null) {
-      continue;
-    }
-    try {
-      time.textContent = formatLocalDateTime(deadlineMs, nowMs);
-    } catch {
-      // Keep the server-rendered UTC floor if the browser's Intl layer fails.
-    }
-
-    const countdown = time.parentElement?.querySelector<HTMLElement>(
-      "[data-deadline-countdown]",
-    );
-    if (countdown) {
-      hasFutureDeadline ||= deadlineMs > nowMs;
-      const label = countdownLabel(deadlineMs, nowMs);
-      countdown.textContent = label ?? "";
-      countdown.hidden = label === null;
-    }
-  }
-
-  if (hasFutureDeadline) {
-    deadlineTimer = window.setTimeout(updateDeadlineDisplays, 60_000);
-  }
-};
-
-if (deadlineTimes.length > 0) {
-  updateDeadlineDisplays();
-}
+// Local deadline timestamps + sub-24-hour countdowns (shared with the
+// direct Results route's hidden After Close explanation).
+enhanceDeadlineTimes();
 
 const offlineOutcome = document.querySelector<HTMLElement>(
   "[data-offline-outcome]",

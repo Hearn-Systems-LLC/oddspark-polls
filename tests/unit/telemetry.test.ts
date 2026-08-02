@@ -3,6 +3,7 @@ import {
   classifyAuthProviderOutcome,
   emitTelemetry,
   isForbiddenTelemetryKey,
+  telemetryOperationForRoute,
   telemetryResultForStatus,
   type TelemetryRecord,
 } from "../../src/adapters/telemetry/index";
@@ -100,6 +101,42 @@ describe("telemetry adapter", () => {
     expect(classifyAuthProviderOutcome("/creator", 200, null)).toBe("none");
   });
 
+  it.each([
+    ["GET", "/Team-Lunch", true, "GET /:reference"],
+    [
+      "HEAD",
+      "/GenRef-AbC123-xYz_9/results",
+      true,
+      "HEAD /:reference/results",
+    ],
+    ["GET", "/team-lunch/results/", true, "GET /:reference/results"],
+    ["GET", "/results", true, "GET /:reference"],
+    ["POST", "/creator/new", false, "POST /creator/new"],
+    ["GET", "/creator/results", false, "GET /creator/results"],
+  ])(
+    "normalizes operation %s %s without obscuring static routes",
+    (method, pathname, hasPollReferenceParam, expected) => {
+      expect(
+        telemetryOperationForRoute(method, pathname, hasPollReferenceParam),
+      ).toBe(expected);
+    },
+  );
+
+  it("keeps raw auth pathnames available for provider classification", () => {
+    const pathname = "/api/auth/callback/google";
+
+    expect(telemetryOperationForRoute("GET", pathname, false)).toBe(
+      "GET /api/auth/callback/google",
+    );
+    expect(
+      classifyAuthProviderOutcome(
+        pathname,
+        302,
+        "/creator?outcome=signed-in",
+      ),
+    ).toBe("ok");
+  });
+
   it("records flagged vote rejections (422) and rate limits (429) as errors, not ok", () => {
     expect(telemetryResultForStatus(422, false, true)).toBe("error");
     expect(telemetryResultForStatus(429, false, true)).toBe("error");
@@ -127,5 +164,10 @@ describe("telemetry adapter", () => {
   it("marks any status as an error when the session lookup itself failed", () => {
     expect(telemetryResultForStatus(200, true)).toBe("error");
     expect(telemetryResultForStatus(404, true)).toBe("error");
+  });
+
+  it("marks any status as an error when the Results lookup itself failed", () => {
+    expect(telemetryResultForStatus(200, false, false, true)).toBe("error");
+    expect(telemetryResultForStatus(404, false, false, true)).toBe("error");
   });
 });

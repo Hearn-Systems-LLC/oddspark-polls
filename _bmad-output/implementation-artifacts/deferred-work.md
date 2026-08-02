@@ -1,5 +1,9 @@
 # Deferred Work
 
+## Deferred from: code review of 1-8-results-view-with-visibility-settings (2026-08-02)
+
+- **Transient option-label editing can silently clamp multi-select bounds** — with three nonblank options and a maximum of three, clearing one label while replacing its text briefly reduces `nonBlankRows()` to two and immediately clamps the maximum to two; restoring the label does not restore the bound. Deferred, pre-existing on the actual Story 1.8 branch-cut baseline; fix by clamping only on explicit row removal or after a stable count change [src/scripts/create-poll-form.ts:103-120,210-214].
+
 ## Deferred from: code review of 1-7-multi-select-voting (2026-07-31)
 
 - **Bounds lock after first Vote (AD-17 handoff to Story 1.12)** — multi-select min/max bounds lock with question/options/type once any Vote is accepted; retroactive bound edits would invalidate accepted ballots. No edit surface exists until Story 1.12 (close/edit/delete); 1.12 must enforce the lock. Recorded in Story 1.7 decisions table; not implemented in 1.7 by design.
@@ -11,7 +15,6 @@
 - Mode-toggle label goes stale on OS theme change — no `matchMedia("prefers-color-scheme")` change listener [src/scripts/mode-override.ts:52-69].
 - `…Light` exception tokens `availability-yes-glyph-light` / `solar-ink-on-wash-light` defined but unconsumed — canonical DESIGN.md tokens consumed by Epic 7 availability-cell [src/styles/tokens.css:41,48-50].
 - Structural Seed deviation — `src/lib/`, `src/layouts/`, `src/styles/` not in the seed tree; update ARCHITECTURE-SPINE seed to match the real layout.
-- results-bar `NaN`/`Infinity` percent unhandled — clamp gives false input-safety; latent until live data arrives [src/components/results-bar.astro:23].
 
 ## Deferred from: code review round 2 of 1-1-project-foundation-deployable-skeleton (2026-07-29)
 

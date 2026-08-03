@@ -8,11 +8,16 @@ import {
 } from "../../shared/application/index";
 import {
   RESULT_VISIBILITIES,
+  type DiscoveryState,
   type PollId,
   type PollOptionId,
   type ResultVisibility,
   type UserId,
 } from "../../shared/domain/index";
+import {
+  DISCOVERY_COPY,
+  parseListingDraft,
+} from "../discovery/index";
 import { multipleChoiceStrategy } from "./types/multiple-choice";
 import { isReservedSlug } from "./reserved-slugs";
 import { POLL_CAPS } from "./caps";
@@ -45,6 +50,7 @@ export type CreatePollDraft = {
   description: string;
   options: string[];
   resultVisibility: string;
+  discoveryState: string;
   deadlineLocal: string;
   timeZone: string;
   customLink: string;
@@ -78,6 +84,7 @@ export type ValidatedCreatePoll = {
   description: string | null;
   options: { label: string; position: number }[];
   resultVisibility: ResultVisibility;
+  discoveryState: DiscoveryState;
   deadlineMs: number | null;
   customLink: string | null;
   multiSelect: boolean;
@@ -281,6 +288,11 @@ export function validateCreatePoll(
     fail("visibility", "visibility_invalid", CREATE_POLL_COPY.visibilityInvalid);
   }
 
+  const discoveryState = parseListingDraft(draft.discoveryState);
+  if (discoveryState === null) {
+    fail("listing", "listing_invalid", DISCOVERY_COPY.listingInvalid);
+  }
+
   const customLink = normalizeCustomLink(draft.customLink);
   if (customLink !== null) {
     // AC #3 requires structural names such as `/`, `_astro`, and dotted
@@ -350,6 +362,7 @@ export function validateCreatePoll(
       description: definition.value.description,
       options: definition.value.options,
       resultVisibility: draft.resultVisibility as ResultVisibility,
+      discoveryState: discoveryState as DiscoveryState,
       deadlineMs,
       customLink,
       multiSelect: definition.value.multiSelect,
@@ -374,7 +387,7 @@ export type PollPersistenceRows = {
     question: string;
     description: string | null;
     resultVisibility: ResultVisibility;
-    discoveryState: "unlisted";
+    discoveryState: DiscoveryState;
     sessionChecksEnabled: boolean;
     ipChecksEnabled: boolean;
     voterCodesEnabled: boolean;
@@ -430,6 +443,7 @@ export type ExistingPollSnapshot = {
   question: string;
   description: string | null;
   resultVisibility: ResultVisibility;
+  discoveryState: DiscoveryState;
   deadlineMs: number | null;
   multiSelectEnabled: boolean;
   minSelections: number | null;
@@ -497,6 +511,7 @@ function matchesExistingPoll(
     validated.question === existing.question &&
     validated.description === existing.description &&
     validated.resultVisibility === existing.resultVisibility &&
+    validated.discoveryState === existing.discoveryState &&
     validated.deadlineMs === existing.deadlineMs &&
     validated.multiSelect === existing.multiSelectEnabled &&
     effectiveMin(validated.minSelections) ===
@@ -542,7 +557,8 @@ function draftContentForCompare(
   if (
     deadlineMs === null ||
     deadlineMs === CIVIL_TIME_NONEXISTENT ||
-    !isResultVisibility(draft.resultVisibility)
+    !isResultVisibility(draft.resultVisibility) ||
+    parseListingDraft(draft.discoveryState) === null
   ) {
     return null;
   }
@@ -558,6 +574,7 @@ function draftContentForCompare(
       .filter((label) => label.length > 0)
       .map((label, position) => ({ label, position })),
     resultVisibility: draft.resultVisibility as ResultVisibility,
+    discoveryState: parseListingDraft(draft.discoveryState) as DiscoveryState,
     deadlineMs,
     customLink: normalizeCustomLink(draft.customLink),
     multiSelect,
@@ -696,7 +713,7 @@ export async function createPoll(
       question: validated.value.question,
       description: validated.value.description,
       resultVisibility: validated.value.resultVisibility,
-      discoveryState: "unlisted",
+      discoveryState: validated.value.discoveryState,
       sessionChecksEnabled: validated.value.sessionChecksEnabled,
       ipChecksEnabled: validated.value.ipChecksEnabled,
       voterCodesEnabled: validated.value.voterCodesEnabled,

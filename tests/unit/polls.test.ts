@@ -20,6 +20,7 @@ import {
   isReservedSlug,
 } from "../../src/modules/polls/reserved-slugs";
 import { multipleChoiceStrategy } from "../../src/modules/polls/types/multiple-choice";
+import { DISCOVERY_COPY } from "../../src/modules/discovery/index";
 import type { PollOptionId, UserId } from "../../src/shared/domain/index";
 
 const NOW = Date.UTC(2026, 6, 29, 12, 0, 0);
@@ -35,6 +36,7 @@ function draft(overrides: Partial<CreatePollDraft> = {}): CreatePollDraft {
     description: "",
     options: ["Pizza", "Tacos"],
     resultVisibility: "live",
+    discoveryState: "unlisted",
     deadlineLocal: "",
     timeZone: "",
     customLink: "",
@@ -77,6 +79,7 @@ describe("validateCreatePoll", () => {
           { label: "Tacos", position: 1 },
         ],
         resultVisibility: "live",
+        discoveryState: "unlisted",
         deadlineMs: null,
         customLink: null,
         multiSelect: false,
@@ -90,6 +93,25 @@ describe("validateCreatePoll", () => {
       });
     }
   });
+
+  it.each(["", "delisted", "tampered"])(
+    "rejects the missing or invalid %s listing value",
+    (discoveryState) => {
+      const result = validateCreatePoll(draft({ discoveryState }), NOW);
+      expect(result).toEqual({
+        ok: false,
+        error: expect.objectContaining({
+          code: "poll_validation_failed",
+          fieldErrors: expect.objectContaining({
+            listing: DISCOVERY_COPY.listingInvalid,
+          }),
+          reasonCodes: expect.objectContaining({
+            listing: "listing_invalid",
+          }),
+        }),
+      });
+    },
+  );
 
   it.each([
     ["blank bounds", "", "", null, null],
@@ -1115,6 +1137,18 @@ describe("createPoll command", () => {
     });
   });
 
+  it("persists an explicit Listed creation choice", async () => {
+    const persisted: PollPersistenceRows[] = [];
+    const result = await createPoll(
+      deps(persisted),
+      USER_1,
+      draft({ discoveryState: "listed" }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(persisted[0]?.poll.discoveryState).toBe("listed");
+  });
+
   it("substitutes a normalized Custom Link for the generated reference", async () => {
     const persisted: PollPersistenceRows[] = [];
     const generateReference = vi.fn(() => "must-not-be-used");
@@ -1319,6 +1353,7 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
       question: "Where should we eat?",
       description: null,
       resultVisibility: "live",
+      discoveryState: "unlisted",
       deadlineMs: null,
       multiSelectEnabled: false,
       minSelections: null,
@@ -1368,6 +1403,22 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
         existing: true,
       });
     }
+  });
+
+  it("treats a retry that differs only in listing as divergent", async () => {
+    const result = await createPoll(
+      duplicateDeps(snapshot({ discoveryState: "unlisted" })),
+      USER_1,
+      draft({ idempotencyId: NONCE, discoveryState: "listed" }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "poll_duplicate_divergent",
+        message: CREATE_POLL_COPY.duplicateDivergent,
+      },
+    });
   });
 
   it("rejects a divergent resubmission with the duplicate Voice line", async () => {
@@ -1583,6 +1634,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
       question: "Where should we eat?",
       description: null,
       resultVisibility: "live",
+      discoveryState: "unlisted",
       deadlineMs: DEADLINE_MS,
       multiSelectEnabled: false,
       minSelections: null,
@@ -1621,6 +1673,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
       question: "Where should we eat?",
       description: null,
       resultVisibility: "live",
+      discoveryState: "unlisted",
       deadlineMs: DEADLINE_MS,
       multiSelectEnabled: true,
       minSelections: 1,
@@ -1663,6 +1716,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
       question: "A different question entirely?",
       description: null,
       resultVisibility: "live",
+      discoveryState: "unlisted",
       deadlineMs: DEADLINE_MS,
       multiSelectEnabled: false,
       minSelections: null,

@@ -183,6 +183,10 @@
   --trust-badge-padding-y: var(--space-3);
   --trust-badge-color: var(--color-text);
   --trust-badge-glyph-color: var(--color-entropy);
+  /* listing-badge — the word carries state; color only annotates (UX-DR12). */
+  --listing-badge-unlisted-color: var(--color-dim);
+  --listing-badge-listed-color: var(--color-entropy);
+  --listing-badge-delisted-color: var(--color-alarm);
   /* poll-card — a row, not a card (DESIGN.md:310-318, 623). One :root block:
      every binding resolves to an already-mode-collapsed runtime var. */
   --poll-card-background: transparent;

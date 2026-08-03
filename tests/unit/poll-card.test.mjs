@@ -67,6 +67,18 @@ describe("poll-card component contract (Story 1.11)", () => {
     expect(cardSource).toContain('status="open"');
   });
 
+  it("renders an optional listing badge in the separated status cluster", () => {
+    expect(presenterSource).toContain("listing?: DiscoveryState");
+    expect(presenterSource).toContain("listing: input.listing");
+    expect(cardSource).toContain("ListingBadge");
+    expect(cardSource).toContain("listing &&");
+    expect(cardSource).toContain("poll-card-status-separator");
+    expect(cardSource).toMatch(
+      /\.poll-card-status-separator\s*\{[^}]*margin-inline:\s*var\(--space-1\)/,
+    );
+    expect(cardSource).toContain("state={listing}");
+  });
+
   it("renders structured metadata without reparsing display copy", () => {
     expect(presenterSource).toContain("buildPollCardViewModel");
     expect(cardSource).toContain("metadata.typeLabel");
@@ -166,6 +178,11 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
     expect(creatorPageSource).not.toContain("pollCardMetaParts");
     expect(detailPageSource).not.toContain("pollCardMetaLine");
     expect(detailPageSource).not.toContain("pollCardMetaParts");
+  });
+
+  it("passes creator listing state into both poll-card call sites", () => {
+    expect(creatorPageSource).toContain("listing: poll.discoveryState");
+    expect(detailPageSource).toContain("listing: row.discoveryState");
   });
 
   it("keeps private no-store cache control on the dashboard", () => {

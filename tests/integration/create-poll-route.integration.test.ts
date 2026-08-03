@@ -65,6 +65,40 @@ async function runRealRoute(context: MiddlewareContext): Promise<Response> {
   )) as Response;
 }
 
+async function postCreate(
+  cookie: string,
+  csrfToken: string,
+  pollId: string,
+  listing: string,
+): Promise<Response> {
+  const body = new URLSearchParams({
+    csrf_token: csrfToken,
+    intent: "publish",
+    poll_id: pollId,
+    question: "Where should we go?",
+    visibility: "live",
+    listing,
+    multiSelect: "false",
+    sessionChecks: "true",
+  });
+  body.append("option", "Alpha");
+  body.append("option", "Beta");
+  return runRealRoute(
+    makeContext(
+      new Request("https://polls.example.test/creator/new", {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body,
+      }),
+    ),
+  );
+}
+
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
 });
@@ -170,6 +204,7 @@ describe("POST /creator/new delivery boundary", () => {
       poll_id: pollId,
       question: "Which protections?",
       visibility: "live",
+      listing: "unlisted",
       multiSelect: "false",
       sessionChecks: "true",
       ipChecks: "true",
@@ -217,5 +252,63 @@ describe("POST /creator/new delivery boundary", () => {
       captcha_enabled: 1,
       vpn_blocking_enabled: 0,
     });
+  });
+
+  it("persists the fresh-form Unlisted choice", async () => {
+    const cookie = await createAuthenticatedCookie();
+    const csrfToken = await csrfFor(cookie);
+    const pollId = crypto.randomUUID();
+
+    const response = await postCreate(
+      cookie,
+      csrfToken,
+      pollId,
+      "unlisted",
+    );
+    const row = await testEnv.DB.prepare(
+      "SELECT discovery_state AS state FROM poll WHERE id = ?1",
+    )
+      .bind(pollId)
+      .first<{ state: string }>();
+
+    expect(response.status).toBe(303);
+    expect(row?.state).toBe("unlisted");
+  });
+
+  it("persists an explicit Listed creation choice", async () => {
+    const cookie = await createAuthenticatedCookie();
+    const csrfToken = await csrfFor(cookie);
+    const pollId = crypto.randomUUID();
+
+    const response = await postCreate(cookie, csrfToken, pollId, "listed");
+    const row = await testEnv.DB.prepare(
+      "SELECT discovery_state AS state FROM poll WHERE id = ?1",
+    )
+      .bind(pollId)
+      .first<{ state: string }>();
+
+    expect(response.status).toBe(303);
+    expect(row?.state).toBe("listed");
+  });
+
+  it("rejects a tampered listing and re-renders the chooser", async () => {
+    const cookie = await createAuthenticatedCookie();
+    const csrfToken = await csrfFor(cookie);
+    const pollId = crypto.randomUUID();
+
+    const response = await postCreate(cookie, csrfToken, pollId, "delisted");
+    const html = await response.text();
+    const row = await testEnv.DB.prepare(
+      "SELECT discovery_state AS state FROM poll WHERE id = ?1",
+    )
+      .bind(pollId)
+      .first<{ state: string }>();
+
+    expect(response.status).toBe(422);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(html).toContain("Pick a Discovery Setting.");
+    expect(html).toContain('id="listing-unlisted"');
+    expect(html).toContain('id="listing-listed"');
+    expect(row).toBeNull();
   });
 });

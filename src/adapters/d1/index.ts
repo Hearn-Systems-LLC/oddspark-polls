@@ -1,7 +1,7 @@
 // D1 adapter — poll repositories and batches. Implements the Polls module's
 // persistence port over the DB binding (AD-1: adapters implement ports and
 // never call delivery code). Only Polls-module commands write these tables
-// (AD-19).
+// (AD-19). Discovery-module commands own subsequent listing transitions.
 
 import {
   DuplicatePollIdError,
@@ -33,6 +33,7 @@ import {
 } from "../../modules/voting/index";
 import type { RepresentationVersionIncrement } from "../../shared/application/index";
 import type {
+  DiscoveryState,
   PollId,
   PollOptionId,
   PollSecurityToggles,
@@ -63,6 +64,7 @@ export type PollPage = {
 };
 
 export type OwnedPoll = PollPage & {
+  discoveryState: DiscoveryState;
   canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
   createdAtMs: number;
 };
@@ -72,6 +74,7 @@ export type OwnerPollListItem = {
   pollId: PollId;
   question: string;
   pollType: PollType;
+  discoveryState: DiscoveryState;
   deadlineMs: number | null;
   closedAtMs: number | null;
   createdAtMs: number;
@@ -263,13 +266,14 @@ export function createPollPersistence(db: D1Database) {
     ): Promise<OwnedPoll | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.discovery_state, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
         )
         .bind(pollId, ownerUserId)
         .first<
           PollRow & {
             canonical_reference: string;
             canonical_reference_kind: PollPersistenceRows["reference"]["kind"];
+            discovery_state: DiscoveryState;
             created_at_ms: number;
           }
         >();
@@ -278,6 +282,7 @@ export function createPollPersistence(db: D1Database) {
       }
       return {
         ...toPollPage(row, await loadOptions(db, row.id)),
+        discoveryState: row.discovery_state,
         canonicalReference: row.canonical_reference,
         canonicalReferenceKind: row.canonical_reference_kind,
         createdAtMs: row.created_at_ms,
@@ -295,7 +300,7 @@ export function createPollPersistence(db: D1Database) {
     ): Promise<OwnerPollListItem[]> {
       const result = await db
         .prepare(
-          `SELECT p.id, p.question, p.poll_type, p.deadline_ms, p.closed_at_ms, p.created_at_ms,
+          `SELECT p.id, p.question, p.poll_type, p.discovery_state, p.deadline_ms, p.closed_at_ms, p.created_at_ms,
                   (
                     SELECT COUNT(*)
                     FROM vote AS v INDEXED BY vote_poll_id_idx
@@ -314,6 +319,7 @@ export function createPollPersistence(db: D1Database) {
           id: PollId;
           question: string;
           poll_type: PollType;
+          discovery_state: DiscoveryState;
           deadline_ms: number | null;
           closed_at_ms: number | null;
           created_at_ms: number;
@@ -324,6 +330,7 @@ export function createPollPersistence(db: D1Database) {
         pollId: row.id,
         question: row.question,
         pollType: row.poll_type,
+        discoveryState: row.discovery_state,
         deadlineMs: row.deadline_ms,
         closedAtMs: row.closed_at_ms,
         createdAtMs: row.created_at_ms,
@@ -340,6 +347,7 @@ export function createPollPersistence(db: D1Database) {
       const rows = await db
         .prepare(
           `SELECT p.id, p.owner_user_id, p.poll_type, p.question, p.description,
+                  p.discovery_state,
                   p.multi_select_enabled, p.min_selections, p.max_selections,
                   p.session_checks_enabled, p.ip_checks_enabled,
                   p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled,
@@ -363,6 +371,7 @@ export function createPollPersistence(db: D1Database) {
           poll_type: PollType;
           question: string;
           description: string | null;
+          discovery_state: DiscoveryState;
           multi_select_enabled: number;
           min_selections: number | null;
           max_selections: number | null;
@@ -389,6 +398,7 @@ export function createPollPersistence(db: D1Database) {
         pollType: row.poll_type,
         question: row.question,
         description: row.description,
+        discoveryState: row.discovery_state,
         multiSelectEnabled: row.multi_select_enabled === 1,
         minSelections: row.min_selections,
         maxSelections: row.max_selections,
@@ -449,6 +459,45 @@ export function createPollPersistence(db: D1Database) {
         return "not_found";
       }
       return "already_closed";
+    },
+
+    async updateListingForOwner(input: {
+      pollId: PollId;
+      ownerUserId: UserId;
+      state: Exclude<DiscoveryState, "delisted">;
+      updatedAtMs: number;
+    }): Promise<"updated" | "unchanged" | "delisted" | "not_found"> {
+      // Listing is presentation, so AD-24 intentionally excludes a
+      // representation_version increment from this guarded write.
+      const result = await db
+        .prepare(
+          `UPDATE poll
+           SET discovery_state = ?3,
+               updated_at_ms = ?4
+           WHERE id = ?1
+             AND owner_user_id = ?2
+             AND discovery_state != 'delisted'
+             AND discovery_state != ?3`,
+        )
+        .bind(input.pollId, input.ownerUserId, input.state, input.updatedAtMs)
+        .run();
+      if ((result.meta.changes ?? 0) === 1) {
+        return "updated";
+      }
+      const existing = await this.loadLifecycleForOwner(
+        input.pollId,
+        input.ownerUserId,
+      );
+      if (!existing) {
+        return "not_found";
+      }
+      if (existing.discoveryState === "delisted") {
+        return "delisted";
+      }
+      if (existing.discoveryState === input.state) {
+        return "unchanged";
+      }
+      throw new Error("Listing update guard changed no row");
     },
 
     // Description-only edit: one owner-qualified statement when the value

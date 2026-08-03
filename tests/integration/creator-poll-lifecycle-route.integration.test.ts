@@ -131,6 +131,41 @@ function securityBody(
   return body;
 }
 
+function listingBody(
+  csrfToken: string,
+  listing: string,
+  extras: Record<string, string> = {},
+): URLSearchParams {
+  return new URLSearchParams({
+    csrf_token: csrfToken,
+    intent: "update-listing",
+    listing,
+    ...extras,
+  });
+}
+
+function listingInput(html: string, id: string): string {
+  const tag = new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(html)?.[0];
+  if (!tag) throw new Error(`Missing listing input: ${id}`);
+  return tag;
+}
+
+async function listingRow(pollId: string): Promise<{
+  discovery_state: string;
+  representation_version: number;
+}> {
+  const row = await testEnv.DB.prepare(
+    "SELECT discovery_state, representation_version FROM poll WHERE id = ?1",
+  )
+    .bind(pollId)
+    .first<{
+      discovery_state: string;
+      representation_version: number;
+    }>();
+  if (!row) throw new Error(`Missing Poll: ${pollId}`);
+  return row;
+}
+
 function securityInput(html: string, id: string): string {
   const tag = new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(html)?.[0];
   if (!tag) throw new Error(`Missing Security Toggle input: ${id}`);
@@ -396,6 +431,169 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(html).toContain("This Poll doesn't exist.");
     expect(html).not.toContain("Route truth?");
+  });
+
+  it("updates listing in both directions without bumping representation version", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const csrfToken = await csrfFor(cookie);
+
+    for (const listing of ["listed", "unlisted"] as const) {
+      const context = makeContext(
+        new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+          method: "POST",
+          headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded",
+            origin: "https://polls.example.test",
+            "sec-fetch-site": "same-origin",
+          },
+          body: listingBody(csrfToken, listing),
+        }),
+      );
+      const response = await runRealRoute(context, pollId);
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        `/creator/polls/${pollId}?outcome=listing-updated`,
+      );
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(await listingRow(pollId)).toEqual({
+        discovery_state: listing,
+        representation_version: 1,
+      });
+    }
+  });
+
+  it("conceals a listing update from a different creator", async () => {
+    const owner = await createAuthenticatedCookie();
+    const other = await createAuthenticatedCookie();
+    const pollId = await seedPoll(owner.userId);
+    const csrfToken = await csrfFor(other.cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie: other.cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: listingBody(csrfToken, "listed"),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    expect(response.status).toBe(404);
+    expect(await listingRow(pollId)).toEqual({
+      discovery_state: "unlisted",
+      representation_version: 1,
+    });
+  });
+
+  it("rejects unknown listing-form keys before dispatch", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const csrfToken = await csrfFor(cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: listingBody(csrfToken, "listed", { question: "forged" }),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    expect(response.status).toBe(422);
+    expect(await listingRow(pollId)).toEqual({
+      discovery_state: "unlisted",
+      representation_version: 1,
+    });
+  });
+
+  it("refuses a delisted Poll and re-renders persisted truth", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    await testEnv.DB.prepare(
+      "UPDATE poll SET discovery_state = 'delisted' WHERE id = ?1",
+    )
+      .bind(pollId)
+      .run();
+    const csrfToken = await csrfFor(cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: listingBody(csrfToken, "listed"),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(html).toContain("Delisted by the Administrator.");
+    expect(listingInput(html, "detail-listing-listed")).not.toMatch(
+      /\schecked(?:[=\s/>])/,
+    );
+    expect(listingInput(html, "detail-listing-unlisted")).not.toMatch(
+      /\schecked(?:[=\s/>])/,
+    );
+    expect(await listingRow(pollId)).toEqual({
+      discovery_state: "delisted",
+      representation_version: 1,
+    });
+  });
+
+  it("returns 500 and persisted truth when a listing write fails", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    await testEnv.DB.prepare(
+      `CREATE TRIGGER fail_listing_update
+       BEFORE UPDATE OF discovery_state ON poll
+       BEGIN
+         SELECT RAISE(ABORT, 'forced listing write failure');
+       END`,
+    ).run();
+    const csrfToken = await csrfFor(cookie);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: listingBody(csrfToken, "listed"),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    const html = await response.text();
+    expect(response.status).toBe(500);
+    expect(html).toContain("That didn&#39;t save. Nothing changed — try again.");
+    expect(listingInput(html, "detail-listing-unlisted")).toMatch(
+      /\schecked(?:[=\s/>])/,
+    );
+    expect(await listingRow(pollId)).toEqual({
+      discovery_state: "unlisted",
+      representation_version: 1,
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "poll_edit_failed",
+      expect.objectContaining({ pollId }),
+    );
+    errorSpy.mockRestore();
   });
 
   it("updates Security Toggles through the real page and returns the no-store redirect", async () => {

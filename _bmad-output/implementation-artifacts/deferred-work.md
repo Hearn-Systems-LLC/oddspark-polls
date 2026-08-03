@@ -1,5 +1,9 @@
 # Deferred Work
 
+## Deferred from: code review of 3-1-listing-control-opt-into-discovery (2026-08-03)
+
+- If `loadLifecycleForOwner` fails after `findPollForOwner` in the delisted error branch of `[pollId].astro`, the "Delisted by the Administrator" message is swallowed and replaced with 404 — extremely narrow window (D1 must fail between two reads of the same row), pre-existing gap also in the security toggles path [src/pages/creator/polls/[pollId].astro:431-441, 479-485]
+
 ## Deferred from: code review of 2-4-trust-badge (2026-08-03)
 
 - **SQL injection vector in E2E `seedPoll`** — template-literal SQL with `reference` parameter used across all E2E specs; all callers pass UUID-prefixed literals in practice, but the utility is copy-pasteable. Deferred, pre-existing pattern.

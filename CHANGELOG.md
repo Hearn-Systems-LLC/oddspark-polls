@@ -15,6 +15,10 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Creator-controlled Poll discovery: new Polls default to Unlisted, Creators can
+  opt into Listed during creation or switch between Listed and Unlisted from
+  Poll detail, and creator detail/dashboard surfaces show a word-first listing
+  badge. Public voting pages do not disclose listing state.
 - Trust badge on the voting page and both Tally surfaces: a label-caps line
   above `VOTE` (and below the bars on results) names each protection actually
   enforcing the count in the Voter's terms — `ONE VOTE PER BROWSER`,

@@ -1019,7 +1019,7 @@ test.describe("direct results route", () => {
 
     // Visible surface: literal text, no element or attribute injection.
     await page.goto(poll.path);
-    await expect(page.locator("h1")).toHaveText(question);
+    await expect(page.locator("h1.results-question")).toHaveText(question);
     await expect(
       page.getByRole("img", { name: `${scriptLabel}, 100 percent, 1 vote, leading` }),
     ).toBeVisible();

@@ -7,6 +7,7 @@ export type LifecycleIntent =
   | "update-definition"
   | "update-description"
   | "update-security"
+  | "update-listing"
   | "close"
   | "delete";
 
@@ -24,6 +25,7 @@ export type ParsedLifecycleForm = {
   voterCodes: string;
   captcha: string;
   vpnBlocking: string;
+  listing: string;
 };
 
 const INTENTS = new Set<LifecycleIntent>([
@@ -31,6 +33,7 @@ const INTENTS = new Set<LifecycleIntent>([
   "update-definition",
   "update-description",
   "update-security",
+  "update-listing",
   "close",
   "delete",
 ]);
@@ -54,6 +57,7 @@ const DEFINITION_FORM_KEYS = new Set([
 ]);
 const DESCRIPTION_FORM_KEYS = new Set([...COMMON_KEYS, "description"]);
 const SECURITY_FORM_KEYS = new Set([...COMMON_KEYS, ...SECURITY_KEYS]);
+const LISTING_FORM_KEYS = new Set([...COMMON_KEYS, "listing"]);
 
 function unreadable(): never {
   throw new Error("unreadable_lifecycle_form");
@@ -90,6 +94,8 @@ export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
         ? DESCRIPTION_FORM_KEYS
         : intent === "update-security"
           ? SECURITY_FORM_KEYS
+          : intent === "update-listing"
+            ? LISTING_FORM_KEYS
           : COMMON_KEYS;
 
   for (const [key, value] of formData.entries()) {
@@ -139,5 +145,6 @@ export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
     voterCodes: security.voterCodes,
     captcha: security.captcha,
     vpnBlocking: security.vpnBlocking,
+    listing: singleton(formData, "listing"),
   };
 }

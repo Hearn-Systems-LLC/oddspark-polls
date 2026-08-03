@@ -9,6 +9,7 @@ import {
   effectivePollStatus,
   type PollId,
   type PollOptionId,
+  type PollSecurityToggles,
   type PollStatus,
   type ResultVisibility,
   type UserId,
@@ -24,7 +25,10 @@ export type ViewerContext = {
 // need. Deliberately NO options, option counts, Vote counts, percentages,
 // representationVersion, or any other result-shape signal — hidden responses
 // must not leak the result's shape (FR-20, UX-DR19). `multiSelectEnabled` is
-// safe Poll configuration, not a result fact. Discovery/listing state is
+// safe Poll configuration, not a result fact; `securityToggles` is the same
+// kind of configuration (Story 2.4 — the trust badge explains visible
+// numbers; it names mechanisms, never a digest, IP, or session identifier,
+// AD-8). Discovery/listing state is
 // absent by design: a reached-by-link Poll gets the same Results decision
 // listed, unlisted, or delisted (AD-5).
 export type ResultsAccessEnvelope = {
@@ -35,6 +39,7 @@ export type ResultsAccessEnvelope = {
   deadlineMs: number | null;
   closedAtMs: number | null;
   multiSelectEnabled: boolean;
+  securityToggles: PollSecurityToggles;
   canonicalReference: string;
 };
 
@@ -126,6 +131,9 @@ export type ResultsView =
       question: string;
       canonicalReference: string;
       status: PollStatus;
+      /** Persisted toggle truth for the trust badge (Story 2.4) — safe Poll
+       * configuration threaded from the envelope, never a result fact. */
+      securityToggles: PollSecurityToggles;
       tally: ResultsTallyView;
     }
   | {
@@ -293,6 +301,7 @@ export async function queryResults(
     question: envelope.question,
     canonicalReference: envelope.canonicalReference,
     status,
+    securityToggles: envelope.securityToggles,
     tally: projectTallyView(envelope, projection),
   };
 }

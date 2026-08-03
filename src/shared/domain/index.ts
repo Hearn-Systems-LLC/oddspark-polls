@@ -36,6 +36,16 @@ export const SECURITY_TOGGLES = [
 export type SecurityToggle = (typeof SECURITY_TOGGLES)[number];
 export type PollSecurityToggles = Record<SecurityToggle, boolean>;
 
+export function makeSecurityToggles(
+  sessionChecks: boolean,
+  ipChecks: boolean,
+  voterCodes: boolean,
+  captcha: boolean,
+  vpnBlocking: boolean,
+): PollSecurityToggles {
+  return { sessionChecks, ipChecks, voterCodes, captcha, vpnBlocking };
+}
+
 export const DISCOVERY_STATES = ["unlisted", "listed", "delisted"] as const;
 export type DiscoveryState = (typeof DISCOVERY_STATES)[number];
 

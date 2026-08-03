@@ -5,6 +5,7 @@ import ButtonPrimary from "../components/button-primary.astro";
 import PollOption from "../components/poll-option.astro";
 import ResultsTally from "../components/results-tally.astro";
 import ShareAction from "../components/share-action.astro";
+import TrustBadge from "../components/trust-badge.astro";
 import Turnstile from "../components/turnstile.astro";
 import BaseLayout from "../layouts/base-layout.astro";
 import { formatUtc } from "../lib/datetime";
@@ -53,7 +54,9 @@ import {
 } from "../modules/voting/index";
 import {
   effectivePollStatus,
+  makeSecurityToggles,
   type PollOptionId,
+  type PollSecurityToggles,
   type PollStatus,
   type PollType,
   type UserId,
@@ -837,6 +840,19 @@ const resultsExplanation =
     : null;
 const postVoteComposition = compactCounted && showTally;
 
+// Story 2.4: the trust badge renders from persisted toggle truth — never
+// form state — keyed by SecurityToggle. The CAPTCHA/definition-change re-read
+// above (AD-17) keeps this current on toggle races with no extra plumbing.
+const pollToggles: PollSecurityToggles | null = poll
+  ? makeSecurityToggles(
+      poll.sessionChecksEnabled,
+      poll.ipChecksEnabled,
+      poll.voterCodesEnabled,
+      poll.captchaEnabled,
+      poll.vpnBlockingEnabled,
+    )
+  : null;
+
 const selected = new Set(selectedOptionIds);
 const multiSelect =
   poll?.pollType === "multiple_choice" && poll.multiSelectEnabled;
@@ -1069,6 +1085,11 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
                   />
                 ))}
               </fieldset>
+              {/* Story 2.4 / UX-DR7: the badge sits above the vote button but
+                  never between the challenge and the button (Story 2.3 AC #4)
+                  — document order badge → hint → Turnstile → VOTE. It renders
+                  nothing at all when every Toggle is off (SM-C1). */}
+              {pollToggles && <TrustBadge toggles={pollToggles} />}
               <div class="vote-action">
                 {/* UX-DR8: the hint is a JS affordance — the server renders
                     it hidden (no-JS shows an enabled button with no hint);
@@ -1103,6 +1124,7 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
               yourBallotOptionIds={
                 outcome?.code === "counted" ? yourBallotOptionIds : undefined
               }
+              toggles={pollToggles ?? undefined}
               loading
               liveEndpoint={
                 postVoteResults.status === "open"
@@ -1295,6 +1317,12 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     line-height: var(--type-caption-lh);
   }
 
+  /* Story 2.4: the post-vote badge rises 32px above its hairline (the
+     /results instance keeps the component's 24px). */
+  .poll-shell[data-post-vote="true"] :global(.results-tally-badge) {
+    margin-top: var(--space-8);
+  }
+
   @media (min-width: 640px) {
     .poll-shell {
       padding-inline: var(--space-margin-desktop);
@@ -1369,10 +1397,17 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
       grid-row: 5;
     }
 
+    /* Story 2.4: the badge dissolves into a direct grid child with the bars
+       — it travels in the right column, directly below them. */
+    .poll-shell[data-post-vote="true"] :global(.results-tally-badge) {
+      grid-column: 2;
+      grid-row: 6;
+    }
+
     /* Share stays below both columns — secondary, never competes with VOTE. */
     .poll-shell[data-post-vote="true"] > .share-block {
       grid-column: 1 / -1;
-      grid-row: 6;
+      grid-row: 7;
     }
   }
 </style>

@@ -40,6 +40,7 @@ import type {
   ResultVisibility,
   UserId,
 } from "../../shared/domain/index";
+import { makeSecurityToggles } from "../../shared/domain/index";
 
 export type PollPage = {
   pollId: PollId;
@@ -1033,7 +1034,7 @@ export function createResultsPersistence(db: D1Database) {
     ): Promise<ResultsAccessEnvelope | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.result_visibility, p.owner_user_id, p.deadline_ms, p.closed_at_ms, p.multi_select_enabled, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
+          "SELECT p.id, p.question, p.result_visibility, p.owner_user_id, p.deadline_ms, p.closed_at_ms, p.multi_select_enabled, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
         )
         .bind(reference)
         .first<{
@@ -1044,6 +1045,11 @@ export function createResultsPersistence(db: D1Database) {
           deadline_ms: number | null;
           closed_at_ms: number | null;
           multi_select_enabled: number;
+          session_checks_enabled: number;
+          ip_checks_enabled: number;
+          voter_codes_enabled: number;
+          captcha_enabled: number;
+          vpn_blocking_enabled: number;
           canonical_reference: string;
         }>();
       if (!row) {
@@ -1057,6 +1063,13 @@ export function createResultsPersistence(db: D1Database) {
         deadlineMs: row.deadline_ms,
         closedAtMs: row.closed_at_ms,
         multiSelectEnabled: row.multi_select_enabled === 1,
+        securityToggles: makeSecurityToggles(
+          row.session_checks_enabled === 1,
+          row.ip_checks_enabled === 1,
+          row.voter_codes_enabled === 1,
+          row.captcha_enabled === 1,
+          row.vpn_blocking_enabled === 1,
+        ),
         canonicalReference: row.canonical_reference,
       };
     },

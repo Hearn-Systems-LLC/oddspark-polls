@@ -1,5 +1,11 @@
 # Deferred Work
 
+## Deferred from: code review of 2-4-trust-badge (2026-08-03)
+
+- **SQL injection vector in E2E `seedPoll`** — template-literal SQL with `reference` parameter used across all E2E specs; all callers pass UUID-prefixed literals in practice, but the utility is copy-pasteable. Deferred, pre-existing pattern.
+- **Walker test fragility** — source-code string scanning assertions (`not.toContain("background")`, hex regex) in `tests/unit/trust-badge.test.mjs` break on unrelated refactors. Deferred, pre-existing pattern from `live-indicator.test.mjs`.
+- **E2E `afterAll` cleanup silently leaks on failure** — `for`-loop over `seededUserIds` calls `cleanupCreator` without try/catch; one failure skips remaining IDs. Deferred, pre-existing pattern in every E2E spec.
+
 ## Deferred from: code review of 1-9-live-updating-results (2026-08-02)
 
 - **Multi-select summary never pluralizes** — `1 VOTERS · 1 SELECTIONS` renders verbatim for singular counts on both the SSR summary and the live poller patch path. Deferred, pre-existing: the SSR line shipped in Story 1.8 and the 1.9 poller deliberately mirrors it so the reconciliation diff-check stays in sync; fixing one side without the other breaks that check [src/components/results-tally.astro:77, src/scripts/results-live.ts:323].

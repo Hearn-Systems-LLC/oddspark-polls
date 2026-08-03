@@ -49,6 +49,13 @@ describe("telemetry adapter", () => {
     expect(isForbiddenTelemetryKey("comment")).toBe(true);
     expect(isForbiddenTelemetryKey("ballot")).toBe(true);
     expect(isForbiddenTelemetryKey("voterCode")).toBe(true);
+    expect(isForbiddenTelemetryKey("ip")).toBe(true);
+    expect(isForbiddenTelemetryKey("ipAddress")).toBe(true);
+    expect(isForbiddenTelemetryKey("ip_address")).toBe(true);
+    expect(isForbiddenTelemetryKey("clientIp")).toBe(true);
+    expect(isForbiddenTelemetryKey("cfConnectingIp")).toBe(true);
+    expect(isForbiddenTelemetryKey("digest")).toBe(true);
+    expect(isForbiddenTelemetryKey("ipDigest")).toBe(true);
     expect(isForbiddenTelemetryKey("requestId")).toBe(false);
     expect(isForbiddenTelemetryKey("operation")).toBe(false);
   });
@@ -66,6 +73,12 @@ describe("telemetry adapter", () => {
       pollId: "poll-456",
       token: "secret-should-not-appear",
       voterCode: "ABC123",
+      ip: "203.0.113.8",
+      ipAddress: "203.0.113.8",
+      clientIp: "203.0.113.8",
+      cfConnectingIp: "203.0.113.8",
+      digest: "a".repeat(64),
+      ipDigest: "b".repeat(64),
     };
 
     emitTelemetry(hostile);
@@ -75,6 +88,12 @@ describe("telemetry adapter", () => {
     expect(raw).not.toContain("ABC123");
     expect(raw).not.toContain("token");
     expect(raw).not.toContain("voterCode");
+    expect(raw).not.toContain("203.0.113.8");
+    expect(raw).not.toContain("a".repeat(64));
+    expect(raw).not.toContain("b".repeat(64));
+    expect(raw).not.toContain('"ip"');
+    expect(raw).not.toContain("ipAddress");
+    expect(raw).not.toContain("digest");
   });
 
   it("classifies auth initiation and callback outcomes without logging payloads", () => {

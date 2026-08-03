@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- IP Checks enforcement on the vote path: when a Creator turns on one-vote-per-network,
+  a second Vote from the same IPv4 address or IPv6 `/64` is rejected inside the existing
+  vote transaction with the connection-specific message, while Session Checks still
+  identify a returning browser. Raw addresses never leave the edge boundary — only
+  purpose-separated digests reach D1 and the abuse floor.
 - Per-poll Security Toggles on create and the Poll detail page: Session Checks, IP Checks,
   Voter Codes, CAPTCHA, and VPN Blocking. A new Poll opens with Session Checks on and the
   rest off. After the first Vote, protections can only tighten — on Toggles lock on, and

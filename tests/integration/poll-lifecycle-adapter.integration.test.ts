@@ -23,11 +23,22 @@ import {
   PollGoneError,
   type VotePersistenceBatch,
 } from "../../src/modules/voting/index";
+import { asVoterClaimDigest } from "../../src/modules/voting/ip-address";
 import type {
   PollId,
   PollOptionId,
   UserId,
 } from "../../src/shared/domain/index";
+
+function fixtureDigest(seed: string) {
+  let out = "";
+  for (let i = 0; i < 64; i += 1) {
+    out += (seed.charCodeAt(i % seed.length) % 16).toString(16);
+  }
+  const branded = asVoterClaimDigest(out);
+  if (branded === null) throw new Error("fixture digest construction failed");
+  return branded;
+}
 
 type MigrationTestEnv = Cloudflare.Env & {
   TEST_MIGRATIONS: D1Migration[];
@@ -149,7 +160,7 @@ function voteBatch(
         kind: "voter_claim",
         pollId,
         checkKind: "session",
-        digest: `digest-${suffix}`,
+        digest: fixtureDigest(`digest-${suffix}`),
         voteId,
         createdAtMs: updatedAtMs,
       },
@@ -346,7 +357,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
       .bind("vote-del", `${POLL_A}-opt-1`)
       .run();
     await testEnv.DB.prepare(
-      "INSERT INTO voter_claim (poll_id, check_kind, digest, vote_id, created_at_ms) VALUES (?1, 'session', 'digest', ?2, ?3)",
+      "INSERT INTO voter_claim (poll_id, check_kind, digest, vote_id, created_at_ms) VALUES (?1, 'session', 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', ?2, ?3)",
     )
       .bind(POLL_A, "vote-del", NOW)
       .run();

@@ -1,12 +1,20 @@
 // WebCrypto digest adapter. Raw browser/network identifiers enter only here;
-// callers receive one-way hex digests and never log the inputs or outputs.
+// callers receive one-way branded hex digests and never log the inputs or outputs.
 
 import type { PollId } from "../../shared/domain/index";
+import {
+  asVoteRateLimitDigest,
+  asVoterClaimDigest,
+  isVoteDigestPurpose,
+  type VoteDigestPurpose,
+  type VoteRateLimitDigest,
+  type VoterClaimCheckKind,
+  type VoterClaimDigest,
+} from "../../modules/voting/ip-address";
 
 export const VOTER_COOKIE_NAME = "oddspark.voter";
 export const VOTER_COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
-type DuplicateCheckKind = "session" | "ip";
 type RandomBytes = (length: number) => Uint8Array;
 
 function toHex(bytes: ArrayBuffer): string {
@@ -20,14 +28,46 @@ export async function sha256Hex(value: string): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", encoded));
 }
 
+/**
+ * Purpose-separated HMAC-SHA256 of JSON `[pollId, purpose, token]`.
+ * Returns a branded digest: claim purposes → `VoterClaimDigest`,
+ * `rate_limit` → `VoteRateLimitDigest`. Never reuses one purpose for another.
+ */
 export async function createVoteDigest(
   secret: string,
   input: {
     pollId: PollId;
-    checkKind: DuplicateCheckKind;
+    checkKind: VoterClaimCheckKind;
     token: string;
   },
-): Promise<string> {
+): Promise<VoterClaimDigest>;
+export async function createVoteDigest(
+  secret: string,
+  input: {
+    pollId: PollId;
+    checkKind: "rate_limit";
+    token: string;
+  },
+): Promise<VoteRateLimitDigest>;
+export async function createVoteDigest(
+  secret: string,
+  input: {
+    pollId: PollId;
+    checkKind: VoteDigestPurpose;
+    token: string;
+  },
+): Promise<VoterClaimDigest | VoteRateLimitDigest>;
+export async function createVoteDigest(
+  secret: string,
+  input: {
+    pollId: PollId;
+    checkKind: VoteDigestPurpose;
+    token: string;
+  },
+): Promise<VoterClaimDigest | VoteRateLimitDigest> {
+  if (!isVoteDigestPurpose(input.checkKind)) {
+    throw new Error("Unsupported vote digest purpose");
+  }
   if (secret.trim().length === 0) {
     throw new Error("VOTE_DIGEST_SECRET is required");
   }
@@ -50,7 +90,23 @@ export async function createVoteDigest(
     key,
     new TextEncoder().encode(scopedMessage),
   );
-  return toHex(signature);
+  const hex = toHex(signature);
+
+  if (input.checkKind === "rate_limit") {
+    const branded = asVoteRateLimitDigest(hex);
+    if (branded === null) {
+      throw new Error(
+        "digest construction produced an invalid rate-limit digest",
+      );
+    }
+    return branded;
+  }
+
+  const branded = asVoterClaimDigest(hex);
+  if (branded === null) {
+    throw new Error("digest construction produced an invalid claim digest");
+  }
+  return branded;
 }
 
 export function createVoterToken(

@@ -3,7 +3,7 @@ import {
   type D1Migration,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createVotePersistence } from "../../src/adapters/d1/index";
 import {
   createVoteDigest,
@@ -12,12 +12,15 @@ import {
 import { multipleChoiceStrategy } from "../../src/modules/polls/types/multiple-choice";
 import {
   AlreadyVotedError,
+  asVoterClaimDigest,
   PollClosedError,
   PollGoneError,
   SubmissionReplayError,
   castVote,
   type CastVoteDeps,
   type VotePersistenceBatch,
+  type VoterClaimCheckKind,
+  type VoterClaimDigest,
   type VotingPollTypeStrategy,
 } from "../../src/modules/voting/index";
 import { incrementRepresentationVersion } from "../../src/shared/application/index";
@@ -25,6 +28,23 @@ import type {
   PollId,
   PollOptionId,
 } from "../../src/shared/domain/index";
+
+/** Deterministic lowercase 64-hex claim digest for D1 fixtures. */
+function fixtureDigest(seed: string): VoterClaimDigest {
+  let out = "";
+  for (let i = 0; i < 64; i += 1) {
+    out += (seed.charCodeAt(i % seed.length) % 16).toString(16);
+  }
+  const branded = asVoterClaimDigest(out);
+  if (branded === null) {
+    throw new Error("fixture digest construction failed");
+  }
+  return branded;
+}
+
+const DIGEST_1 = fixtureDigest("digest-1");
+const DIGEST_SESSION_ALT = fixtureDigest("digest-session-alt");
+const DIGEST_IP = fixtureDigest("digest-ip");
 
 type MigrationTestEnv = Cloudflare.Env & {
   TEST_MIGRATIONS: D1Migration[];
@@ -53,6 +73,7 @@ async function insertPoll(
   overrides: {
     closedAtMs?: number;
     deadlineMs?: number;
+    ipChecksEnabled?: boolean;
     maxSelections?: number | null;
     minSelections?: number | null;
     multiSelectEnabled?: boolean;
@@ -61,10 +82,11 @@ async function insertPoll(
 ): Promise<void> {
   await testEnv.DB.batch([
     testEnv.DB.prepare(
-      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, ?5, ?6, ?7, 1, 0, 0)",
+      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, ip_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 0, 0)",
     ).bind(
       POLL_ID,
       overrides.sessionChecksEnabled === false ? 0 : 1,
+      overrides.ipChecksEnabled === true ? 1 : 0,
       overrides.multiSelectEnabled === true ? 1 : 0,
       overrides.minSelections ?? null,
       overrides.maxSelections ?? null,
@@ -103,7 +125,7 @@ function batch(
         kind: "voter_claim",
         pollId: POLL_ID,
         checkKind: "session",
-        digest: "digest-1",
+        digest: DIGEST_1,
         voteId,
         createdAtMs: NOW,
       },
@@ -151,11 +173,8 @@ function castVoteDeps(): CastVoteDeps {
       const { validateSubmission, persistFacts } = multipleChoiceStrategy;
       return persistFacts ? { validateSubmission, persistFacts } : null;
     },
-    createDigest: (digestInput: {
-      pollId: PollId;
-      checkKind: "session";
-      token: string;
-    }) => createVoteDigest("integration-vote-digest-secret", digestInput),
+    createDigest: (digestInput) =>
+      createVoteDigest("integration-vote-digest-secret", digestInput),
     hashPayload: sha256Hex,
     persistVote: persistence.insertVote,
     generateId: () => `integrated-vote-${(generated += 1)}`,
@@ -168,12 +187,32 @@ const integratedCommand = {
   submissionId: "integrated-submission",
   selectedOptionIds: [OPTION_A],
   browserToken: "browser-token",
+  ipDigest: null as VoterClaimDigest | null,
 };
 
 async function closePoll(): Promise<void> {
   await testEnv.DB.prepare("UPDATE poll SET closed_at_ms = ?1 WHERE id = ?2")
     .bind(NOW + 1, POLL_ID)
     .run();
+}
+
+function d1WithClaimClassificationRead(
+  first: () => Promise<{ found: number } | null>,
+): D1Database {
+  // Deliberate failure-injection boundary: all writes use real D1, while only
+  // the post-rollback claim-classification read is replaced.
+  return {
+    prepare(query: string) {
+      if (query.startsWith("SELECT 1 AS found FROM voter_claim")) {
+        return {
+          bind: () => ({ first }),
+        } as unknown as D1PreparedStatement;
+      }
+      return testEnv.DB.prepare(query);
+    },
+    batch: (statements: D1PreparedStatement[]) =>
+      testEnv.DB.batch(statements),
+  } as unknown as D1Database;
 }
 
 describe("createVotePersistence", () => {
@@ -222,7 +261,7 @@ describe("createVotePersistence", () => {
             kind: "voter_claim",
             pollId: POLL_ID,
             checkKind: "session",
-            digest: "digest-1",
+            digest: DIGEST_1,
             voteId: "vote-1",
             createdAtMs: NOW,
           },
@@ -274,7 +313,7 @@ describe("createVotePersistence", () => {
               kind: "voter_claim",
               pollId: POLL_ID,
               checkKind: "session",
-              digest: "digest-1",
+              digest: DIGEST_1,
               voteId: "vote-1",
               createdAtMs: NOW,
             },
@@ -303,6 +342,7 @@ describe("createVotePersistence", () => {
         { id: OPTION_B, label: "B", position: 1 },
       ],
       sessionChecksEnabled: true,
+      ipChecksEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -317,11 +357,84 @@ describe("createVotePersistence", () => {
       createdAtMs: NOW,
     });
     await expect(
-      persistence.findClaim(POLL_ID, "session", "digest-1"),
+      persistence.findClaim(POLL_ID, "session", DIGEST_1),
     ).resolves.toBe(true);
     await expect(
-      persistence.findClaim(POLL_ID, "session", "digest-missing"),
+      persistence.findClaim(POLL_ID, "session", DIGEST_SESSION_ALT),
     ).resolves.toBe(false);
+    await expect(
+      persistence.findClaim(
+        POLL_ID,
+        "session",
+        "not-a-hex-digest" as unknown as VoterClaimDigest,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      persistence.findVoteSelectionByClaim(POLL_ID, "session", DIGEST_1),
+    ).resolves.toEqual([OPTION_A]);
+    await expect(
+      persistence.findVoteSelectionByClaim(
+        POLL_ID,
+        "session",
+        DIGEST_SESSION_ALT,
+      ),
+    ).resolves.toEqual([]);
+    await expect(
+      persistence.findVoteSelectionByClaim(
+        POLL_ID,
+        "session",
+        "hostile" as unknown as VoterClaimDigest,
+      ),
+    ).resolves.toEqual([]);
+    await expect(
+      persistence.findVoteSelectionByClaim(
+        POLL_ID,
+        "device" as unknown as VoterClaimCheckKind,
+        DIGEST_1,
+      ),
+    ).resolves.toEqual([]);
+  });
+
+  it("rejects hostile claim reads before any D1 prepare or bind call", async () => {
+    const bind = vi.fn();
+    const prepare = vi.fn(() => ({ bind }));
+    // Deliberate spy boundary; invalid branded-port values must return before
+    // the adapter needs any other part of the D1Database surface.
+    const persistence = createVotePersistence({
+      prepare,
+      batch: vi.fn(),
+    } as unknown as D1Database);
+    const hostileDigest = "not-a-claim-digest" as unknown as VoterClaimDigest;
+
+    await expect(
+      persistence.findClaim(POLL_ID, "session", hostileDigest),
+    ).resolves.toBe(false);
+    await expect(
+      persistence.findVoteSelectionByClaim(
+        POLL_ID,
+        "session",
+        hostileDigest,
+      ),
+    ).resolves.toEqual([]);
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(bind).not.toHaveBeenCalled();
+  });
+
+  it("reads sequential Poll snapshots before and after IP Checks are enabled", async () => {
+    await insertPoll({ ipChecksEnabled: false });
+    const persistence = createVotePersistence(testEnv.DB);
+
+    const before = await persistence.findPoll(POLL_ID);
+    await testEnv.DB.prepare(
+      "UPDATE poll SET ip_checks_enabled = 1, representation_version = representation_version + 1 WHERE id = ?1",
+    )
+      .bind(POLL_ID)
+      .run();
+    const after = await persistence.findPoll(POLL_ID);
+
+    expect(before?.ipChecksEnabled).toBe(false);
+    expect(after?.ipChecksEnabled).toBe(true);
   });
 
   it("maps a second claim to AlreadyVotedError and rolls the batch back", async () => {
@@ -348,14 +461,101 @@ describe("createVotePersistence", () => {
               kind: "voter_claim",
               pollId: POLL_ID,
               checkKind: "session",
-              digest: "digest-1",
+              digest: DIGEST_1,
               voteId: "vote-2",
               createdAtMs: NOW,
             },
           ],
         }),
       ),
-    ).rejects.toBeInstanceOf(AlreadyVotedError);
+    ).rejects.toMatchObject({
+      name: "AlreadyVotedError",
+      checkKind: "session",
+    });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("does not guess a claim cause when a collision cannot be confirmed", async () => {
+    await insertPoll();
+    await createVotePersistence(testEnv.DB).insertVote(batch());
+    const persistence = createVotePersistence(
+      d1WithClaimClassificationRead(async () => null),
+    );
+
+    await expect(
+      persistence.insertVote(
+        batch({
+          vote: {
+            ...batch().vote,
+            id: "vote-unclassified",
+            submissionId: "submission-unclassified",
+          },
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-unclassified",
+              pollOptionId: OPTION_B,
+            },
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "vote-unclassified",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("voter claim collision without confirmed candidate");
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("fails safely when the post-collision classification read fails", async () => {
+    await insertPoll();
+    await createVotePersistence(testEnv.DB).insertVote(batch());
+    const persistence = createVotePersistence(
+      d1WithClaimClassificationRead(async () => {
+        throw new Error("classification read unavailable");
+      }),
+    );
+
+    await expect(
+      persistence.insertVote(
+        batch({
+          vote: {
+            ...batch().vote,
+            id: "vote-read-failure",
+            submissionId: "submission-read-failure",
+          },
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-read-failure",
+              pollOptionId: OPTION_B,
+            },
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "vote-read-failure",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("voter claim collision could not be classified");
     expect(await counts()).toEqual({
       votes: 1,
       selections: 1,
@@ -378,7 +578,7 @@ describe("createVotePersistence", () => {
               kind: "voter_claim",
               pollId: POLL_ID,
               checkKind: "session",
-              digest: "digest-1",
+              digest: DIGEST_1,
               voteId: "vote-replay",
               createdAtMs: NOW,
             },
@@ -633,5 +833,455 @@ describe("castVote with the D1 adapter", () => {
       claims: 1,
       version: 2,
     });
+  });
+
+  it("commits both Session and IP claims with one version bump when both toggles are on", async () => {
+    await insertPoll({ sessionChecksEnabled: true, ipChecksEnabled: true });
+    const deps = castVoteDeps();
+    const ipDigest = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v4:203.0.113.8",
+    });
+
+    await expect(
+      castVote(deps, { ...integratedCommand, ipDigest }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { existing: false },
+    });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 2,
+      version: 2,
+    });
+    const kinds = await testEnv.DB.prepare(
+      "SELECT check_kind, digest FROM voter_claim WHERE poll_id = ?1 ORDER BY check_kind",
+    )
+      .bind(POLL_ID)
+      .all<{ check_kind: string; digest: string }>();
+    expect(kinds.results.map((row) => row.check_kind)).toEqual(["ip", "session"]);
+    for (const row of kinds.results) {
+      expect(row.digest).toMatch(/^[a-f0-9]{64}$/);
+    }
+  });
+
+  it("rejects a second browser on the same network with the IP cause", async () => {
+    await insertPoll({ sessionChecksEnabled: true, ipChecksEnabled: true });
+    const deps = castVoteDeps();
+    const ipDigest = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v4:203.0.113.8",
+    });
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        browserToken: "browser-a",
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: false } });
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "integrated-submission-b",
+        browserToken: "browser-b",
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "already_voted_ip" },
+    });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 2,
+      version: 2,
+    });
+  });
+
+  it("rejects the same browser with the Session cause even when IP also collides", async () => {
+    await insertPoll({ sessionChecksEnabled: true, ipChecksEnabled: true });
+    const deps = castVoteDeps();
+    const ipDigest = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v4:203.0.113.8",
+    });
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        browserToken: "browser-a",
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "integrated-submission-retry",
+        browserToken: "browser-a",
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "already_voted" },
+    });
+  });
+
+  it("allows two browsers behind one IP when only Session Checks are on", async () => {
+    await insertPoll({ sessionChecksEnabled: true, ipChecksEnabled: false });
+    const deps = castVoteDeps();
+    const ipDigest = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v4:203.0.113.8",
+    });
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        browserToken: "browser-a",
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: false } });
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "integrated-submission-b",
+        browserToken: "browser-b",
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: false } });
+    expect(await counts()).toEqual({
+      votes: 2,
+      selections: 2,
+      claims: 2,
+      version: 3,
+    });
+  });
+
+  it("enforces IP Checks only after mid-Poll enablement without backfilling old Votes", async () => {
+    await insertPoll({ sessionChecksEnabled: false, ipChecksEnabled: false });
+    const deps = castVoteDeps();
+    const ipDigest = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v4:203.0.113.20",
+    });
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "before-ip-enable",
+        browserToken: null,
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: false } });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 0,
+      version: 2,
+    });
+
+    await testEnv.DB.prepare(
+      "UPDATE poll SET ip_checks_enabled = 1, representation_version = representation_version + 1 WHERE id = ?1",
+    )
+      .bind(POLL_ID)
+      .run();
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "first-after-ip-enable",
+        browserToken: null,
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: false } });
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "duplicate-after-ip-enable",
+        browserToken: null,
+        ipDigest,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "already_voted_ip" },
+    });
+    expect(await counts()).toEqual({
+      votes: 2,
+      selections: 2,
+      claims: 1,
+      version: 4,
+    });
+  });
+
+  it("blocks two hosts in the same IPv6 /64 under IP Checks", async () => {
+    await insertPoll({ sessionChecksEnabled: false, ipChecksEnabled: true });
+    const deps = castVoteDeps();
+    const claimA = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v6:20010db800000000",
+    });
+    // Same /64 claim token as host A — different full host is irrelevant for claims.
+    const claimB = claimA;
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        browserToken: null,
+        ipDigest: claimA,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "integrated-submission-b",
+        browserToken: null,
+        ipDigest: claimB,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "already_voted_ip" },
+    });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("accepts hosts from distinct IPv6 /64 networks under IP Checks", async () => {
+    await insertPoll({ sessionChecksEnabled: false, ipChecksEnabled: true });
+    const deps = castVoteDeps();
+    const claimA = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v6:20010db800000000",
+    });
+    const claimB = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v6:20010db800000001",
+    });
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "ipv6-network-a",
+        browserToken: null,
+        ipDigest: claimA,
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: false } });
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "ipv6-network-b",
+        browserToken: null,
+        ipDigest: claimB,
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: false } });
+    expect(await counts()).toEqual({
+      votes: 2,
+      selections: 2,
+      claims: 2,
+      version: 3,
+    });
+  });
+
+  it("rejects a forged claim digest before any D1 write", async () => {
+    await insertPoll();
+    const persistence = createVotePersistence(testEnv.DB);
+    await expect(
+      persistence.insertVote(
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: "raw-not-hex" as unknown as VoterClaimDigest,
+              voteId: "vote-1",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/invalid voter claim digest/);
+    expect(await counts()).toEqual({
+      votes: 0,
+      selections: 0,
+      claims: 0,
+      version: 1,
+    });
+  });
+
+  it("makes zero D1 calls when a later voter claim is malformed", async () => {
+    const bind = vi.fn();
+    const prepare = vi.fn(() => ({ bind }));
+    const executeBatch = vi.fn();
+    // Deliberate spy boundary; the adapter must reject before requiring the
+    // remainder of the D1Database surface.
+    const persistence = createVotePersistence({
+      prepare,
+      batch: executeBatch,
+    } as unknown as D1Database);
+
+    await expect(
+      persistence.insertVote(
+        batch({
+          contributions: [
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "vote-1",
+              createdAtMs: NOW,
+            },
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: "malformed-later-claim" as unknown as VoterClaimDigest,
+              voteId: "vote-1",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("invalid voter claim digest");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(bind).not.toHaveBeenCalled();
+    expect(executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("rolls back every loser fact when forced concurrent same-network Votes race", async () => {
+    await insertPoll({ sessionChecksEnabled: true, ipChecksEnabled: true });
+    let batchArrivals = 0;
+    let releaseBatches: (() => void) | undefined;
+    const bothBatchesReady = new Promise<void>((resolve) => {
+      releaseBatches = resolve;
+    });
+    // Force both real transactions to arrive at D1 batch() before either can
+    // start. This proves the UNIQUE boundary, not sequential preflight.
+    const racingDb = {
+      prepare: (query: string) => testEnv.DB.prepare(query),
+      batch: async (statements: D1PreparedStatement[]) => {
+        batchArrivals += 1;
+        if (batchArrivals === 2) {
+          releaseBatches?.();
+        }
+        await bothBatchesReady;
+        return testEnv.DB.batch(statements);
+      },
+    } as unknown as D1Database;
+    const racingPersistence = createVotePersistence(racingDb);
+    const deps = castVoteDeps();
+    const attemptedVoteIds = new Map<string, string>();
+    deps.persistVote = async (persistBatch) => {
+      attemptedVoteIds.set(
+        persistBatch.vote.submissionId,
+        persistBatch.vote.id,
+      );
+      return racingPersistence.insertVote(persistBatch);
+    };
+    const ipDigest = await createVoteDigest("integration-vote-digest-secret", {
+      pollId: POLL_ID,
+      checkKind: "ip",
+      token: "v4:198.51.100.9",
+    });
+
+    const commands = [
+      {
+        ...integratedCommand,
+        submissionId: "race-a",
+        browserToken: "race-browser-a",
+        ipDigest,
+      },
+      {
+        ...integratedCommand,
+        submissionId: "race-b",
+        browserToken: "race-browser-b",
+        ipDigest,
+      },
+    ];
+    const outcomes = await Promise.all(
+      commands.map((command) => castVote(deps, command)),
+    );
+
+    expect(batchArrivals).toBe(2);
+    expect(outcomes.filter((r) => r.ok && !r.value.existing)).toHaveLength(1);
+    expect(
+      outcomes.filter((r) => !r.ok && r.error.code === "already_voted_ip"),
+    ).toHaveLength(1);
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 2,
+      version: 2,
+    });
+
+    const loserIndex = outcomes.findIndex(
+      (outcome) => !outcome.ok && outcome.error.code === "already_voted_ip",
+    );
+    if (loserIndex < 0) {
+      throw new Error("forced race produced no losing IP collision");
+    }
+    const loserVoteId = attemptedVoteIds.get(
+      commands[loserIndex]?.submissionId ?? "",
+    );
+    if (!loserVoteId) {
+      throw new Error("forced race did not capture the losing Vote id");
+    }
+    const [loserVote, loserSelection, loserSessionClaim] = await Promise.all([
+      testEnv.DB.prepare("SELECT COUNT(*) AS n FROM vote WHERE id = ?1")
+        .bind(loserVoteId)
+        .first<{ n: number }>(),
+      testEnv.DB.prepare(
+        "SELECT COUNT(*) AS n FROM vote_selection WHERE vote_id = ?1",
+      )
+        .bind(loserVoteId)
+        .first<{ n: number }>(),
+      testEnv.DB.prepare(
+        "SELECT COUNT(*) AS n FROM voter_claim WHERE vote_id = ?1 AND check_kind = 'session'",
+      )
+        .bind(loserVoteId)
+        .first<{ n: number }>(),
+    ]);
+    expect({
+      vote: loserVote?.n,
+      selection: loserSelection?.n,
+      sessionClaim: loserSessionClaim?.n,
+    }).toEqual({ vote: 0, selection: 0, sessionClaim: 0 });
+
+    const digests = await testEnv.DB.prepare(
+      "SELECT digest FROM voter_claim WHERE poll_id = ?1",
+    )
+      .bind(POLL_ID)
+      .all<{ digest: string }>();
+    expect(digests.results).toHaveLength(2);
+    for (const row of digests.results) {
+      expect(row.digest).toMatch(/^[a-f0-9]{64}$/);
+      expect(row.digest).not.toContain("198.51.100");
+    }
   });
 });

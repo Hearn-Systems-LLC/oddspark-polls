@@ -45,6 +45,19 @@ const FORBIDDEN_KEYS = [
   "voterCode",
   "voter_code",
   "voterCodes",
+  // Story 2.2: raw IP identity and digest vocabulary never reach telemetry.
+  "ip",
+  "ipAddress",
+  "ip_address",
+  "clientIp",
+  "client_ip",
+  "cfConnectingIp",
+  "cf_connecting_ip",
+  "digest",
+  "ipDigest",
+  "ip_digest",
+  "rateLimitDigest",
+  "rate_limit_digest",
 ] as const;
 
 export type ForbiddenTelemetryKey = (typeof FORBIDDEN_KEYS)[number];

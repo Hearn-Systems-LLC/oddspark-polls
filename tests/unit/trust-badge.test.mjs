@@ -122,7 +122,7 @@ describe("trust badge Tally composition contract (Story 2.4, AC #4)", () => {
     expect(tallySource).toMatch(/data-tally-final[\s\S]*<TrustBadge/);
     expect(tallySource).toContain('class="results-tally-badge"');
     expect(tallySource).toMatch(
-      /\.results-tally-badge\s*\{[^}]*margin-top:\s*var\(--space-6\)/,
+      /:global\(\.results-tally-badge\)\s*\{[^}]*margin-top:\s*var\(--space-6\)/,
     );
   });
 

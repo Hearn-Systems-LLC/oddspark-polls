@@ -88,4 +88,26 @@ describe("creator lifecycle form parsing", () => {
 
     expect(() => parseLifecycleForm(form)).toThrow("unreadable_lifecycle_form");
   });
+
+  it("parses an update-listing intent with its listing value", () => {
+    const form = new FormData();
+    form.set("intent", "update-listing");
+    form.set("csrf_token", "token");
+    form.set("listing", "listed");
+
+    expect(parseLifecycleForm(form)).toMatchObject({
+      intent: "update-listing",
+      listing: "listed",
+    });
+  });
+
+  it("rejects unknown keys on an update-listing submission", () => {
+    const form = new FormData();
+    form.set("intent", "update-listing");
+    form.set("csrf_token", "token");
+    form.set("listing", "unlisted");
+    form.set("question", "forged");
+
+    expect(() => parseLifecycleForm(form)).toThrow("unreadable_lifecycle_form");
+  });
 });

@@ -21,6 +21,7 @@ import {
   POLL_CAPS,
   RENDER_OPTION_CEILING,
 } from "../../modules/polls/caps";
+import { LISTING_CHOICES } from "../../modules/discovery/index";
 import {
   SECURITY_TOGGLES,
   type PollId,
@@ -72,6 +73,7 @@ const formSchema = z.object({
   description: z.string().default(""),
   options: z.array(z.string()).default([]),
   visibility: z.string().default(""),
+  listing: z.string().default(""),
   deadline: z.string().default(""),
   timezone: z.string().default(""),
   customLink: z.string().default(""),
@@ -99,6 +101,7 @@ let values: CreatePollDraft = {
   description: "",
   options: Array.from({ length: INITIAL_OPTION_ROWS }, () => ""),
   resultVisibility: "live",
+  discoveryState: "unlisted",
   deadlineLocal: "",
   timeZone: "",
   customLink: "",
@@ -135,6 +138,9 @@ if (Astro.request.method === "POST") {
       // Missing or tampered visibility must fail domain validation with the
       // visibilityInvalid copy — never silently default to live.
       visibility: text(formData.get("visibility")),
+      // The Unlisted default belongs to fresh GET rendering. Missing or
+      // tampered POST values must reach domain validation unchanged.
+      listing: text(formData.get("listing")),
       deadline: text(formData.get("deadline")),
       timezone: text(formData.get("timezone")),
       customLink: text(formData.get("customLink")),
@@ -172,6 +178,7 @@ if (Astro.request.method === "POST") {
     description: parsed.description,
     options: parsed.options,
     resultVisibility: parsed.visibility,
+    discoveryState: parsed.listing,
     deadlineLocal: parsed.deadline,
     timeZone: parsed.timezone,
     customLink: parsed.customLink,
@@ -331,6 +338,28 @@ while (values.options.length < 2) {
         )}
       </fieldset>
 
+      <fieldset
+        class="field-block"
+        aria-describedby={fieldErrors.listing ? "listing-error" : undefined}
+      >
+        <legend class="group-label">WHO CAN FIND IT</legend>
+        <div class="listing-choices">
+          {LISTING_CHOICES.map((choice) => (
+            <PollOption
+              id={`listing-${choice.value}`}
+              name="listing"
+              value={choice.value}
+              label={choice.label}
+              description={choice.description}
+              checked={values.discoveryState === choice.value}
+            />
+          ))}
+        </div>
+        {fieldErrors.listing && (
+          <p class="field-error" id="listing-error">{fieldErrors.listing}</p>
+        )}
+      </fieldset>
+
       <div class="field-block">
         <Input
           id="deadline"
@@ -480,7 +509,8 @@ while (values.options.length < 2) {
     justify-items: start;
   }
 
-  .visibility-choices {
+  .visibility-choices,
+  .listing-choices {
     margin-top: var(--space-3);
   }
 

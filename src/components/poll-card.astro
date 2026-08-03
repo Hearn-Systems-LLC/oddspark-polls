@@ -5,6 +5,7 @@
  * Props are one structured view model composed beside this component.
  */
 import LiveIndicator from "./live-indicator.astro";
+import ListingBadge from "./listing-badge.astro";
 import type { PollCardViewModel } from "./poll-card";
 
 interface Props {
@@ -13,7 +14,7 @@ interface Props {
 }
 
 const {
-  viewModel: { title, metadata, status, href, current },
+  viewModel: { title, metadata, status, href, current, listing },
   class: className = "",
 } = Astro.props;
 ---
@@ -46,13 +47,21 @@ const {
       }
     </span>
   </span>
-  {
-    status === "open" ? (
-      <LiveIndicator status="open" class="poll-card-status" />
-    ) : (
-      <span class="poll-card-closed">CLOSED</span>
-    )
-  }
+  <span class="poll-card-status-cluster">
+    {
+      status === "open" ? (
+        <LiveIndicator status="open" class="poll-card-status" />
+      ) : (
+        <span class="poll-card-closed">CLOSED</span>
+      )
+    }
+    {listing && (
+      <>
+        <span class="poll-card-status-separator" aria-hidden="true">·</span>
+        <ListingBadge state={listing} />
+      </>
+    )}
+  </span>
 </a>
 
 <style>
@@ -111,5 +120,17 @@ const {
 
   .poll-card :global(.poll-card-status) {
     flex: 0 0 auto;
+  }
+
+  .poll-card-status-cluster {
+    display: inline-flex;
+    align-items: baseline;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .poll-card-status-separator {
+    color: var(--color-dim);
+    margin-inline: var(--space-1);
   }
 </style>

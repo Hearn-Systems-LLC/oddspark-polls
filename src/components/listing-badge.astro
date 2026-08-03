@@ -1,0 +1,51 @@
+---
+/**
+ * Listing Badge (Story 3.1, UX-DR12) — static creator-facing discovery state.
+ * The canonical word carries the state; color only annotates it. This
+ * component owns presentation only, never listing policy or mutation.
+ */
+import type { DiscoveryState } from "../shared/domain/index";
+
+interface Props {
+  state: DiscoveryState;
+  class?: string;
+}
+
+const { state, class: className = "" } = Astro.props;
+const LISTING_LABELS: Record<DiscoveryState, string> = {
+  unlisted: "UNLISTED",
+  listed: "LISTED",
+  delisted: "DELISTED",
+};
+---
+
+<span
+  class:list={["listing-badge", className]}
+  data-listing-badge
+  data-state={state}
+>
+  {LISTING_LABELS[state]}
+</span>
+
+<style>
+  .listing-badge {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    font-weight: 400;
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .listing-badge[data-state="unlisted"] {
+    color: var(--listing-badge-unlisted-color);
+  }
+
+  .listing-badge[data-state="listed"] {
+    color: var(--listing-badge-listed-color);
+  }
+
+  .listing-badge[data-state="delisted"] {
+    color: var(--listing-badge-delisted-color);
+  }
+</style>

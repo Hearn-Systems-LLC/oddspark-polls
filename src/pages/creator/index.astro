@@ -50,6 +50,7 @@ const cards = polls.map((poll) =>
     deadlineMs: poll.deadlineMs,
     nowMs,
     href: `/creator/polls/${poll.pollId}`,
+    listing: poll.discoveryState,
   }),
 );
 

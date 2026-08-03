@@ -233,6 +233,7 @@ describe("createPollPersistence reads", () => {
       description: "",
       options: ["Pizza", "Tacos"],
       resultVisibility: "live",
+      discoveryState: "unlisted",
       deadlineLocal: "",
       timeZone: "",
       customLink: "",

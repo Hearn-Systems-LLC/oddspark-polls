@@ -35,6 +35,7 @@ function snapshot(
     pollType: "multiple_choice",
     question: "Where should we eat?",
     description: null,
+    discoveryState: "unlisted",
     multiSelectEnabled: false,
     minSelections: null,
     maxSelections: null,

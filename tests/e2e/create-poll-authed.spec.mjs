@@ -471,6 +471,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     body.append("option", "A");
     body.append("option", "B");
     body.set("visibility", "live");
+    body.set("listing", "unlisted");
     body.set("deadline", "not-a-date");
     body.set("intent", "publish");
     const response = await page.request.post("/creator/new", {
@@ -648,6 +649,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     body.set("csrf_token", csrfToken ?? "");
     body.set("question", "Full house?");
     body.set("visibility", "live");
+    body.set("listing", "unlisted");
     body.set("intent", "add-option");
     for (let index = 1; index <= 30; index += 1) {
       body.append("option", `Option ${index}`);
@@ -687,6 +689,7 @@ test.describe("authenticated create flow (seeded session)", () => {
       body.set("csrf_token", csrfToken ?? "");
       body.set("question", "Ceiling probe?");
       body.set("visibility", "live");
+      body.set("listing", "unlisted");
       body.set("intent", intent);
       body.append("option", "A");
       body.append("option", "B");
@@ -803,6 +806,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     body.append("option", "A");
     body.append("option", "B");
     body.set("visibility", "live");
+    body.set("listing", "unlisted");
     body.set("deadline", "");
     body.set("intent", "publish");
     const headers = {
@@ -856,6 +860,7 @@ test.describe("authenticated create flow (seeded session)", () => {
       body.append("option", "A");
       body.append("option", "B");
       body.set("visibility", "live");
+      body.set("listing", "unlisted");
       body.set("intent", "publish");
       return page.request.post("/creator/new", {
         data: body.toString(),
@@ -924,6 +929,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     body.append("option", "A");
     body.append("option", "B");
     body.set("visibility", "live");
+    body.set("listing", "unlisted");
     body.set("intent", "publish");
     const forged = await page.request.post("/creator/new", {
       data: body.toString(),
@@ -993,6 +999,7 @@ test.describe("authenticated create flow (seeded session)", () => {
       body.append("option", "A");
       body.append("option", "B");
       body.set("visibility", "live");
+      body.set("listing", "unlisted");
       body.set("intent", "publish");
       return page.request.post("/creator/new", {
         data: body.toString(),

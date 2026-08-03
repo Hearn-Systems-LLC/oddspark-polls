@@ -11,6 +11,7 @@ import {
 } from "../../shared/application/index";
 import {
   effectivePollStatus,
+  type DiscoveryState,
   type PollId,
   type PollOptionId,
   type PollType,
@@ -48,6 +49,7 @@ export type PollLifecycleSnapshot = {
   pollType: PollType;
   question: string;
   description: string | null;
+  discoveryState: DiscoveryState;
   multiSelectEnabled: boolean;
   minSelections: number | null;
   maxSelections: number | null;

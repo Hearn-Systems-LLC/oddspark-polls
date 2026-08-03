@@ -4,7 +4,11 @@
 
 import { formatUtc } from "../lib/datetime";
 import { countdownLabel } from "../modules/polls/deadline-display";
-import type { PollStatus, PollType } from "../shared/domain/index";
+import type {
+  DiscoveryState,
+  PollStatus,
+  PollType,
+} from "../shared/domain/index";
 import { formatVoteTotal } from "./live-indicator";
 
 /** Exhaustive presentation label for every Poll Type. */
@@ -29,6 +33,7 @@ export type PollCardViewModelInput = {
   nowMs: number;
   href: string;
   current?: boolean;
+  listing?: DiscoveryState;
 };
 
 export type PollCardViewModel = {
@@ -41,6 +46,7 @@ export type PollCardViewModel = {
   status: PollStatus;
   href: string;
   current: boolean;
+  listing?: DiscoveryState;
 };
 
 function closingView(
@@ -78,5 +84,6 @@ export function buildPollCardViewModel(
     status: input.status,
     href: input.href,
     current: input.current ?? false,
+    listing: input.listing,
   };
 }

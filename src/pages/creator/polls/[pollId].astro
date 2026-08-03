@@ -4,9 +4,11 @@ import BaseLayout from "../../../layouts/base-layout.astro";
 import ButtonSecondary from "../../../components/button-secondary.astro";
 import ButtonDestructive from "../../../components/button-destructive.astro";
 import LiveIndicator from "../../../components/live-indicator.astro";
+import ListingBadge from "../../../components/listing-badge.astro";
 import Overlay from "../../../components/overlay.astro";
 import PollCard from "../../../components/poll-card.astro";
 import PollDefinitionFields from "../../../components/poll-definition-fields.astro";
+import PollOption from "../../../components/poll-option.astro";
 import SecurityToggle from "../../../components/security-toggle.astro";
 import ShareAction from "../../../components/share-action.astro";
 import { buildPollCardViewModel } from "../../../components/poll-card";
@@ -32,6 +34,12 @@ import {
   POLL_CAPS,
   RENDER_OPTION_CEILING,
 } from "../../../modules/polls/caps";
+import {
+  DISCOVERY_COPY,
+  LISTING_CHOICES,
+  parseListingDraft,
+  setPollListing,
+} from "../../../modules/discovery/index";
 import {
   SECURITY_TOGGLES,
   effectivePollStatus,
@@ -81,6 +89,7 @@ type OutcomeKind =
   | "description-updated"
   | "poll-closed"
   | "security-updated"
+  | "listing-updated"
   | null;
 
 let fieldErrors: Record<string, string> = {};
@@ -391,6 +400,46 @@ if (Astro.request.method === "POST") {
       formError = result.error.message;
       Astro.response.status = 500;
     }
+  } else if (intent === "update-listing") {
+    const requested = parseListingDraft(parsedForm.listing);
+    if (requested === null) {
+      fieldErrors = { listing: DISCOVERY_COPY.listingInvalid };
+      Astro.response.status = 422;
+    } else {
+      const result = await setPollListing(
+        {
+          loadOwnedPoll: loadLifecycle,
+          updateListing: (input) => persistence.updateListingForOwner(input),
+          nowMs: () => nowMs,
+        },
+        pollId,
+        ownerId,
+        requested,
+      );
+      if (result.ok) {
+        return new Response(null, {
+          status: 303,
+          headers: {
+            location: `/creator/polls/${pollId}?outcome=listing-updated`,
+            "cache-control": "private, no-store",
+          },
+        });
+      }
+      if (result.error.code === "poll_not_found") {
+        poll = null;
+        Astro.response.status = 404;
+      } else if (result.error.code === "poll_delisted") {
+        // Policy rejection renders owner-qualified persisted truth, never the
+        // rejected creator draft (the administrator owns delisted).
+        formError = result.error.message;
+        Astro.response.status = 422;
+        poll = await persistence.findPollForOwner(pollId, ownerId);
+      } else {
+        formError = result.error.message;
+        Astro.response.status = 500;
+        poll = await persistence.findPollForOwner(pollId, ownerId);
+      }
+    }
   }
 }
 
@@ -418,6 +467,8 @@ if (created) {
   outcome = "poll-closed";
 } else if (outcomeParam === "security-updated") {
   outcome = "security-updated";
+} else if (outcomeParam === "listing-updated") {
+  outcome = "listing-updated";
 }
 
 const confirmDelete = Astro.url.searchParams.get("confirm") === "delete";
@@ -465,6 +516,7 @@ const listCards = ownedPolls.map((row) =>
     nowMs,
     href: `/creator/polls/${row.pollId}`,
     current: poll !== null && row.pollId === pollId,
+    listing: row.discoveryState,
   }),
 );
 
@@ -491,7 +543,10 @@ const outcomeCopy: Record<Exclude<OutcomeKind, null>, string> = {
   "description-updated": "Description updated.",
   "poll-closed": "Poll closed.",
   "security-updated": "Security updated.",
+  "listing-updated": "Listing updated.",
 };
+
+const listingState = lifecycleSnapshot?.discoveryState ?? poll?.discoveryState;
 
 const persistedSecurity: PollSecurityToggles | null = lifecycleSnapshot
   ? snapshotSecurityToggles(lifecycleSnapshot)
@@ -591,6 +646,12 @@ const detailPath = `/creator/polls/${pollId}`;
                 <span>{formatVoteTotal(voterCount)}</span>
                 <span aria-hidden="true"> · </span>
               </LiveIndicator>
+              {listingState && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <ListingBadge state={listingState} />
+                </>
+              )}
             </p>
             <h1 id="poll-detail-heading">{poll.question}</h1>
             {formError && (
@@ -676,6 +737,44 @@ const detailPath = `/creator/polls/${pollId}`;
               <div class="security-save">
                 <ButtonSecondary type="submit" name="intent" value="update-security">
                   SAVE SECURITY
+                </ButtonSecondary>
+              </div>
+            </form>
+
+            <form
+              method="post"
+              action={detailPath}
+              class="lifecycle-form listing-form"
+              data-listing-control
+              novalidate
+            >
+              <input type="hidden" name="csrf_token" value={csrfToken} />
+              <fieldset
+                class="field-block"
+                aria-describedby={fieldErrors.listing ? "detail-listing-error" : undefined}
+              >
+                <legend class="group-label">WHO CAN FIND IT</legend>
+                <div class="listing-choices">
+                  {LISTING_CHOICES.map((choice) => (
+                    <PollOption
+                      id={`detail-listing-${choice.value}`}
+                      name="listing"
+                      value={choice.value}
+                      label={choice.label}
+                      description={choice.description}
+                      checked={listingState === choice.value}
+                    />
+                  ))}
+                </div>
+                {fieldErrors.listing && (
+                  <p class="field-error" id="detail-listing-error">
+                    {fieldErrors.listing}
+                  </p>
+                )}
+              </fieldset>
+              <div class="listing-save">
+                <ButtonSecondary type="submit" name="intent" value="update-listing">
+                  SAVE LISTING
                 </ButtonSecondary>
               </div>
             </form>
@@ -867,7 +966,8 @@ const detailPath = `/creator/polls/${pollId}`;
     gap: var(--space-8);
   }
 
-  .security-form .field-block {
+  .security-form .field-block,
+  .listing-form .field-block {
     display: grid;
     gap: var(--space-2);
     margin: 0;
@@ -875,7 +975,8 @@ const detailPath = `/creator/polls/${pollId}`;
     border: none;
   }
 
-  .security-form .group-label {
+  .security-form .group-label,
+  .listing-form .group-label {
     display: block;
     padding: 0;
     color: var(--color-dim);
@@ -899,6 +1000,21 @@ const detailPath = `/creator/polls/${pollId}`;
 
   .security-save {
     margin-top: var(--space-2);
+  }
+
+  .listing-choices {
+    display: grid;
+  }
+
+  .listing-save {
+    margin-top: var(--space-2);
+  }
+
+  .field-error {
+    margin: 0;
+    color: var(--color-alarm);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
   }
 
   .lifecycle-actions {

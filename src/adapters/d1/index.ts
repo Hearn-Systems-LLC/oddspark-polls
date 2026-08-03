@@ -911,7 +911,7 @@ export function createVotePersistence(db: D1Database) {
     async findPoll(pollId: PollId): Promise<VotingPollSnapshot | null> {
       const row = await db
         .prepare(
-          "SELECT id, poll_type, session_checks_enabled, ip_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
+          "SELECT id, poll_type, session_checks_enabled, ip_checks_enabled, captcha_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
         )
         .bind(pollId)
         .first<{
@@ -919,6 +919,7 @@ export function createVotePersistence(db: D1Database) {
           poll_type: PollType;
           session_checks_enabled: number;
           ip_checks_enabled: number;
+          captcha_enabled: number;
           multi_select_enabled: number;
           min_selections: number | null;
           max_selections: number | null;
@@ -934,6 +935,7 @@ export function createVotePersistence(db: D1Database) {
         options: await loadOptions(db, row.id),
         sessionChecksEnabled: row.session_checks_enabled === 1,
         ipChecksEnabled: row.ip_checks_enabled === 1,
+        captchaEnabled: row.captcha_enabled === 1,
         multiSelectEnabled: row.multi_select_enabled === 1,
         minSelections: row.min_selections,
         maxSelections: row.max_selections,

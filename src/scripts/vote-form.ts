@@ -224,6 +224,9 @@ if (form) {
       if (submissionIdInput) {
         submissionIdInput.value = crypto.randomUUID();
       }
+      // Fresh submission ID must couple with a fresh challenge: the prior
+      // one-use token may have been consumed by a slow/lost first request.
+      form.dispatchEvent(new CustomEvent("oddspark:vote-retry-reset"));
     }, 10_000);
   };
 
@@ -279,8 +282,13 @@ if (form) {
     });
   });
 
-  window.addEventListener("pageshow", () => {
+  window.addEventListener("pageshow", (event) => {
     restoreIdleState();
+    // bfcache restore: keep the original submission_id (exact replay must
+    // remain possible) but reset a potentially spent challenge token.
+    if (event.persisted) {
+      form.dispatchEvent(new CustomEvent("oddspark:vote-retry-reset"));
+    }
     // A bfcache-frozen page misses offline/online events; reconcile the
     // banner with reality on resume so a stale "No connection" line cannot
     // outlive the outage (and a missed outage still surfaces).

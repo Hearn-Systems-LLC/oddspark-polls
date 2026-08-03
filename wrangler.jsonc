@@ -46,9 +46,42 @@
       }
     }
   ],
+  // Public Turnstile site key (always-pass visible test key — local/CI only).
+  "vars": {
+    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+  },
+  // Non-inheritable: must be repeated in each named environment. Drives
+  // wrangler types + deploy validation; replaces .dev.vars inference.
+  "secrets": {
+    "required": [
+      "BETTER_AUTH_SECRET",
+      "BETTER_AUTH_URL",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GITHUB_CLIENT_ID",
+      "GITHUB_CLIENT_SECRET",
+      "TURNSTILE_SECRET_KEY",
+      "VOTE_DIGEST_SECRET"
+    ]
+  },
   "env": {
     "staging": {
       "name": "oddspark-polls-staging",
+      "vars": {
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT53x0EwB5qscd"
+      },
+      "secrets": {
+        "required": [
+          "BETTER_AUTH_SECRET",
+          "BETTER_AUTH_URL",
+          "GOOGLE_CLIENT_ID",
+          "GOOGLE_CLIENT_SECRET",
+          "GITHUB_CLIENT_ID",
+          "GITHUB_CLIENT_SECRET",
+          "TURNSTILE_SECRET_KEY",
+          "VOTE_DIGEST_SECRET"
+        ]
+      },
       "kv_namespaces": [
         {
           "binding": "SESSION",
@@ -83,6 +116,21 @@
     },
     "production": {
       "name": "oddspark-polls",
+      "vars": {
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT6LCSXHS59uSr"
+      },
+      "secrets": {
+        "required": [
+          "BETTER_AUTH_SECRET",
+          "BETTER_AUTH_URL",
+          "GOOGLE_CLIENT_ID",
+          "GOOGLE_CLIENT_SECRET",
+          "GITHUB_CLIENT_ID",
+          "GITHUB_CLIENT_SECRET",
+          "TURNSTILE_SECRET_KEY",
+          "VOTE_DIGEST_SECRET"
+        ]
+      },
       "kv_namespaces": [
         {
           "binding": "SESSION",

@@ -3,6 +3,7 @@ import {
   classifyAuthProviderOutcome,
   emitTelemetry,
   isForbiddenTelemetryKey,
+  resolveProviderOutcome,
   telemetryOperationForRoute,
   telemetryResultForStatus,
   type TelemetryRecord,
@@ -56,6 +57,12 @@ describe("telemetry adapter", () => {
     expect(isForbiddenTelemetryKey("cfConnectingIp")).toBe(true);
     expect(isForbiddenTelemetryKey("digest")).toBe(true);
     expect(isForbiddenTelemetryKey("ipDigest")).toBe(true);
+    expect(isForbiddenTelemetryKey("cf-turnstile-response")).toBe(true);
+    expect(isForbiddenTelemetryKey("cfTurnstileResponse")).toBe(true);
+    expect(isForbiddenTelemetryKey("turnstileToken")).toBe(true);
+    expect(isForbiddenTelemetryKey("turnstile_token")).toBe(true);
+    expect(isForbiddenTelemetryKey("TURNSTILE_SECRET_KEY")).toBe(true);
+    expect(isForbiddenTelemetryKey("error-codes")).toBe(true);
     expect(isForbiddenTelemetryKey("requestId")).toBe(false);
     expect(isForbiddenTelemetryKey("operation")).toBe(false);
   });
@@ -79,6 +86,11 @@ describe("telemetry adapter", () => {
       cfConnectingIp: "203.0.113.8",
       digest: "a".repeat(64),
       ipDigest: "b".repeat(64),
+      // Story 2.3: Turnstile challenge material must never reach telemetry.
+      "cf-turnstile-response": "turnstile-token-value",
+      turnstileToken: "turnstile-token-value",
+      TURNSTILE_SECRET_KEY: "secret-value",
+      "error-codes": '["invalid-input-response"]',
     };
 
     emitTelemetry(hostile);
@@ -94,6 +106,13 @@ describe("telemetry adapter", () => {
     expect(raw).not.toContain('"ip"');
     expect(raw).not.toContain("ipAddress");
     expect(raw).not.toContain("digest");
+    expect(raw).not.toContain("turnstile-token-value");
+    expect(raw).not.toContain("secret-value");
+    expect(raw).not.toContain("cf-turnstile-response");
+    expect(raw).not.toContain("cfTurnstileResponse");
+    expect(raw).not.toContain("turnstileToken");
+    expect(raw).not.toContain("TURNSTILE_SECRET_KEY");
+    expect(raw).not.toContain("error-codes");
   });
 
   it("classifies auth initiation and callback outcomes without logging payloads", () => {
@@ -118,6 +137,30 @@ describe("telemetry adapter", () => {
       classifyAuthProviderOutcome("/api/auth/callback/google", 500, null),
     ).toBe("error");
     expect(classifyAuthProviderOutcome("/creator", 200, null)).toBe("none");
+  });
+
+  it("prefers a Turnstile provider-outcome override over auth classification", () => {
+    expect(
+      resolveProviderOutcome("/some-poll", 422, null, "timeout"),
+    ).toBe("timeout");
+    expect(resolveProviderOutcome("/some-poll", 303, null, "ok")).toBe("ok");
+    expect(
+      resolveProviderOutcome("/some-poll", 422, null, "skipped"),
+    ).toBe("skipped");
+    expect(resolveProviderOutcome("/api/sign-in", 303, "/x", "none")).toBe(
+      "ok",
+    );
+  });
+
+  it("keeps auth classification when the override is none", () => {
+    expect(
+      resolveProviderOutcome(
+        "/api/auth/callback/google",
+        500,
+        null,
+        "none",
+      ),
+    ).toBe("error");
   });
 
   it.each([

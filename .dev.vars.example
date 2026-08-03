@@ -11,8 +11,13 @@ GOOGLE_CLIENT_SECRET=
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 
+# Cloudflare Turnstile secret — local/CI use the official always-pass dummy:
+# 1x0000000000000000000000000000000AA
+# Staging/production use provider-issued secrets via provision-auth-secrets.
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+
 # Keys duplicate-vote claim digests — generate independently of the auth
-# secret: openssl rand -base64 32. Keep this key last: `wrangler types` emits
-# keys in file order and the committed worker-configuration.d.ts expects
-# digest-last.
+# secret: openssl rand -base64 32. Keep this key last for provisioning
+# consistency. Binding/type/deploy truth is `secrets.required` in wrangler.jsonc
+# (not .dev.vars key order).
 VOTE_DIGEST_SECRET=

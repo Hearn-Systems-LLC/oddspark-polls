@@ -23,6 +23,21 @@ export type Result<T> =
   | { ok: true; value: T }
   | { ok: false; error: ApplicationError };
 
+/**
+ * Coarse cross-cutting provider outcome for the single per-request telemetry
+ * record (AD-15 / AD-23). Canonical owner — adapters import this; they do not
+ * redefine the union.
+ */
+export type ProviderOutcome =
+  | "none"
+  | "ok"
+  | "error"
+  | "timeout"
+  | "skipped";
+
+/** Provider-neutral human-challenge proof — never a raw Turnstile token. */
+export type HumanChallengeProof = "passed" | "failed" | "not_attempted";
+
 // AD-24: every representation-changing command contributes this descriptor
 // to its one atomic persistence batch. Adapters map the shared descriptor to
 // provider SQL; commands never hand-roll the version update.

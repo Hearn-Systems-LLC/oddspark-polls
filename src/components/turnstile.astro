@@ -1,0 +1,29 @@
+---
+/**
+ * Product-owned Turnstile wrapper for CAPTCHA-enabled writable vote forms.
+ * Renders only the container + public site key. Vendor script and widget are
+ * progressive enhancements in turnstile.ts — no custom iframe chrome.
+ */
+interface Props {
+  siteKey: string;
+}
+
+const { siteKey } = Astro.props;
+---
+
+<div
+  class="turnstile-challenge"
+  data-turnstile
+  data-sitekey={siteKey}
+  data-action="vote"
+>
+</div>
+
+<style>
+  .turnstile-challenge {
+    width: 100%;
+    max-width: 100%;
+    margin: 0 0 var(--space-4);
+    overflow: hidden;
+  }
+</style>

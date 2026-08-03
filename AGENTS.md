@@ -66,9 +66,15 @@ pnpm test
 
 ### Secrets
 
-Seven bindings are required in **every** environment: `BETTER_AUTH_SECRET`,
-`BETTER_AUTH_URL`, `VOTE_DIGEST_SECRET`, `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
+Nine runtime values are required in **every** environment: eight secret-backed
+bindings plus one public Turnstile site-key var. Secrets
+(`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
+`TURNSTILE_SECRET_KEY`, `VOTE_DIGEST_SECRET`) are declared under
+`secrets.required` in `wrangler.jsonc` at the root **and** in each named
+environment — that list is binding/type/deploy truth (Wrangler 4.115), not
+`.dev.vars` key order. `TURNSTILE_SITE_KEY` is a public per-env `vars` entry
+(local/CI always-pass test key; distinct real widgets for staging and production).
 Each environment has its own OAuth registrations — six in total — so a local or staging
 callback can never share production credentials.
 
@@ -78,18 +84,24 @@ and shell history:
 ```zsh
 ./scripts/provision-auth-secrets.zsh local initialize
 ./scripts/provision-auth-secrets.zsh local initialize-voting
+./scripts/provision-auth-secrets.zsh local initialize-turnstile
 ./scripts/provision-auth-secrets.zsh staging rotate-providers
+./scripts/provision-auth-secrets.zsh staging rotate-turnstile
 ```
 
 - **Never** paste a credential into chat, a command argument, `wrangler.jsonc`, CI logs, or Git.
 - The helper deliberately refuses remote master-secret initialization — Cloudflare secret
-  writes are upserts, so `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` / `VOTE_DIGEST_SECRET`
-  are bootstrapped once by hand in each Worker's dashboard.
+  writes are upserts, so `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` / `VOTE_DIGEST_SECRET` /
+  `TURNSTILE_SECRET_KEY` are bootstrapped once by hand (or via masked `rotate-turnstile`)
+  in each Worker's dashboard. Staging/production rotation rejects every documented
+  Cloudflare dummy Turnstile secret.
 - Rotating `BETTER_AUTH_SECRET` invalidates active sessions and makes stored OAuth tokens
   unreadable. Treat it as a planned incident, never a routine step.
 - Rotating `VOTE_DIGEST_SECRET` makes existing duplicate-vote claims
   incomparable and can allow repeat voting. Treat it as a planned integrity
   incident, never a routine step.
+- Siteverify omits optional `remoteip` (raw addresses stay request-bound). CAPTCHA-on
+  still loads Cloudflare's third-party iframe in the browser; CAPTCHA-off loads none.
 
 See `README.md` for the full provider-registration table.
 
@@ -113,9 +125,9 @@ How to *prove* a change is good, and which layer to run for which change.
 The CI gate (`.github/workflows/deploy.yml`) runs, in order: migration guard → `pnpm test`
 → `pnpm check` → `pnpm test:e2e` → `pnpm types` → binding-types drift check
 (`git diff --exit-code worker-configuration.d.ts`) → `pnpm build:production`. Match that
-locally before pushing. The drift check is sensitive to `.dev.vars` key order — `wrangler
-types` emits keys in file order — so keep `.dev.vars` in the canonical order the
-provisioning script produces (`VOTE_DIGEST_SECRET` last, matching `.dev.vars.example`).
+locally before pushing. Binding types are driven by `secrets.required` plus public `vars` in
+`wrangler.jsonc` (not `.dev.vars` inference). Keep `.dev.vars` provisioning order
+with `VOTE_DIGEST_SECRET` last for script consistency with `.dev.vars.example`.
 
 ### What the automated checks *don't* catch
 

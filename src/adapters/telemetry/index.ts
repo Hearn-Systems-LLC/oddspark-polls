@@ -5,12 +5,9 @@
  * Forbidden forever: tokens, voter digests, Comments, ballot content, Voter Codes.
  */
 
-export type ProviderOutcome =
-  | "none"
-  | "ok"
-  | "error"
-  | "timeout"
-  | "skipped";
+import type { ProviderOutcome } from "../../shared/application/index";
+
+export type { ProviderOutcome };
 
 /** Stable result/error codes — expand in later stories; keep narrow here. */
 export type TelemetryResultCode =
@@ -58,6 +55,26 @@ const FORBIDDEN_KEYS = [
   "ip_digest",
   "rateLimitDigest",
   "rate_limit_digest",
+  // Story 2.3: Turnstile challenge material never reaches telemetry.
+  "cf-turnstile-response",
+  "cfTurnstileResponse",
+  "cf_turnstile_response",
+  "turnstileToken",
+  "turnstile_token",
+  "turnstileResponse",
+  "turnstile_response",
+  "turnstileSecret",
+  "turnstile_secret",
+  "TURNSTILE_SECRET_KEY",
+  "turnstileSecretKey",
+  "turnstile_secret_key",
+  "siteverify",
+  "siteVerify",
+  "error-codes",
+  "error_codes",
+  "errorCodes",
+  "challengeToken",
+  "challenge_token",
 ] as const;
 
 export type ForbiddenTelemetryKey = (typeof FORBIDDEN_KEYS)[number];
@@ -89,6 +106,22 @@ export function classifyAuthProviderOutcome(
   }
 
   return "ok";
+}
+
+/**
+ * Resolve the single providerOutcome for the request record. A Turnstile
+ * override set by the vote route wins; otherwise auth classification applies.
+ */
+export function resolveProviderOutcome(
+  pathname: string,
+  status: number,
+  location: string | null,
+  override: ProviderOutcome,
+): ProviderOutcome {
+  if (override !== "none") {
+    return override;
+  }
+  return classifyAuthProviderOutcome(pathname, status, location);
 }
 
 export function isForbiddenTelemetryKey(

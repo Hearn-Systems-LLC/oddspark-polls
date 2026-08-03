@@ -6,6 +6,7 @@
 import {
   incrementRepresentationVersion,
   type ApplicationError,
+  type HumanChallengeProof,
   type RepresentationVersionIncrement,
   type Result,
 } from "../../shared/application/index";
@@ -65,7 +66,11 @@ export const VOTE_COPY = {
     "This Poll changed while you were deciding. Your Vote wasn't recorded — review the options and try again.",
   idempotencyConflict:
     "Your earlier Vote stands — this change wasn't recorded.",
+  captchaFailed:
+    "The human check didn't pass. Try it again — it's usually just a fluke.",
 } as const;
+
+export type { HumanChallengeProof };
 
 export class AlreadyVotedError extends Error {
   readonly checkKind: VoterClaimCheckKind;
@@ -118,6 +123,8 @@ export type VotingPollSnapshot = {
   }[];
   sessionChecksEnabled: boolean;
   ipChecksEnabled: boolean;
+  /** Authoritative CAPTCHA policy from the fresh Poll snapshot (Story 2.3). */
+  captchaEnabled: boolean;
   multiSelectEnabled: boolean;
   minSelections: number | null;
   maxSelections: number | null;
@@ -243,6 +250,13 @@ export type CastVoteInput = {
    * whether the claim is required — the route does not.
    */
   ipDigest: VoterClaimDigest | null;
+  /**
+   * Provider-neutral human-challenge proof from the outbound adapter. Raw
+   * tokens, Siteverify DTOs, and provider error codes never cross this
+   * boundary. CastVote's authoritative Poll snapshot decides whether proof
+   * is required.
+   */
+  humanChallenge: HumanChallengeProof;
 };
 
 export type CastVoteOutcome = {
@@ -446,6 +460,15 @@ export async function castVote(
     ipDigest = asVoterClaimDigest(input.ipDigest);
     if (ipDigest === null) {
       return failure("ip_check_unavailable", VOTE_COPY.retry);
+    }
+  }
+
+  // CAPTCHA: required only when the authoritative snapshot enables it. Fail
+  // closed on failed/not_attempted; with CAPTCHA off, ignore any proof value
+  // (including a stale failed verification from an on→off race).
+  if (poll.captchaEnabled) {
+    if (input.humanChallenge !== "passed") {
+      return failure("captcha_failed", VOTE_COPY.captchaFailed);
     }
   }
 

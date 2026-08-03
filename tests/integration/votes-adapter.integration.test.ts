@@ -71,6 +71,7 @@ beforeEach(async () => {
 
 async function insertPoll(
   overrides: {
+    captchaEnabled?: boolean;
     closedAtMs?: number;
     deadlineMs?: number;
     ipChecksEnabled?: boolean;
@@ -82,11 +83,12 @@ async function insertPoll(
 ): Promise<void> {
   await testEnv.DB.batch([
     testEnv.DB.prepare(
-      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, ip_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 0, 0)",
+      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, ip_checks_enabled, captcha_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 0, 0)",
     ).bind(
       POLL_ID,
       overrides.sessionChecksEnabled === false ? 0 : 1,
       overrides.ipChecksEnabled === true ? 1 : 0,
+      overrides.captchaEnabled === true ? 1 : 0,
       overrides.multiSelectEnabled === true ? 1 : 0,
       overrides.minSelections ?? null,
       overrides.maxSelections ?? null,
@@ -188,6 +190,7 @@ const integratedCommand = {
   selectedOptionIds: [OPTION_A],
   browserToken: "browser-token",
   ipDigest: null as VoterClaimDigest | null,
+  humanChallenge: "not_attempted" as const,
 };
 
 async function closePoll(): Promise<void> {
@@ -343,6 +346,7 @@ describe("createVotePersistence", () => {
       ],
       sessionChecksEnabled: true,
       ipChecksEnabled: false,
+      captchaEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -1172,6 +1176,63 @@ describe("castVote with the D1 adapter", () => {
     expect(prepare).not.toHaveBeenCalled();
     expect(bind).not.toHaveBeenCalled();
     expect(executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("projects captcha_enabled into the voting snapshot and gates later submissions only", async () => {
+    await insertPoll({ captchaEnabled: false });
+    const deps = castVoteDeps();
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        humanChallenge: "not_attempted",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { existing: false },
+    });
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+
+    await testEnv.DB.prepare(
+      "UPDATE poll SET captcha_enabled = 1 WHERE id = ?1",
+    )
+      .bind(POLL_ID)
+      .run();
+
+    await expect(deps.findPoll(POLL_ID)).resolves.toMatchObject({
+      captchaEnabled: true,
+    });
+
+    const before = await counts();
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "after-captcha-enable",
+        browserToken: "browser-after-captcha",
+        humanChallenge: "not_attempted",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "captcha_failed" },
+    });
+    expect(await counts()).toEqual(before);
+
+    await expect(
+      castVote(deps, {
+        ...integratedCommand,
+        submissionId: "after-captcha-passed",
+        browserToken: "browser-after-captcha-pass",
+        humanChallenge: "passed",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { existing: false },
+    });
   });
 
   it("rolls back every loser fact when forced concurrent same-network Votes race", async () => {

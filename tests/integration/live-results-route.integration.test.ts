@@ -107,6 +107,7 @@ function requestContext(): RequestContext {
     sessionLookupFailed: false,
     resultsLookupFailed: false,
     voteRejection: false,
+    providerOutcome: "none",
   };
 }
 

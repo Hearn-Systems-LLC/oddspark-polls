@@ -15,6 +15,10 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Per-poll Security Toggles on create and the Poll detail page: Session Checks, IP Checks,
+  Voter Codes, CAPTCHA, and VPN Blocking. A new Poll opens with Session Checks on and the
+  rest off. After the first Vote, protections can only tighten — on Toggles lock on, and
+  the server rejects any attempt to loosen them.
 - Share action beside the canonical Poll URL on the create-confirmation, voting, and
   results surfaces: native share sheet when available, clipboard copy with a persistent
   `LINK COPIED` confirmation otherwise, and a no-JavaScript floor of the selectable URL.

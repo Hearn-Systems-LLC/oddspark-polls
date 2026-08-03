@@ -3,6 +3,7 @@ import {
   DISCOVERY_STATES,
   POLL_TYPES,
   RESULT_VISIBILITIES,
+  SECURITY_TOGGLES,
   effectivePollStatus,
 } from "../../src/shared/domain/index";
 import {
@@ -22,6 +23,16 @@ describe("shared kernel enums", () => {
 
   it("declares the three Visibility Settings", () => {
     expect(RESULT_VISIBILITIES).toEqual(["live", "after_close", "creator_only"]);
+  });
+
+  it("declares the five Security Toggles in trust-badge vocabulary order", () => {
+    expect(SECURITY_TOGGLES).toEqual([
+      "sessionChecks",
+      "ipChecks",
+      "voterCodes",
+      "captcha",
+      "vpnBlocking",
+    ]);
   });
 
   it("declares the three Discovery states", () => {

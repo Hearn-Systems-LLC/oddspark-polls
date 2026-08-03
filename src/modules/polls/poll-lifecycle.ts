@@ -38,6 +38,8 @@ export const LIFECYCLE_COPY = {
   // question + vote count; commands never render UI copy for the overlay.
   definitionIntentOnLocked:
     "This Poll's definition is locked. Only the description can change.",
+  securityLocked:
+    "Votes are in. Protections can tighten from here, not loosen.",
 } as const;
 
 export type PollLifecycleSnapshot = {
@@ -49,6 +51,11 @@ export type PollLifecycleSnapshot = {
   multiSelectEnabled: boolean;
   minSelections: number | null;
   maxSelections: number | null;
+  sessionChecksEnabled: boolean;
+  ipChecksEnabled: boolean;
+  voterCodesEnabled: boolean;
+  captchaEnabled: boolean;
+  vpnBlockingEnabled: boolean;
   options: { id: PollOptionId; label: string; position: number }[];
   deadlineMs: number | null;
   closedAtMs: number | null;

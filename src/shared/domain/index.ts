@@ -24,6 +24,18 @@ export const RESULT_VISIBILITIES = [
 ] as const;
 export type ResultVisibility = (typeof RESULT_VISIBILITIES)[number];
 
+// FR-15 / UX-DR6: the five independent Security Toggles. Form field names and
+// the trust-badge vocabulary share these keys (Story 2.1 / 2.4).
+export const SECURITY_TOGGLES = [
+  "sessionChecks",
+  "ipChecks",
+  "voterCodes",
+  "captcha",
+  "vpnBlocking",
+] as const;
+export type SecurityToggle = (typeof SECURITY_TOGGLES)[number];
+export type PollSecurityToggles = Record<SecurityToggle, boolean>;
+
 export const DISCOVERY_STATES = ["unlisted", "listed", "delisted"] as const;
 export type DiscoveryState = (typeof DISCOVERY_STATES)[number];
 

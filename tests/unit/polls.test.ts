@@ -41,6 +41,11 @@ function draft(overrides: Partial<CreatePollDraft> = {}): CreatePollDraft {
     multiSelect: "false",
     minSelections: "",
     maxSelections: "",
+    sessionChecks: "true",
+    ipChecks: "false",
+    voterCodes: "false",
+    captcha: "false",
+    vpnBlocking: "false",
     ...overrides,
   };
 }
@@ -77,6 +82,11 @@ describe("validateCreatePoll", () => {
         multiSelect: false,
         minSelections: null,
         maxSelections: null,
+        sessionChecksEnabled: true,
+        ipChecksEnabled: false,
+        voterCodesEnabled: false,
+        captchaEnabled: false,
+        vpnBlockingEnabled: false,
       });
     }
   });
@@ -1082,6 +1092,10 @@ describe("createPoll command", () => {
       resultVisibility: "live",
       discoveryState: "unlisted",
       sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -1309,6 +1323,11 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
+      sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -1568,6 +1587,11 @@ describe("createPoll retry-after-deadline dedupe", () => {
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
+      sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -1601,6 +1625,11 @@ describe("createPoll retry-after-deadline dedupe", () => {
       multiSelectEnabled: true,
       minSelections: 1,
       maxSelections: 2,
+      sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -1638,6 +1667,11 @@ describe("createPoll retry-after-deadline dedupe", () => {
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
+      sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },

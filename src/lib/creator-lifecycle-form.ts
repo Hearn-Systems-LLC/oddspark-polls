@@ -1,9 +1,12 @@
 import { RENDER_OPTION_CEILING } from "../modules/polls/caps";
+import type { SecurityToggle } from "../shared/domain/index";
+import { SECURITY_TOGGLES } from "../shared/domain/index";
 
 export type LifecycleIntent =
   | "add-option"
   | "update-definition"
   | "update-description"
+  | "update-security"
   | "close"
   | "delete";
 
@@ -16,12 +19,18 @@ export type ParsedLifecycleForm = {
   minSelections: string;
   maxSelections: string;
   pollType: string | null;
+  sessionChecks: string;
+  ipChecks: string;
+  voterCodes: string;
+  captcha: string;
+  vpnBlocking: string;
 };
 
 const INTENTS = new Set<LifecycleIntent>([
   "add-option",
   "update-definition",
   "update-description",
+  "update-security",
   "close",
   "delete",
 ]);
@@ -35,6 +44,8 @@ const DEFINITION_KEYS = [
   "pollType",
 ] as const;
 
+const SECURITY_KEYS = [...SECURITY_TOGGLES] as SecurityToggle[];
+
 const COMMON_KEYS = new Set(["csrf_token", "intent"]);
 const DEFINITION_FORM_KEYS = new Set([
   ...COMMON_KEYS,
@@ -42,6 +53,7 @@ const DEFINITION_FORM_KEYS = new Set([
   "description",
 ]);
 const DESCRIPTION_FORM_KEYS = new Set([...COMMON_KEYS, "description"]);
+const SECURITY_FORM_KEYS = new Set([...COMMON_KEYS, ...SECURITY_KEYS]);
 
 function unreadable(): never {
   throw new Error("unreadable_lifecycle_form");
@@ -55,6 +67,16 @@ function singleton(formData: FormData, key: string): string {
   return typeof values[0] === "string" ? values[0] : "";
 }
 
+function emptySecurityDraft(): Record<SecurityToggle, string> {
+  return {
+    sessionChecks: "false",
+    ipChecks: "false",
+    voterCodes: "false",
+    captcha: "false",
+    vpnBlocking: "false",
+  };
+}
+
 export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
   const rawIntent = singleton(formData, "intent");
   if (!INTENTS.has(rawIntent as LifecycleIntent)) {
@@ -66,7 +88,9 @@ export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
       ? DEFINITION_FORM_KEYS
       : intent === "update-description"
         ? DESCRIPTION_FORM_KEYS
-        : COMMON_KEYS;
+        : intent === "update-security"
+          ? SECURITY_FORM_KEYS
+          : COMMON_KEYS;
 
   for (const [key, value] of formData.entries()) {
     if (!allowed.has(key) || typeof value !== "string") {
@@ -88,6 +112,17 @@ export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
     return unreadable();
   }
 
+  const security = emptySecurityDraft();
+  if (intent === "update-security") {
+    for (const key of SECURITY_KEYS) {
+      // Checkbox absent = off (multiSelect semantics). Only "true" is on.
+      security[key] =
+        formData.has(key) && singleton(formData, key) === "true"
+          ? "true"
+          : "false";
+    }
+  }
+
   return {
     intent,
     question: singleton(formData, "question"),
@@ -99,5 +134,10 @@ export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
     pollType: formData.has("pollType")
       ? singleton(formData, "pollType")
       : null,
+    sessionChecks: security.sessionChecks,
+    ipChecks: security.ipChecks,
+    voterCodes: security.voterCodes,
+    captcha: security.captcha,
+    vpnBlocking: security.vpnBlocking,
   };
 }

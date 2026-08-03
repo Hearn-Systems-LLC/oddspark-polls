@@ -29,6 +29,7 @@ import type { RepresentationVersionIncrement } from "../../shared/application/in
 import type {
   PollId,
   PollOptionId,
+  PollSecurityToggles,
   PollType,
   ResultVisibility,
   UserId,
@@ -44,6 +45,11 @@ export type PollPage = {
   multiSelectEnabled: boolean;
   minSelections: number | null;
   maxSelections: number | null;
+  sessionChecksEnabled: boolean;
+  ipChecksEnabled: boolean;
+  voterCodesEnabled: boolean;
+  captchaEnabled: boolean;
+  vpnBlockingEnabled: boolean;
   deadlineMs: number | null;
   closedAtMs: number | null;
   options: { id: PollOptionId; label: string; position: number }[];
@@ -76,6 +82,11 @@ type PollRow = {
   multi_select_enabled: number;
   min_selections: number | null;
   max_selections: number | null;
+  session_checks_enabled: number;
+  ip_checks_enabled: number;
+  voter_codes_enabled: number;
+  captcha_enabled: number;
+  vpn_blocking_enabled: number;
   deadline_ms: number | null;
   closed_at_ms: number | null;
 };
@@ -104,6 +115,11 @@ function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
     multiSelectEnabled: row.multi_select_enabled === 1,
     minSelections: row.min_selections,
     maxSelections: row.max_selections,
+    sessionChecksEnabled: row.session_checks_enabled === 1,
+    ipChecksEnabled: row.ip_checks_enabled === 1,
+    voterCodesEnabled: row.voter_codes_enabled === 1,
+    captchaEnabled: row.captcha_enabled === 1,
+    vpnBlockingEnabled: row.vpn_blocking_enabled === 1,
     deadlineMs: row.deadline_ms,
     closedAtMs: row.closed_at_ms,
     options,
@@ -130,7 +146,7 @@ export function createPollPersistence(db: D1Database) {
         await db.batch([
           db
             .prepare(
-              "INSERT INTO poll (id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
+              "INSERT INTO poll (id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)",
             )
             .bind(
               poll.id,
@@ -141,6 +157,10 @@ export function createPollPersistence(db: D1Database) {
               poll.resultVisibility,
               poll.discoveryState,
               poll.sessionChecksEnabled ? 1 : 0,
+              poll.ipChecksEnabled ? 1 : 0,
+              poll.voterCodesEnabled ? 1 : 0,
+              poll.captchaEnabled ? 1 : 0,
+              poll.vpnBlockingEnabled ? 1 : 0,
               poll.multiSelectEnabled ? 1 : 0,
               poll.minSelections,
               poll.maxSelections,
@@ -199,7 +219,7 @@ export function createPollPersistence(db: D1Database) {
     async findPollByReference(reference: string): Promise<PollPage | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.deadline_ms, p.closed_at_ms, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
         )
         .bind(reference)
         .first<PollRow>();
@@ -236,7 +256,7 @@ export function createPollPersistence(db: D1Database) {
     ): Promise<OwnedPoll | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
         )
         .bind(pollId, ownerUserId)
         .first<
@@ -314,6 +334,8 @@ export function createPollPersistence(db: D1Database) {
         .prepare(
           `SELECT p.id, p.owner_user_id, p.poll_type, p.question, p.description,
                   p.multi_select_enabled, p.min_selections, p.max_selections,
+                  p.session_checks_enabled, p.ip_checks_enabled,
+                  p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled,
                   p.deadline_ms, p.closed_at_ms, p.representation_version,
                   (
                     SELECT COUNT(*)
@@ -337,6 +359,11 @@ export function createPollPersistence(db: D1Database) {
           multi_select_enabled: number;
           min_selections: number | null;
           max_selections: number | null;
+          session_checks_enabled: number;
+          ip_checks_enabled: number;
+          voter_codes_enabled: number;
+          captcha_enabled: number;
+          vpn_blocking_enabled: number;
           deadline_ms: number | null;
           closed_at_ms: number | null;
           representation_version: number;
@@ -358,6 +385,11 @@ export function createPollPersistence(db: D1Database) {
         multiSelectEnabled: row.multi_select_enabled === 1,
         minSelections: row.min_selections,
         maxSelections: row.max_selections,
+        sessionChecksEnabled: row.session_checks_enabled === 1,
+        ipChecksEnabled: row.ip_checks_enabled === 1,
+        voterCodesEnabled: row.voter_codes_enabled === 1,
+        captchaEnabled: row.captcha_enabled === 1,
+        vpnBlockingEnabled: row.vpn_blocking_enabled === 1,
         options: rows.results.flatMap((option) =>
           option.option_id !== null &&
           option.option_label !== null &&
@@ -579,6 +611,96 @@ export function createPollPersistence(db: D1Database) {
         return "deleted";
       }
       return "not_found";
+    },
+
+    // Security Toggles (Story 2.1): owner-qualified UPDATE with a race-free
+    // tighten-only guard — current column <= requested for every toggle when
+    // any Vote exists, so a Vote landing between advisory pre-check and write
+    // cannot loosen a protection (AD-17).
+    async updateSecurityTogglesForOwner(input: {
+      pollId: PollId;
+      ownerUserId: UserId;
+      toggles: PollSecurityToggles;
+      version: RepresentationVersionIncrement;
+    }): Promise<"updated" | "unchanged" | "locked" | "not_found"> {
+      const version = versionForPoll(input.pollId, input.version);
+      const session = input.toggles.sessionChecks ? 1 : 0;
+      const ip = input.toggles.ipChecks ? 1 : 0;
+      const codes = input.toggles.voterCodes ? 1 : 0;
+      const captcha = input.toggles.captcha ? 1 : 0;
+      const vpn = input.toggles.vpnBlocking ? 1 : 0;
+      const result = await db
+        .prepare(
+          `UPDATE poll
+           SET session_checks_enabled = ?3,
+               ip_checks_enabled = ?4,
+               voter_codes_enabled = ?5,
+               captcha_enabled = ?6,
+               vpn_blocking_enabled = ?7,
+               updated_at_ms = ?8,
+               representation_version = representation_version + 1
+           WHERE id = ?1
+             AND owner_user_id = ?2
+             AND (
+               NOT EXISTS (SELECT 1 FROM vote v WHERE v.poll_id = poll.id)
+               OR (
+                 session_checks_enabled <= ?3
+                 AND ip_checks_enabled <= ?4
+                 AND voter_codes_enabled <= ?5
+                 AND captcha_enabled <= ?6
+                 AND vpn_blocking_enabled <= ?7
+               )
+             )
+             AND (
+               session_checks_enabled IS NOT ?3
+               OR ip_checks_enabled IS NOT ?4
+               OR voter_codes_enabled IS NOT ?5
+               OR captcha_enabled IS NOT ?6
+               OR vpn_blocking_enabled IS NOT ?7
+             )`,
+        )
+        .bind(
+          version.pollId,
+          input.ownerUserId,
+          session,
+          ip,
+          codes,
+          captcha,
+          vpn,
+          version.updatedAtMs,
+        )
+        .run();
+      if ((result.meta.changes ?? 0) === 1) {
+        return "updated";
+      }
+      const existing = await this.loadLifecycleForOwner(
+        input.pollId,
+        input.ownerUserId,
+      );
+      if (!existing) {
+        return "not_found";
+      }
+      if (
+        existing.sessionChecksEnabled === input.toggles.sessionChecks &&
+        existing.ipChecksEnabled === input.toggles.ipChecks &&
+        existing.voterCodesEnabled === input.toggles.voterCodes &&
+        existing.captchaEnabled === input.toggles.captcha &&
+        existing.vpnBlockingEnabled === input.toggles.vpnBlocking
+      ) {
+        return "unchanged";
+      }
+      if (existing.voterCount > 0) {
+        if (
+          (existing.sessionChecksEnabled && !input.toggles.sessionChecks) ||
+          (existing.ipChecksEnabled && !input.toggles.ipChecks) ||
+          (existing.voterCodesEnabled && !input.toggles.voterCodes) ||
+          (existing.captchaEnabled && !input.toggles.captcha) ||
+          (existing.vpnBlockingEnabled && !input.toggles.vpnBlocking)
+        ) {
+          return "locked";
+        }
+      }
+      throw new Error("Security toggle update guard changed no row");
     },
   };
 }

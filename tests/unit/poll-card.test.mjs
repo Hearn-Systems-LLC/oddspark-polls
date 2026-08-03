@@ -132,12 +132,10 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
     );
     expect(detailPageSource).toContain("{formatVoteTotal(voterCount)}");
 
-    for (const outOfScope of [
-      "security-toggle",
-      "chart-form-toggle",
-    ]) {
-      expect(detailPageSource).not.toContain(outOfScope);
-    }
+    // Story 2.1 ships Security Toggles on this surface; chart form remains
+    // results-only (Story 1.10).
+    expect(detailPageSource).toContain("security-toggle");
+    expect(detailPageSource).not.toContain("chart-form-toggle");
     // Story 1.12 adds the shared delete overlay on this surface.
     expect(detailPageSource).toContain("data-overlay");
     expect(detailPageSource).toContain("DELETE POLL");

@@ -1,0 +1,167 @@
+---
+/**
+ * security-toggle — UX-DR6. Native checkbox under a square track/knob visual.
+ * Locked: on-track at full strength, dim knob, LOCKED label — never opacity.
+ * Motion system is closed at five primitives; the knob flips instantly (UX-DR4).
+ */
+interface Props {
+  id: string;
+  name: string;
+  /** Checkbox value when checked (default "true"). */
+  value?: string;
+  label: string;
+  description: string;
+  checked?: boolean;
+  /** Only when checked && voterCount > 0 — UI reflects server lock. */
+  locked?: boolean;
+  class?: string;
+}
+
+const {
+  id,
+  name,
+  value = "true",
+  label,
+  description,
+  checked = false,
+  locked = false,
+  class: className = "",
+} = Astro.props;
+
+// A disabled checkbox does not submit — round-trip locked-on via hidden input.
+const needsHidden = locked && checked;
+---
+
+<label
+  class:list={["security-toggle", locked && "is-locked", className]}
+  for={id}
+>
+  {
+    needsHidden && (
+      <input type="hidden" name={name} value={value} />
+    )
+  }
+  <input
+    class="visually-hidden security-toggle-input"
+    type="checkbox"
+    id={id}
+    name={needsHidden ? undefined : name}
+    value={value}
+    checked={checked}
+    disabled={locked}
+  />
+  <span class="security-toggle-track" aria-hidden="true">
+    <span class="security-toggle-knob"></span>
+  </span>
+  <span class="security-toggle-text">
+    <span class="security-toggle-name-row">
+      <span class="security-toggle-name">{label}</span>
+      {
+        locked && (
+          <span class="security-toggle-locked-label">LOCKED</span>
+        )
+      }
+    </span>
+    <span class="security-toggle-description">{description}</span>
+  </span>
+</label>
+
+<style>
+  .security-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--security-toggle-row-gap);
+    min-height: var(--security-toggle-min-height);
+    padding-block: var(--security-toggle-row-padding-y);
+    border-bottom: var(--space-hairline) solid var(--color-rule);
+    color: var(--security-toggle-name-color);
+    font-family: var(--font-machine);
+    cursor: pointer;
+  }
+
+  .security-toggle.is-locked {
+    cursor: default;
+  }
+
+  .security-toggle:focus-within {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .security-toggle-track {
+    position: relative;
+    flex-shrink: 0;
+    width: var(--security-toggle-track-width);
+    height: var(--security-toggle-track-height);
+    border-radius: var(--security-toggle-radius);
+    background: var(--security-toggle-track-off);
+  }
+
+  /* Visual state follows the native checkbox only — no is-on class that would
+     stick after a no-JS uncheck. Locked rows keep on-track via is-locked. */
+  .security-toggle-input:checked + .security-toggle-track,
+  .security-toggle.is-locked .security-toggle-track {
+    background: var(--security-toggle-track-on);
+  }
+
+  .security-toggle.is-locked .security-toggle-track {
+    background: var(--security-toggle-track-locked);
+  }
+
+  .security-toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: var(--security-toggle-knob-size);
+    height: var(--security-toggle-knob-size);
+    border-radius: var(--security-toggle-radius);
+    background: var(--security-toggle-knob-off);
+  }
+
+  .security-toggle-input:checked + .security-toggle-track .security-toggle-knob,
+  .security-toggle.is-locked .security-toggle-knob {
+    left: calc(
+      var(--security-toggle-track-width) - var(--security-toggle-knob-size) - 2px
+    );
+    background: var(--security-toggle-knob-on);
+  }
+
+  .security-toggle.is-locked .security-toggle-track .security-toggle-knob {
+    background: var(--security-toggle-knob-locked);
+  }
+
+  .security-toggle-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .security-toggle-name-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+  }
+
+  .security-toggle-name {
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .security-toggle-locked-label {
+    color: var(--security-toggle-locked-label-color);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .security-toggle-description {
+    color: var(--security-toggle-description-color);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+</style>

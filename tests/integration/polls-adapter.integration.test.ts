@@ -52,6 +52,10 @@ function rows(overrides: Partial<PollPersistenceRows> = {}): PollPersistenceRows
       resultVisibility: "live",
       discoveryState: "unlisted",
       sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -235,6 +239,11 @@ describe("createPollPersistence reads", () => {
       multiSelect: "true",
       minSelections: "1",
       maxSelections: "2",
+      sessionChecks: "true",
+      ipChecks: "false",
+      voterCodes: "false",
+      captcha: "false",
+      vpnBlocking: "false",
     };
 
     await expect(createPoll(deps, OWNER_1, draft)).resolves.toMatchObject({
@@ -294,6 +303,11 @@ describe("createPollPersistence reads", () => {
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
+      sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       deadlineMs: null,
       closedAtMs: null,
       options: [

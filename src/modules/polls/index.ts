@@ -51,6 +51,13 @@ export type CreatePollDraft = {
   multiSelect: string;
   minSelections: string;
   maxSelections: string;
+  // Security Toggles (FR-15): raw checkbox strings, `=== "true"` semantics —
+  // absent/tampered = off (the multiSelect precedent).
+  sessionChecks: string;
+  ipChecks: string;
+  voterCodes: string;
+  captcha: string;
+  vpnBlocking: string;
   // No-JS duplicate-POST dedupe (D4, decision 2026-07-29): the form renders
   // with a pre-minted poll UUID; a retried publish carrying the same ID
   // collides on the poll PRIMARY KEY instead of minting a second Poll.
@@ -76,6 +83,11 @@ export type ValidatedCreatePoll = {
   multiSelect: boolean;
   minSelections: number | null;
   maxSelections: number | null;
+  sessionChecksEnabled: boolean;
+  ipChecksEnabled: boolean;
+  voterCodesEnabled: boolean;
+  captchaEnabled: boolean;
+  vpnBlockingEnabled: boolean;
 };
 
 // Voice-and-Tone catalog for creation failures. The three epic-specified
@@ -343,6 +355,11 @@ export function validateCreatePoll(
       multiSelect: definition.value.multiSelect,
       minSelections: definition.value.minSelections,
       maxSelections: definition.value.maxSelections,
+      sessionChecksEnabled: draft.sessionChecks === "true",
+      ipChecksEnabled: draft.ipChecks === "true",
+      voterCodesEnabled: draft.voterCodes === "true",
+      captchaEnabled: draft.captcha === "true",
+      vpnBlockingEnabled: draft.vpnBlocking === "true",
     },
   };
 }
@@ -358,7 +375,11 @@ export type PollPersistenceRows = {
     description: string | null;
     resultVisibility: ResultVisibility;
     discoveryState: "unlisted";
-    sessionChecksEnabled: true;
+    sessionChecksEnabled: boolean;
+    ipChecksEnabled: boolean;
+    voterCodesEnabled: boolean;
+    captchaEnabled: boolean;
+    vpnBlockingEnabled: boolean;
     multiSelectEnabled: boolean;
     minSelections: number | null;
     maxSelections: number | null;
@@ -413,6 +434,11 @@ export type ExistingPollSnapshot = {
   multiSelectEnabled: boolean;
   minSelections: number | null;
   maxSelections: number | null;
+  sessionChecksEnabled: boolean;
+  ipChecksEnabled: boolean;
+  voterCodesEnabled: boolean;
+  captchaEnabled: boolean;
+  vpnBlockingEnabled: boolean;
   options: { label: string; position: number }[];
   canonicalReference: string;
   canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
@@ -477,6 +503,11 @@ function matchesExistingPoll(
       effectiveMin(existing.minSelections) &&
     effectiveMax(validated.maxSelections) ===
       effectiveMax(existing.maxSelections) &&
+    validated.sessionChecksEnabled === existing.sessionChecksEnabled &&
+    validated.ipChecksEnabled === existing.ipChecksEnabled &&
+    validated.voterCodesEnabled === existing.voterCodesEnabled &&
+    validated.captchaEnabled === existing.captchaEnabled &&
+    validated.vpnBlockingEnabled === existing.vpnBlockingEnabled &&
     optionCount === existing.options.length &&
     validated.options.every(
       (option, index) =>
@@ -538,6 +569,11 @@ function draftContentForCompare(
       multiSelect && rawMaxSelections.length > 0
         ? Number(rawMaxSelections)
         : null,
+    sessionChecksEnabled: draft.sessionChecks === "true",
+    ipChecksEnabled: draft.ipChecks === "true",
+    voterCodesEnabled: draft.voterCodes === "true",
+    captchaEnabled: draft.captcha === "true",
+    vpnBlockingEnabled: draft.vpnBlocking === "true",
   };
 }
 
@@ -661,7 +697,11 @@ export async function createPoll(
       description: validated.value.description,
       resultVisibility: validated.value.resultVisibility,
       discoveryState: "unlisted",
-      sessionChecksEnabled: true,
+      sessionChecksEnabled: validated.value.sessionChecksEnabled,
+      ipChecksEnabled: validated.value.ipChecksEnabled,
+      voterCodesEnabled: validated.value.voterCodesEnabled,
+      captchaEnabled: validated.value.captchaEnabled,
+      vpnBlockingEnabled: validated.value.vpnBlockingEnabled,
       multiSelectEnabled: validated.value.multiSelect,
       minSelections: validated.value.minSelections,
       maxSelections: validated.value.maxSelections,
@@ -759,3 +799,16 @@ export {
   type ClosePollOutcome,
   type DeletePollOutcome,
 } from "./poll-lifecycle";
+
+// Security toggles (Story 2.1) — same re-export pattern as lifecycle.
+export {
+  SECURITY_COPY,
+  SECURITY_TOGGLE_META,
+  evaluateSecurityToggleChange,
+  parseSecurityToggleDraft,
+  snapshotSecurityToggles,
+  updatePollSecurityToggles,
+  type SecurityTogglesUpdateOutcome,
+  type UpdatePollSecurityTogglesDeps,
+  type UpdateSecurityTogglesPort,
+} from "./poll-security";

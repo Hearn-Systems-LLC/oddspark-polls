@@ -158,6 +158,23 @@
   --chart-form-toggle-padding-y: var(--space-2);
   --chart-form-toggle-min-height: 48px;
   --chart-form-toggle-focus-outline-offset: 2px;
+  /* security-toggle — square track/knob, no pill (UX-DR6 / DESIGN.md). */
+  --security-toggle-track-width: 40px;
+  --security-toggle-track-height: 20px;
+  --security-toggle-knob-size: 16px;
+  --security-toggle-radius: 0;
+  --security-toggle-track-off: var(--color-rule);
+  --security-toggle-track-on: var(--color-solar-wash);
+  --security-toggle-knob-off: var(--color-text);
+  --security-toggle-knob-on: var(--color-solar-ink);
+  --security-toggle-track-locked: var(--color-solar-wash);
+  --security-toggle-knob-locked: var(--color-dim);
+  --security-toggle-name-color: var(--color-text);
+  --security-toggle-description-color: var(--color-dim);
+  --security-toggle-locked-label-color: var(--color-dim);
+  --security-toggle-row-padding-y: var(--space-3);
+  --security-toggle-row-gap: var(--space-3);
+  --security-toggle-min-height: 48px;
   /* poll-card — a row, not a card (DESIGN.md:310-318, 623). One :root block:
      every binding resolves to an already-mode-collapsed runtime var. */
   --poll-card-background: transparent;

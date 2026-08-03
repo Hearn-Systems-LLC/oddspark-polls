@@ -2,9 +2,9 @@
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 import ButtonPrimary from "../../components/button-primary.astro";
-import ButtonSecondary from "../../components/button-secondary.astro";
 import Input from "../../components/input.astro";
 import PollOption from "../../components/poll-option.astro";
+import PollDefinitionFields from "../../components/poll-definition-fields.astro";
 import BaseLayout from "../../layouts/base-layout.astro";
 import { createPollPersistence } from "../../adapters/d1/index";
 import {
@@ -57,11 +57,6 @@ const VISIBILITY_CHOICES = [
   { value: "live", label: "LIVE", description: "anyone with the link watches the count move" },
   { value: "after_close", label: "AFTER CLOSE", description: "Voters see a confirmation until the Poll closes" },
   { value: "creator_only", label: "CREATOR-ONLY", description: "only you ever see the Tally" },
-] as const;
-
-const MULTI_SELECT_CHOICES = [
-  { value: "false", label: "ONE" },
-  { value: "true", label: "SEVERAL" },
 ] as const;
 
 const INITIAL_OPTION_ROWS = 4;
@@ -257,120 +252,13 @@ while (values.options.length < 2) {
         </p>
       </div>
 
-      <div class="field-block">
-        <Input
-          id="question"
-          name="question"
-          label="QUESTION"
-          value={values.question}
-          error={Boolean(fieldErrors.question)}
-          describedby={fieldErrors.question ? "question-error" : undefined}
-        />
-        {fieldErrors.question && (
-          <p class="field-error" id="question-error">{fieldErrors.question}</p>
-        )}
-      </div>
-
-      <fieldset
-        class="field-block options-block"
-        aria-describedby={fieldErrors.options ? "options-error" : undefined}
-      >
-        <legend class="group-label">OPTIONS</legend>
-        <div data-option-list>
-          {values.options.slice(0, RENDER_OPTION_CEILING).map((option, index) => (
-            <div class="option-row" data-option-row>
-              <Input
-                id={`option-${index + 1}`}
-                name="option"
-                label={`OPTION ${index + 1}`}
-                value={option}
-              />
-            </div>
-          ))}
-        </div>
-        {fieldErrors.options && (
-          <p class="field-error" id="options-error">{fieldErrors.options}</p>
-        )}
-        <div class="add-option">
-          <ButtonSecondary type="submit" name="intent" value="add-option">
-            ADD OPTION
-          </ButtonSecondary>
-          {optionNote && <p class="helper-note">{optionNote}</p>}
-          <p class="helper-note">Blank options are dropped when you publish.</p>
-        </div>
-      </fieldset>
-
-      <fieldset
-        class="field-block"
-        aria-describedby={fieldErrors.multiSelect
-          ? "multi-select-error"
-          : undefined}
-      >
-        <legend class="group-label">HOW MANY OPTIONS CAN A VOTER PICK</legend>
-        <div class="multi-select-choices">
-          {MULTI_SELECT_CHOICES.map((choice) => (
-            <PollOption
-              id={`multi-select-${choice.value}`}
-              name="multiSelect"
-              value={choice.value}
-              label={choice.label}
-              checked={values.multiSelect === choice.value}
-            />
-          ))}
-        </div>
-        {fieldErrors.multiSelect && (
-          <p class="field-error" id="multi-select-error">
-            {fieldErrors.multiSelect}
-          </p>
-        )}
-        <div
-          class="multi-select-bounds"
-          data-multi-select-bounds
-          data-has-bounds-error={Boolean(
-            fieldErrors.minSelections || fieldErrors.maxSelections,
-          )}
-        >
-          <div class="field-block">
-            <Input
-              id="min-selections"
-              name="minSelections"
-              label="MIN (OPTIONAL)"
-              type="number"
-              value={values.minSelections}
-              error={Boolean(fieldErrors.minSelections)}
-              describedby={fieldErrors.minSelections
-                ? "min-selections-error multi-select-bounds-help"
-                : "multi-select-bounds-help"}
-            />
-            {fieldErrors.minSelections && (
-              <p class="field-error" id="min-selections-error">
-                {fieldErrors.minSelections}
-              </p>
-            )}
-          </div>
-          <div class="field-block">
-            <Input
-              id="max-selections"
-              name="maxSelections"
-              label="MAX (OPTIONAL)"
-              type="number"
-              value={values.maxSelections}
-              error={Boolean(fieldErrors.maxSelections)}
-              describedby={fieldErrors.maxSelections
-                ? "max-selections-error multi-select-bounds-help"
-                : "multi-select-bounds-help"}
-            />
-            {fieldErrors.maxSelections && (
-              <p class="field-error" id="max-selections-error">
-                {fieldErrors.maxSelections}
-              </p>
-            )}
-          </div>
-          <p class="helper-note" id="multi-select-bounds-help">
-            Leave blank for 1 to all options.
-          </p>
-        </div>
-      </fieldset>
+      <PollDefinitionFields
+        values={values}
+        fieldErrors={fieldErrors}
+        optionNote={optionNote}
+        showPollType={false}
+        showDescription={false}
+      />
 
       <fieldset
         class="field-block"

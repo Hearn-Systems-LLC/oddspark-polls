@@ -7,6 +7,8 @@ import {
   DuplicatePollIdError,
   ReferenceTakenError,
   type PollPersistenceRows,
+  type PollLifecycleSnapshot,
+  type ValidatedPollDefinition,
 } from "../../modules/polls/index";
 import type {
   ResultsAccessEnvelope,
@@ -16,12 +18,14 @@ import type {
 import {
   AlreadyVotedError,
   PollClosedError,
+  PollDefinitionChangedError,
   PollGoneError,
   SubmissionReplayError,
   type StoredVoteOutcome,
   type VotePersistenceBatch,
   type VotingPollSnapshot,
 } from "../../modules/voting/index";
+import type { RepresentationVersionIncrement } from "../../shared/application/index";
 import type {
   PollId,
   PollOptionId,
@@ -102,6 +106,16 @@ function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
     closedAtMs: row.closed_at_ms,
     options,
   };
+}
+
+function versionForPoll(
+  pollId: PollId,
+  version: RepresentationVersionIncrement,
+): RepresentationVersionIncrement {
+  if (version.pollId !== pollId) {
+    throw new Error("Representation-version Poll mismatch");
+  }
+  return version;
 }
 
 export function createPollPersistence(db: D1Database) {
@@ -285,6 +299,283 @@ export function createPollPersistence(db: D1Database) {
         voterCount: row.voter_count,
       }));
     },
+
+    // Lifecycle load (Story 1.12): owner-qualified snapshot with vote count
+    // for presentation and definition/description/close/delete commands.
+    async loadLifecycleForOwner(
+      pollId: PollId,
+      ownerUserId: UserId,
+    ): Promise<PollLifecycleSnapshot | null> {
+      const rows = await db
+        .prepare(
+          `SELECT p.id, p.owner_user_id, p.poll_type, p.question, p.description,
+                  p.multi_select_enabled, p.min_selections, p.max_selections,
+                  p.deadline_ms, p.closed_at_ms, p.representation_version,
+                  (
+                    SELECT COUNT(*)
+                    FROM vote AS v INDEXED BY vote_poll_id_idx
+                    WHERE v.poll_id = p.id
+                  ) AS voter_count,
+                  po.id AS option_id, po.label AS option_label,
+                  po.position AS option_position
+           FROM poll p
+           LEFT JOIN poll_option po ON po.poll_id = p.id
+           WHERE p.id = ?1 AND p.owner_user_id = ?2
+           ORDER BY po.position`,
+        )
+        .bind(pollId, ownerUserId)
+        .all<{
+          id: PollId;
+          owner_user_id: UserId;
+          poll_type: PollType;
+          question: string;
+          description: string | null;
+          multi_select_enabled: number;
+          min_selections: number | null;
+          max_selections: number | null;
+          deadline_ms: number | null;
+          closed_at_ms: number | null;
+          representation_version: number;
+          voter_count: number;
+          option_id: PollOptionId | null;
+          option_label: string | null;
+          option_position: number | null;
+        }>();
+      const row = rows.results[0];
+      if (!row) {
+        return null;
+      }
+      return {
+        pollId: row.id,
+        ownerUserId: row.owner_user_id,
+        pollType: row.poll_type,
+        question: row.question,
+        description: row.description,
+        multiSelectEnabled: row.multi_select_enabled === 1,
+        minSelections: row.min_selections,
+        maxSelections: row.max_selections,
+        options: rows.results.flatMap((option) =>
+          option.option_id !== null &&
+          option.option_label !== null &&
+          option.option_position !== null
+            ? [
+                {
+                  id: option.option_id,
+                  label: option.option_label,
+                  position: option.option_position,
+                },
+              ]
+            : [],
+        ),
+        deadlineMs: row.deadline_ms,
+        closedAtMs: row.closed_at_ms,
+        representationVersion: row.representation_version,
+        voterCount: row.voter_count,
+      };
+    },
+
+    // Manual close: one owner + effective-open guarded UPDATE that coalesces
+    // closed_at_ms, updated_at_ms, and representation_version (AD-24).
+    async closePollForOwner(input: {
+      pollId: PollId;
+      ownerUserId: UserId;
+      version: RepresentationVersionIncrement;
+    }): Promise<"closed" | "already_closed" | "not_found"> {
+      const version = versionForPoll(input.pollId, input.version);
+      const result = await db
+        .prepare(
+          `UPDATE poll
+           SET closed_at_ms = ?3,
+               updated_at_ms = ?3,
+               representation_version = representation_version + 1
+           WHERE id = ?1
+             AND owner_user_id = ?2
+             AND closed_at_ms IS NULL
+             AND (deadline_ms IS NULL OR deadline_ms > ?3)`,
+        )
+        .bind(version.pollId, input.ownerUserId, version.updatedAtMs)
+        .run();
+      if ((result.meta.changes ?? 0) === 1) {
+        return "closed";
+      }
+      const existing = await this.loadLifecycleForOwner(
+        input.pollId,
+        input.ownerUserId,
+      );
+      if (!existing) {
+        return "not_found";
+      }
+      return "already_closed";
+    },
+
+    // Description-only edit: one owner-qualified statement when the value
+    // actually changes (command pre-checks no-op before calling).
+    async updateDescriptionForOwner(input: {
+      pollId: PollId;
+      ownerUserId: UserId;
+      description: string | null;
+      version: RepresentationVersionIncrement;
+    }): Promise<"updated" | "unchanged" | "not_found"> {
+      const version = versionForPoll(input.pollId, input.version);
+      const result = await db
+        .prepare(
+          `UPDATE poll
+           SET description = ?3,
+               updated_at_ms = ?4,
+               representation_version = representation_version + 1
+           WHERE id = ?1
+             AND owner_user_id = ?2
+             AND description IS NOT ?3`,
+        )
+        .bind(
+          version.pollId,
+          input.ownerUserId,
+          input.description,
+          version.updatedAtMs,
+        )
+        .run();
+      if ((result.meta.changes ?? 0) === 1) {
+        return "updated";
+      }
+      const existing = await this.loadLifecycleForOwner(
+        input.pollId,
+        input.ownerUserId,
+      );
+      if (!existing) {
+        return "not_found";
+      }
+      if (existing.description === input.description) {
+        return "unchanged";
+      }
+      throw new Error("Description update guard changed no row");
+    },
+
+    // Full definition replacement: every mutating statement carries the same
+    // owner + no-accepted-Vote guard so a Vote race cannot delete options
+    // after a zero-row parent update (AD-17).
+    async updateDefinitionForOwner(input: {
+      pollId: PollId;
+      ownerUserId: UserId;
+      definition: ValidatedPollDefinition;
+      options: { id: PollOptionId; label: string; position: number }[];
+      expectedRepresentationVersion: number;
+      version: RepresentationVersionIncrement;
+    }): Promise<
+      "updated" | "locked" | "conflict" | "unsupported" | "not_found"
+    > {
+      const version = versionForPoll(input.pollId, input.version);
+      // Child replacement runs before the parent version increment. Every
+      // statement compares the expected version, owner, Poll Type, and no-Vote
+      // state inside one atomic D1 batch. A stale editor or winning Vote makes
+      // the complete batch inert; a later parent failure rolls children back.
+      const noVoteGuard =
+        "NOT EXISTS (SELECT 1 FROM vote v WHERE v.poll_id = poll.id)";
+      const statements: D1PreparedStatement[] = [
+        db
+          .prepare(
+            `DELETE FROM poll_option
+             WHERE poll_id = ?1
+               AND EXISTS (
+                 SELECT 1 FROM poll
+                 WHERE poll.id = ?1
+                   AND poll.owner_user_id = ?2
+                   AND poll.poll_type = 'multiple_choice'
+                   AND poll.representation_version = ?3
+                   AND ${noVoteGuard}
+               )`,
+          )
+          .bind(
+            version.pollId,
+            input.ownerUserId,
+            input.expectedRepresentationVersion,
+          ),
+        ...input.options.map((option) =>
+          db
+            .prepare(
+              `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms)
+               SELECT ?4, poll.id, ?5, ?6, ?7
+               FROM poll
+               WHERE poll.id = ?1
+                 AND poll.owner_user_id = ?2
+                 AND poll.poll_type = 'multiple_choice'
+                 AND poll.representation_version = ?3
+                 AND ${noVoteGuard}`,
+            )
+            .bind(
+              version.pollId,
+              input.ownerUserId,
+              input.expectedRepresentationVersion,
+              option.id,
+              option.label,
+              option.position,
+              version.updatedAtMs,
+            ),
+        ),
+        db
+          .prepare(
+            `UPDATE poll
+             SET question = ?4,
+                 description = ?5,
+                 multi_select_enabled = ?6,
+                 min_selections = ?7,
+                 max_selections = ?8,
+                 updated_at_ms = ?9,
+                 representation_version = representation_version + 1
+             WHERE id = ?1
+               AND owner_user_id = ?2
+               AND poll_type = 'multiple_choice'
+               AND representation_version = ?3
+               AND ${noVoteGuard}`,
+          )
+          .bind(
+            version.pollId,
+            input.ownerUserId,
+            input.expectedRepresentationVersion,
+            input.definition.question,
+            input.definition.description,
+            input.definition.multiSelect ? 1 : 0,
+            input.definition.minSelections,
+            input.definition.maxSelections,
+            version.updatedAtMs,
+          ),
+      ];
+
+      const batch = await db.batch(statements);
+      const parentChanges = batch.at(-1)?.meta.changes ?? 0;
+      if (parentChanges === 1) {
+        return "updated";
+      }
+      const existing = await this.loadLifecycleForOwner(
+        input.pollId,
+        input.ownerUserId,
+      );
+      if (!existing) {
+        return "not_found";
+      }
+      if (existing.pollType !== "multiple_choice") {
+        return "unsupported";
+      }
+      if (existing.voterCount > 0) {
+        return "locked";
+      }
+      return "conflict";
+    },
+
+    // Hard delete: single owner-qualified DELETE; FK cascades remove children.
+    async deletePollForOwner(input: {
+      pollId: PollId;
+      ownerUserId: UserId;
+    }): Promise<"deleted" | "not_found"> {
+      const [result] = await db.batch([
+        db
+          .prepare("DELETE FROM poll WHERE id = ?1 AND owner_user_id = ?2")
+          .bind(input.pollId, input.ownerUserId),
+      ]);
+      if ((result?.meta.changes ?? 0) >= 1) {
+        return "deleted";
+      }
+      return "not_found";
+    },
   };
 }
 
@@ -372,10 +663,62 @@ export function createVotePersistence(db: D1Database) {
           error instanceof Error &&
           /FOREIGN KEY constraint failed/i.test(error.message)
         ) {
+          // Distinguish deleted Poll vs edited options (Story 1.12). Re-read
+          // the Poll and selected option reachability before classifying.
+          const pollStillExists = await db
+            .prepare("SELECT 1 AS found FROM poll WHERE id = ?1")
+            .bind(batch.vote.pollId)
+            .first<{ found: number }>();
+          if (!pollStillExists) {
+            throw new PollGoneError();
+          }
+          const selectedOptionIds = batch.contributions
+            .filter(
+              (contribution): contribution is {
+                kind: "vote_selection";
+                voteId: string;
+                pollOptionId: PollOptionId;
+              } => contribution.kind === "vote_selection",
+            )
+            .map((contribution) => contribution.pollOptionId);
+          if (selectedOptionIds.length > 0) {
+            const placeholders = selectedOptionIds
+              .map((_, index) => `?${index + 2}`)
+              .join(", ");
+            const reachable = await db
+              .prepare(
+                `SELECT COUNT(*) AS count FROM poll_option
+                 WHERE poll_id = ?1 AND id IN (${placeholders})`,
+              )
+              .bind(batch.vote.pollId, ...selectedOptionIds)
+              .first<{ count: number }>();
+            if ((reachable?.count ?? 0) !== selectedOptionIds.length) {
+              throw new PollDefinitionChangedError();
+            }
+          }
+          // Unrelated malformed-state FK — keep generic for the command layer.
           throw new PollGoneError();
         }
         throw error;
       }
+    },
+
+    async optionsStillReachable(
+      pollId: PollId,
+      optionIds: readonly PollOptionId[],
+    ): Promise<boolean> {
+      if (optionIds.length === 0) {
+        return true;
+      }
+      const placeholders = optionIds.map((_, index) => `?${index + 2}`).join(", ");
+      const reachable = await db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM poll_option
+           WHERE poll_id = ?1 AND id IN (${placeholders})`,
+        )
+        .bind(pollId, ...optionIds)
+        .first<{ count: number }>();
+      return (reachable?.count ?? 0) === optionIds.length;
     },
 
     async findPoll(pollId: PollId): Promise<VotingPollSnapshot | null> {

@@ -393,7 +393,6 @@ describe("castVote", () => {
   it.each([
     [new AlreadyVotedError(), "already_voted", VOTE_COPY.alreadyVoted],
     [new PollClosedError(), "poll_closed", VOTE_COPY.pollClosed],
-    [new PollGoneError(), "poll_deleted", VOTE_COPY.pollDeleted],
     [new Error("driver detail"), "vote_failed", VOTE_COPY.retry],
   ])(
     "maps persistence failures to safe stable outcomes",
@@ -412,6 +411,40 @@ describe("castVote", () => {
       }
     },
   );
+
+  it("maps PollGone while the Poll still loads to poll_definition_changed", async () => {
+    const commandDeps = deps({
+      persistVote: async () => {
+        throw new PollGoneError();
+      },
+    });
+    const result = await castVote(commandDeps, input);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("poll_definition_changed");
+      expect(result.error.message).toBe(VOTE_COPY.pollDefinitionChanged);
+    }
+  });
+
+  it("maps PollGone to poll_deleted when the Poll is gone on re-read", async () => {
+    let findCalls = 0;
+    const commandDeps = deps({
+      findPoll: async () => {
+        findCalls += 1;
+        // First call for cast; second after PollGone.
+        return findCalls === 1 ? poll() : null;
+      },
+      persistVote: async () => {
+        throw new PollGoneError();
+      },
+    });
+    const result = await castVote(commandDeps, input);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("poll_deleted");
+      expect(result.error.message).toBe(VOTE_COPY.pollDeleted);
+    }
+  });
 
   it("adjudicates a concurrent submission collision by re-reading the stored hash", async () => {
     let lookup = 0;
@@ -851,6 +884,8 @@ describe("VOTE_COPY", () => {
       tooManySelections:
         "Too many selections. This Poll takes up to {max}, and your ballot is still here.",
       pollDeleted: "This Poll no longer exists.",
+      pollDefinitionChanged:
+        "This Poll changed while you were deciding. Your Vote wasn't recorded — review the options and try again.",
       idempotencyConflict:
         "Your earlier Vote stands — this change wasn't recorded.",
     });

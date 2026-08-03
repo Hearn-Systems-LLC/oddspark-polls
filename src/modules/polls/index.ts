@@ -16,6 +16,23 @@ import {
 import { multipleChoiceStrategy } from "./types/multiple-choice";
 import { isReservedSlug } from "./reserved-slugs";
 import { POLL_CAPS } from "./caps";
+import {
+  DEFINITION_COPY,
+  codePointLength,
+  normalizePollDescription,
+  validatePollDefinition,
+  type PollDefinitionDraft,
+  type ValidatedPollDefinition,
+} from "./definition";
+
+export {
+  DEFINITION_COPY,
+  codePointLength,
+  normalizePollDescription,
+  validatePollDefinition,
+  type PollDefinitionDraft,
+  type ValidatedPollDefinition,
+} from "./definition";
 
 // Re-exported for the module's existing consumers; the caps live in
 // ./caps.ts so browser code can import them without the domain command.
@@ -64,14 +81,7 @@ export type ValidatedCreatePoll = {
 // Voice-and-Tone catalog for creation failures. The three epic-specified
 // lines are verbatim; the rest follow the same flat, layout-neutral idiom.
 export const CREATE_POLL_COPY = {
-  questionMissing: "A Poll needs a question. Ask something.",
-  questionTooLong: `That question is too long. Keep it to ${POLL_CAPS.maxQuestionLength} characters.`,
-  optionsMissing: "A Poll needs options. Add at least two.",
-  optionsInsufficient: "One option isn't a Poll. Add at least one more.",
-  optionsTooMany: `That's too many options. Keep it to ${POLL_CAPS.maxOptions}.`,
-  optionTooLong: `That option is too long. Keep it to ${POLL_CAPS.maxOptionLength} characters.`,
-  optionsDuplicate: "Two options say the same thing. Make one of them different.",
-  descriptionTooLong: `That description is too long. Keep it to ${POLL_CAPS.maxDescriptionLength.toLocaleString("en-US")} characters.`,
+  ...DEFINITION_COPY,
   visibilityInvalid: "Pick a Visibility Setting.",
   deadlinePast:
     "That Deadline has already passed. The Poll would close before anyone saw it.",
@@ -84,18 +94,10 @@ export const CREATE_POLL_COPY = {
   customLinkReserved:
     "`{slug}` is reserved by the application itself. Pick something less structural.",
   customLinkTaken: "`{slug}` is taken. Pick another.",
-  boundsMinTooLow:
-    "Min is at least 1 — a Poll someone can't vote in isn't a Poll.",
-  boundsNotInteger: "Bounds must be whole numbers.",
-  boundsOrder: "Min can't be more than max.",
-  boundsMinTooHigh: `Min can't be more than the option count ({count}).`,
-  boundsMaxTooHigh: `Max can't be more than the option count ({count}).`,
-  boundsWithoutMultiSelect: "Bounds only apply when multi-select is on.",
   createFailed: "That didn't publish. Nothing was created — try again.",
   duplicateDivergent: "That Poll already published. Start a new one.",
   dedupeUnconfirmable:
     "That may have published. Try again — a retry won't create it twice.",
-  rowsTooMany: "That's too many rows. Clear the blank ones first.",
 } as const;
 
 // `datetime-local` values; the seconds component (step attributes,
@@ -256,127 +258,11 @@ export function validateCreatePoll(
     reasonCodes[field] = reason;
   };
 
-  // The Voice copy says "characters" — count code points, not UTF-16 code
-  // units, so emoji and other astral characters count as one.
-  const codePoints = (value: string): number => [...value].length;
-
-  const question = draft.question.trim();
-  if (question.length === 0) {
-    fail("question", "question_missing", CREATE_POLL_COPY.questionMissing);
-  } else if (codePoints(question) > POLL_CAPS.maxQuestionLength) {
-    fail("question", "question_too_long", CREATE_POLL_COPY.questionTooLong);
-  }
-
-  const labels = draft.options
-    .map((label) => label.trim())
-    .filter((label) => label.length > 0);
-  if (labels.length === 0) {
-    fail("options", "options_missing", CREATE_POLL_COPY.optionsMissing);
-  } else if (labels.length === 1) {
-    fail("options", "options_insufficient", CREATE_POLL_COPY.optionsInsufficient);
-  } else if (labels.length > POLL_CAPS.maxOptions) {
-    fail("options", "options_too_many", CREATE_POLL_COPY.optionsTooMany);
-  } else if (
-    labels.some((label) => codePoints(label) > POLL_CAPS.maxOptionLength)
-  ) {
-    fail("options", "option_too_long", CREATE_POLL_COPY.optionTooLong);
-  } else if (new Set(labels).size !== labels.length) {
-    // Exact duplicates after trimming are rejected (decision, 2026-07-29).
-    fail("options", "options_duplicate", CREATE_POLL_COPY.optionsDuplicate);
-  }
-
-  const multiSelect = draft.multiSelect === "true";
-  const rawMinSelections = draft.minSelections.trim();
-  const rawMaxSelections = draft.maxSelections.trim();
-  let minSelections: number | null = null;
-  let maxSelections: number | null = null;
-
-  if (!multiSelect) {
-    if (rawMinSelections.length > 0 || rawMaxSelections.length > 0) {
-      fail(
-        "multiSelect",
-        "bounds_without_multi_select",
-        CREATE_POLL_COPY.boundsWithoutMultiSelect,
-      );
-    }
-  } else if (fieldErrors["options"] === undefined) {
-    // Skip bounds when the option list is already invalid — effective max
-    // would be 0 (or 1) and produce a noisy bounds_order next to the real
-    // options error.
-    if (rawMinSelections.length > 0) {
-      const parsedMin = Number(rawMinSelections);
-      if (!Number.isInteger(parsedMin)) {
-        fail(
-          "minSelections",
-          "bounds_not_integer",
-          CREATE_POLL_COPY.boundsNotInteger,
-        );
-      } else if (parsedMin < 1) {
-        fail(
-          "minSelections",
-          "bounds_min_too_low",
-          CREATE_POLL_COPY.boundsMinTooLow,
-        );
-      } else {
-        minSelections = parsedMin;
-      }
-    }
-
-    if (rawMaxSelections.length > 0) {
-      const parsedMax = Number(rawMaxSelections);
-      if (!Number.isInteger(parsedMax)) {
-        fail(
-          "maxSelections",
-          "bounds_not_integer",
-          CREATE_POLL_COPY.boundsNotInteger,
-        );
-      } else {
-        maxSelections = parsedMax;
-      }
-    }
-
-    const effectiveMin = minSelections ?? 1;
-    const effectiveMax = maxSelections ?? labels.length;
-    if (
-      fieldErrors["maxSelections"] === undefined &&
-      effectiveMax > labels.length
-    ) {
-      fail(
-        "maxSelections",
-        "bounds_max_too_high",
-        CREATE_POLL_COPY.boundsMaxTooHigh.replace(
-          "{count}",
-          String(labels.length),
-        ),
-      );
-    } else if (
-      fieldErrors["minSelections"] === undefined &&
-      effectiveMin > labels.length
-    ) {
-      fail(
-        "minSelections",
-        "bounds_min_too_high",
-        CREATE_POLL_COPY.boundsMinTooHigh.replace(
-          "{count}",
-          String(labels.length),
-        ),
-      );
-    } else if (
-      fieldErrors["minSelections"] === undefined &&
-      fieldErrors["maxSelections"] === undefined &&
-      effectiveMin > effectiveMax
-    ) {
-      fail("minSelections", "bounds_order", CREATE_POLL_COPY.boundsOrder);
-    }
-  }
-
-  const description = draft.description.trim();
-  if (codePoints(description) > POLL_CAPS.maxDescriptionLength) {
-    fail(
-      "description",
-      "description_too_long",
-      CREATE_POLL_COPY.descriptionTooLong,
-    );
+  const definition = validatePollDefinition(draft);
+  if (!definition.ok) {
+    // Merge so create can still attach visibility/deadline/customLink errors.
+    Object.assign(fieldErrors, definition.error.fieldErrors ?? {});
+    Object.assign(reasonCodes, definition.error.reasonCodes ?? {});
   }
 
   if (!isResultVisibility(draft.resultVisibility)) {
@@ -439,31 +325,24 @@ export function validateCreatePoll(
     };
   }
 
-  const facts = multipleChoiceStrategy.create(
-    {
-      optionLabels: labels,
-      multiSelect,
-      minSelections,
-      maxSelections,
-    },
-    { nowMs },
-  );
-  if (!facts.ok) {
-    return facts;
+  // definition is ok here because any definition failure was folded into
+  // fieldErrors and would have returned above.
+  if (!definition.ok) {
+    return definition;
   }
 
   return {
     ok: true,
     value: {
-      question,
-      description: description.length > 0 ? description : null,
-      options: facts.value.options,
+      question: definition.value.question,
+      description: definition.value.description,
+      options: definition.value.options,
       resultVisibility: draft.resultVisibility as ResultVisibility,
       deadlineMs,
       customLink,
-      multiSelect: facts.value.multiSelect,
-      minSelections: facts.value.minSelections,
-      maxSelections: facts.value.maxSelections,
+      multiSelect: definition.value.multiSelect,
+      minSelections: definition.value.minSelections,
+      maxSelections: definition.value.maxSelections,
     },
   };
 }
@@ -861,3 +740,22 @@ export async function createPoll(
     value: { pollId, reference, createdAtMs: nowMs, existing: false },
   };
 }
+
+// Lifecycle commands (Story 1.12) — focused sibling, re-exported for the
+// delivery boundary so pages never import deep module paths.
+export {
+  LIFECYCLE_COPY,
+  closePoll,
+  updatePollDefinition,
+  updatePollDescription,
+  deletePoll,
+  type ClosePollDeps,
+  type UpdatePollDefinitionDeps,
+  type UpdatePollDescriptionDeps,
+  type DeletePollDeps,
+  type PollLifecycleSnapshot,
+  type DefinitionUpdateOutcome,
+  type DescriptionUpdateOutcome,
+  type ClosePollOutcome,
+  type DeletePollOutcome,
+} from "./poll-lifecycle";

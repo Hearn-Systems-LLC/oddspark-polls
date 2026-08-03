@@ -94,11 +94,21 @@ export function telemetryOperationForRoute(
   pathname: string,
   hasPollReferenceParam: boolean,
 ): string {
+  const segments = pathname.split("/").filter(Boolean);
+
+  // Creator detail uses an internal Poll UUID in the path — never log it.
+  if (
+    segments.length === 3 &&
+    segments[0] === "creator" &&
+    segments[1] === "polls"
+  ) {
+    return `${method} /creator/polls/:pollId`;
+  }
+
   if (!hasPollReferenceParam) {
     return `${method} ${pathname}`;
   }
 
-  const segments = pathname.split("/").filter(Boolean);
   const normalizedPathname =
     segments.length === 3 &&
     segments[1] === "results" &&

@@ -94,9 +94,9 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
 
   it("keeps the created outcome first and places the desktop grid deterministically", () => {
     expect(detailPageSource).toMatch(
-      /<main[\s\S]*?data-creator-surface\s*>\s*\{created && \(/,
+      /<main[\s\S]*?data-creator-surface[\s\S]*?>\s*\{\s*outcome && \(/,
     );
-    expect(detailPageSource).toContain('data-outcome="created"');
+    expect(detailPageSource).toContain('data-outcome={outcome === "created" ? "created" : outcome}');
     expect(detailPageSource).toContain(
       ".has-created-outcome > .creator-list-region",
     );
@@ -135,13 +135,25 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
     for (const outOfScope of [
       "share-action",
       "ShareAction",
-      "data-overlay",
-      "<dialog",
       "security-toggle",
       "chart-form-toggle",
     ]) {
       expect(detailPageSource).not.toContain(outOfScope);
     }
+    // Story 1.12 adds the shared delete overlay on this surface.
+    expect(detailPageSource).toContain("data-overlay");
+    expect(detailPageSource).toContain("DELETE POLL");
+    expect(detailPageSource).toContain("CLOSE POLL");
+  });
+
+  it("reloads current definition state for stale edit conflicts", () => {
+    expect(detailPageSource).toMatch(
+      /poll_definition_conflict[\s\S]*draftValues = null;[\s\S]*status = 422;[\s\S]*findPollForOwner/,
+    );
+    expect(detailPageSource).toContain("poll_type_unsupported");
+    expect(detailPageSource).toContain(
+      'submittedPollType !== "multiple_choice"',
+    );
   });
 
   it("builds each row once in the component-adjacent presenter", () => {

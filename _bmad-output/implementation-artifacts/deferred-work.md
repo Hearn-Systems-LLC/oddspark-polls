@@ -14,12 +14,12 @@
 
 ## Deferred from: code review of 1-7-multi-select-voting (2026-07-31)
 
-- **Bounds lock after first Vote (AD-17 handoff to Story 1.12)** — multi-select min/max bounds lock with question/options/type once any Vote is accepted; retroactive bound edits would invalidate accepted ballots. No edit surface exists until Story 1.12 (close/edit/delete); 1.12 must enforce the lock. Recorded in Story 1.7 decisions table; not implemented in 1.7 by design.
+- ~~**Bounds lock after first Vote (AD-17 handoff to Story 1.12)**~~ — **Resolved in Story 1.12.** Definition (question, options, multi-select bounds, type) is editable only with zero accepted Votes; D1 mutation batch re-enforces the no-Vote guard; after the first Vote the detail surface renders the exact lock line and description remains editable.
 
 ## Deferred from: code review of 1-1-project-foundation-deployable-skeleton (2026-07-29)
 
 - Playwright e2e not in CI gate — spec gate requires unit+integration only; add when the e2e suite grows.
-- Overlay primitive never demonstrated (rendered `open={false}`) — accepted deviation: overlay exists token-bound and opens in later stories; AD-2 forbids the client JS an open demo would need.
+- ~~Overlay primitive never demonstrated (rendered `open={false}`)~~ — **Resolved in Story 1.12.** The shared overlay now has a real Poll-delete consumer with enhanced and no-JavaScript open/Cancel/confirm paths plus browser-level focus, dismissal, scroll, and hostile-copy proof [src/components/overlay.astro, src/scripts/overlay.ts, tests/e2e/creator-poll-lifecycle.spec.mjs].
 - Mode-toggle label goes stale on OS theme change — no `matchMedia("prefers-color-scheme")` change listener [src/scripts/mode-override.ts:52-69].
 - `…Light` exception tokens `availability-yes-glyph-light` / `solar-ink-on-wash-light` defined but unconsumed — canonical DESIGN.md tokens consumed by Epic 7 availability-cell [src/styles/tokens.css:41,48-50].
 - Structural Seed deviation — `src/lib/`, `src/layouts/`, `src/styles/` not in the seed tree; update ARCHITECTURE-SPINE seed to match the real layout.
@@ -58,7 +58,7 @@
 ## Deferred from: code review round 6 of 1-3-create-a-multiple-choice-poll (2026-07-30)
 
 - The reachable sign-in redirect has no `cache-control` — `creatorGuardMiddleware` 303s every unauthenticated `/creator/*` request bare; the page-level defense-in-depth redirects patched in review round 5 are dead code by comparison. Deferred: pre-existing middleware behavior from Story 1.2; fix belongs to the middleware layer, not this story's diff [src/middleware.ts:237-242].
-- The 10s idle-restore can re-enable PUBLISH while a legitimately slow POST is still in flight — a second click stacks two navigations; the nonce dedupe keeps the database safe (exactly the D4 case), but the UI outcome is whichever response wins. Deferred: accepted residual; a request-aware restore is a larger client redesign [src/scripts/create-poll-form.ts].
+- ~~The 10s idle-restore can re-enable PUBLISH while a legitimately slow POST is still in flight~~ — **Resolved in Story 1.12.** The shared definition-form enhancer no longer uses an unconditional timer and restores controls only when a document is actually recovered from the back-forward cache [src/scripts/poll-definition-form.ts].
 
 ## Deferred from: code review round 2 of 1-2-creator-sign-in-with-google-or-github (2026-07-29)
 
@@ -86,7 +86,7 @@
 
 ## Deferred from: code review of 1-5-cast-a-vote-that-counts-exactly-once (2026-07-31)
 
-- Any FK failure in the vote batch maps to `PollGoneError` ("This Poll no longer exists") — the batch has four FKs that can fail independently of the poll's existence (`vote_selection.poll_option_id`, `voter_claim.vote_id`, …), but D1's error text doesn't name the failing FK, so the mapping can't be narrowed today. Deferred: only bites if options ever become deletable (or recovery-drift loses option rows); revisit when a delete-options capability lands [src/adapters/d1/index.ts:295-300].
+- ~~Any FK failure in the vote batch maps to `PollGoneError` ("This Poll no longer exists")~~ — **Resolved in Story 1.12 for the now-reachable option-edit race.** After an FK failure the adapter re-reads Poll and selected-option reachability: a missing Poll keeps the ordinary 404, missing replaced options map to `poll_definition_changed`, and unrelated malformed-state failures remain generic [src/adapters/d1/index.ts, src/modules/voting/index.ts].
 - POST to a case-variant custom slug receives a bare 301 that browsers rewrite to GET, silently discarding the ballot. Deferred, pre-existing: the redirect predates this story (1.4) and is effectively unreachable in browser flow — the vote form is only ever served at the canonical reference, so only scripted POSTs hit it [src/pages/[reference].astro:70-91].
 - The `extension:*` vote-contribution seam is a domain-only contract: `castVote` accepts `deps.contributors`, but the D1 adapter throws `Unsupported vote contribution kind` on any extension contribution, and the unit test proves the seam only against a mock. Deferred (Justin, 2026-07-31): adapter rendering is owned by the first real consumer — Story 4.1 (comment port) or Epic 8 (code-redemption slot); until then the seam must not be wired in production deps [src/modules/voting/index.ts:331-345, src/adapters/d1/index.ts:259].
 - Rotating `VOTE_DIGEST_SECRET` silently resets exactly-once protection: claims key on `HMAC(secret, pollId, checkKind, token)`, so post-rotation every prior voter's digest changes and the same browser can vote again. Deferred (Justin, 2026-07-31): accepted ops trade-off, same class as `BETTER_AUTH_SECRET` rotation — a planned incident, never a routine step; documented in README [src/adapters/digest/index.ts].

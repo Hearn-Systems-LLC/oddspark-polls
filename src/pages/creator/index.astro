@@ -32,7 +32,9 @@ if (!principal) {
   });
 }
 
-const signedIn = Astro.url.searchParams.get("outcome") === "signed-in";
+const outcomeParam = Astro.url.searchParams.get("outcome");
+const signedIn = outcomeParam === "signed-in";
+const pollDeleted = outcomeParam === "poll-deleted";
 const nowMs = Date.now();
 const polls = await createPollPersistence(env.DB).listPollsForOwner(
   principal.userId as UserId,
@@ -53,7 +55,9 @@ const cards = polls.map((poll) =>
 
 const title = signedIn
   ? "Signed in — Oddspark Polls"
-  : "Creator — Oddspark Polls";
+  : pollDeleted
+    ? "Poll deleted — Oddspark Polls"
+    : "Creator — Oddspark Polls";
 ---
 
 <BaseLayout title={title}>
@@ -67,6 +71,18 @@ const title = signedIn
           autofocus
         >
           Signed in.
+        </p>
+      )
+    }
+    {
+      pollDeleted && (
+        <p
+          class="outcome-line"
+          data-outcome="poll-deleted"
+          tabindex="-1"
+          autofocus
+        >
+          Poll deleted.
         </p>
       )
     }

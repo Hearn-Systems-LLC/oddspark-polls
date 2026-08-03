@@ -258,6 +258,16 @@ const outcomeFromError = (
         titlePrefix: "Vote not counted",
         tone: "rejection",
       };
+    case "poll_definition_changed":
+      // Story 1.12: options were replaced while the ballot was open. The Poll
+      // still exists — never render as deleted.
+      return {
+        code: error.code,
+        ...splitCopy(VOTE_COPY.pollDefinitionChanged),
+        time: null,
+        titlePrefix: "Poll changed",
+        tone: "rejection",
+      };
     default:
       return {
         code: error.code,
@@ -413,6 +423,7 @@ if (poll && method === "POST") {
           {
             findPoll: votePersistence.findPoll,
             findVoteBySubmission: votePersistence.findVoteBySubmission,
+            optionsStillReachable: votePersistence.optionsStillReachable,
             strategyFor,
             createDigest: (input) =>
               createVoteDigest(env.VOTE_DIGEST_SECRET, input),
@@ -450,6 +461,16 @@ if (poll && method === "POST") {
           Astro.response.status = 404;
         } else {
           outcome = outcomeFromError(result.error);
+          // Definition-edit race: re-read so the form shows current options
+          // and only preserve selections whose IDs still exist.
+          if (result.error.code === "poll_definition_changed" && poll) {
+            poll =
+              (await pollPersistence.findPollByReference(reference)) ?? poll;
+            const reachable = new Set(poll.options.map((option) => option.id));
+            selectedOptionIds = selectedOptionIds.filter((id) =>
+              reachable.has(id as PollOptionId),
+            );
+          }
           readOnly =
             result.error.code === "already_voted" ||
             result.error.code === "poll_closed";

@@ -68,6 +68,30 @@ describe("polls D1 schema (migration 0004)", () => {
           dflt_value: "1",
         }),
         expect.objectContaining({
+          name: "ip_checks_enabled",
+          type: "INTEGER",
+          notnull: 1,
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "voter_codes_enabled",
+          type: "INTEGER",
+          notnull: 1,
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "captcha_enabled",
+          type: "INTEGER",
+          notnull: 1,
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
+          name: "vpn_blocking_enabled",
+          type: "INTEGER",
+          notnull: 1,
+          dflt_value: "0",
+        }),
+        expect.objectContaining({
           name: "multi_select_enabled",
           type: "INTEGER",
           notnull: 1,

@@ -33,6 +33,11 @@ function snapshot(
     multiSelectEnabled: false,
     minSelections: null,
     maxSelections: null,
+    sessionChecksEnabled: true,
+    ipChecksEnabled: false,
+    voterCodesEnabled: false,
+    captchaEnabled: false,
+    vpnBlockingEnabled: false,
     options: [
       { id: OPTION_A, label: "Pizza", position: 0 },
       { id: OPTION_B, label: "Tacos", position: 1 },

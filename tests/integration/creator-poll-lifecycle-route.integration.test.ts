@@ -5,7 +5,7 @@ import {
 import { env } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
 import { experimental_AstroContainer as AstroContainer } from "astro/container";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthOptions } from "../../src/adapters/auth/index";
 import { onRequest } from "../../src/middleware";
 import CreatorPollDetail from "../../src/pages/creator/polls/[pollId].astro";
@@ -100,6 +100,68 @@ async function csrfFor(cookie: string): Promise<string> {
   const token = context.locals.requestContext?.csrfToken?.value;
   if (!token) throw new Error("middleware did not issue a CSRF token");
   return token;
+}
+
+async function insertVote(pollId: string): Promise<void> {
+  const voteId = crypto.randomUUID();
+  await testEnv.DB.prepare(
+    "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+  )
+    .bind(
+      voteId,
+      pollId,
+      `submission-${voteId}`,
+      `payload-${voteId}`,
+      Date.now(),
+    )
+    .run();
+}
+
+function securityBody(
+  csrfToken: string,
+  enabled: readonly string[],
+): URLSearchParams {
+  const body = new URLSearchParams({
+    csrf_token: csrfToken,
+    intent: "update-security",
+  });
+  for (const key of enabled) {
+    body.set(key, "true");
+  }
+  return body;
+}
+
+function securityInput(html: string, id: string): string {
+  const tag = new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(html)?.[0];
+  if (!tag) throw new Error(`Missing Security Toggle input: ${id}`);
+  return tag;
+}
+
+async function securityRow(pollId: string): Promise<{
+  session_checks_enabled: number;
+  ip_checks_enabled: number;
+  voter_codes_enabled: number;
+  captcha_enabled: number;
+  vpn_blocking_enabled: number;
+  representation_version: number;
+}> {
+  const row = await testEnv.DB.prepare(
+    `SELECT session_checks_enabled, ip_checks_enabled,
+            voter_codes_enabled, captcha_enabled, vpn_blocking_enabled,
+            representation_version
+       FROM poll WHERE id = ?1`,
+  )
+    .bind(pollId)
+    .first<{
+      session_checks_enabled: number;
+      ip_checks_enabled: number;
+      voter_codes_enabled: number;
+      captcha_enabled: number;
+      vpn_blocking_enabled: number;
+      representation_version: number;
+    }>();
+  if (!row) throw new Error(`Missing Poll: ${pollId}`);
+  return row;
 }
 
 beforeEach(async () => {
@@ -334,5 +396,173 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(html).toContain("This Poll doesn't exist.");
     expect(html).not.toContain("Route truth?");
+  });
+
+  it("updates Security Toggles through the real page and returns the no-store redirect", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const csrfToken = await csrfFor(cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: securityBody(csrfToken, [
+          "sessionChecks",
+          "ipChecks",
+          "captcha",
+        ]),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      `/creator/polls/${pollId}?outcome=security-updated`,
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await securityRow(pollId)).toEqual({
+      session_checks_enabled: 1,
+      ip_checks_enabled: 1,
+      voter_codes_enabled: 0,
+      captcha_enabled: 1,
+      vpn_blocking_enabled: 0,
+      representation_version: 2,
+    });
+  });
+
+  it("conceals a Security Toggle update from a different creator", async () => {
+    const owner = await createAuthenticatedCookie();
+    const other = await createAuthenticatedCookie();
+    const pollId = await seedPoll(owner.userId);
+    const csrfToken = await csrfFor(other.cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie: other.cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: securityBody(csrfToken, ["sessionChecks", "captcha"]),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    const html = await response.text();
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(html).toContain("This Poll doesn't exist.");
+    expect(await securityRow(pollId)).toEqual({
+      session_checks_enabled: 1,
+      ip_checks_enabled: 0,
+      voter_codes_enabled: 0,
+      captcha_enabled: 0,
+      vpn_blocking_enabled: 0,
+      representation_version: 1,
+    });
+  });
+
+  it("rejects a forged post-vote disable and re-renders persisted security truth", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    await insertVote(pollId);
+    const csrfToken = await csrfFor(cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        // Session Checks is deliberately omitted while CAPTCHA is requested.
+        body: securityBody(csrfToken, ["captcha"]),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    const html = await response.text();
+    const sessionInput = securityInput(html, "detail-security-sessionChecks");
+    const captchaInput = securityInput(html, "detail-security-captcha");
+
+    expect(response.status).toBe(422);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(html).toContain(
+      "Votes are in. Protections can tighten from here, not loosen.",
+    );
+    expect(sessionInput).toMatch(/\schecked(?:[=\s/>])/);
+    expect(sessionInput).toMatch(/\sdisabled(?:[=\s/>])/);
+    expect(captchaInput).not.toMatch(/\schecked(?:[=\s/>])/);
+    expect(captchaInput).not.toMatch(/\sdisabled(?:[=\s/>])/);
+    expect(await securityRow(pollId)).toEqual({
+      session_checks_enabled: 1,
+      ip_checks_enabled: 0,
+      voter_codes_enabled: 0,
+      captcha_enabled: 0,
+      vpn_blocking_enabled: 0,
+      representation_version: 1,
+    });
+  });
+
+  it("renders persisted security truth when an allowed write fails", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    await insertVote(pollId);
+    await testEnv.DB.prepare(
+      `CREATE TRIGGER fail_security_update
+       BEFORE UPDATE OF captcha_enabled ON poll
+       BEGIN
+         SELECT RAISE(ABORT, 'forced security write failure');
+       END`,
+    ).run();
+    const csrfToken = await csrfFor(cookie);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: securityBody(csrfToken, ["sessionChecks", "captcha"]),
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    const html = await response.text();
+    const sessionInput = securityInput(html, "detail-security-sessionChecks");
+    const captchaInput = securityInput(html, "detail-security-captcha");
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(html).toContain("That didn&#39;t save. Nothing changed — try again.");
+    expect(sessionInput).toMatch(/\schecked(?:[=\s/>])/);
+    expect(sessionInput).toMatch(/\sdisabled(?:[=\s/>])/);
+    expect(captchaInput).not.toMatch(/\schecked(?:[=\s/>])/);
+    expect(captchaInput).not.toMatch(/\sdisabled(?:[=\s/>])/);
+    expect(await securityRow(pollId)).toEqual({
+      session_checks_enabled: 1,
+      ip_checks_enabled: 0,
+      voter_codes_enabled: 0,
+      captcha_enabled: 0,
+      vpn_blocking_enabled: 0,
+      representation_version: 1,
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "poll_edit_failed",
+      expect.objectContaining({ pollId }),
+    );
+    errorSpy.mockRestore();
   });
 });

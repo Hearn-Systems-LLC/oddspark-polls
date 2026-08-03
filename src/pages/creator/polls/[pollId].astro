@@ -7,6 +7,7 @@ import LiveIndicator from "../../../components/live-indicator.astro";
 import Overlay from "../../../components/overlay.astro";
 import PollCard from "../../../components/poll-card.astro";
 import PollDefinitionFields from "../../../components/poll-definition-fields.astro";
+import SecurityToggle from "../../../components/security-toggle.astro";
 import ShareAction from "../../../components/share-action.astro";
 import { buildPollCardViewModel } from "../../../components/poll-card";
 import { formatVoteTotal } from "../../../components/live-indicator";
@@ -16,10 +17,15 @@ import {
   CREATE_POLL_COPY,
   LIFECYCLE_COPY,
   RECENTLY_CREATED_WINDOW_MS,
+  SECURITY_COPY,
+  SECURITY_TOGGLE_META,
   closePoll,
   deletePoll,
+  parseSecurityToggleDraft,
+  snapshotSecurityToggles,
   updatePollDefinition,
   updatePollDescription,
+  updatePollSecurityToggles,
   type PollDefinitionDraft,
 } from "../../../modules/polls/index";
 import {
@@ -27,8 +33,10 @@ import {
   RENDER_OPTION_CEILING,
 } from "../../../modules/polls/caps";
 import {
+  SECURITY_TOGGLES,
   effectivePollStatus,
   type PollId,
+  type PollSecurityToggles,
   type UserId,
 } from "../../../shared/domain/index";
 
@@ -72,6 +80,7 @@ type OutcomeKind =
   | "poll-updated"
   | "description-updated"
   | "poll-closed"
+  | "security-updated"
   | null;
 
 let fieldErrors: Record<string, string> = {};
@@ -80,6 +89,9 @@ let optionNote: string | null = null;
 let outcome: OutcomeKind = null;
 let draftValues: PollDefinitionDraft | null = null;
 let forceLockedView = false;
+/** Rejected security draft must never re-render as truth (1.12 lock race). */
+let securityDraft: PollSecurityToggles | null = null;
+let forceSecurityFromPersisted = false;
 
 // Ownership gate — set pollId on telemetry only after success.
 let poll = await persistence.findPollForOwner(pollId, ownerId);
@@ -331,6 +343,54 @@ if (Astro.request.method === "POST") {
       formError = result.error.message;
       Astro.response.status = 500;
     }
+  } else if (intent === "update-security") {
+    const requested = parseSecurityToggleDraft({
+      sessionChecks: parsedForm.sessionChecks,
+      ipChecks: parsedForm.ipChecks,
+      voterCodes: parsedForm.voterCodes,
+      captcha: parsedForm.captcha,
+      vpnBlocking: parsedForm.vpnBlocking,
+    });
+    securityDraft = requested;
+    const result = await updatePollSecurityToggles(
+      {
+        loadOwnedPoll: loadLifecycle,
+        updateSecurityToggles: (input) =>
+          persistence.updateSecurityTogglesForOwner(input),
+        nowMs: () => nowMs,
+      },
+      pollId,
+      ownerId,
+      requested,
+    );
+    if (result.ok) {
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: `/creator/polls/${pollId}?outcome=security-updated`,
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (result.error.code === "poll_not_found") {
+      poll = null;
+      Astro.response.status = 404;
+    } else if (result.error.code === "poll_security_locked") {
+      // Race or forged disable: re-render persisted truth, never the draft.
+      forceSecurityFromPersisted = true;
+      securityDraft = null;
+      formError = SECURITY_COPY.locked;
+      Astro.response.status = 422;
+      poll = await persistence.findPollForOwner(pollId, ownerId);
+    } else {
+      // A failed write means none of the submitted values are trustworthy.
+      // Re-render the fresh lifecycle snapshot so a voted Poll cannot present
+      // an unpersisted protection as checked and LOCKED.
+      forceSecurityFromPersisted = true;
+      securityDraft = null;
+      formError = result.error.message;
+      Astro.response.status = 500;
+    }
   }
 }
 
@@ -356,6 +416,8 @@ if (created) {
   outcome = "description-updated";
 } else if (outcomeParam === "poll-closed") {
   outcome = "poll-closed";
+} else if (outcomeParam === "security-updated") {
+  outcome = "security-updated";
 }
 
 const confirmDelete = Astro.url.searchParams.get("confirm") === "delete";
@@ -428,7 +490,33 @@ const outcomeCopy: Record<Exclude<OutcomeKind, null>, string> = {
   "poll-updated": "Poll updated.",
   "description-updated": "Description updated.",
   "poll-closed": "Poll closed.",
+  "security-updated": "Security updated.",
 };
+
+const persistedSecurity: PollSecurityToggles | null = lifecycleSnapshot
+  ? snapshotSecurityToggles(lifecycleSnapshot)
+  : poll
+    ? {
+        sessionChecks: poll.sessionChecksEnabled,
+        ipChecks: poll.ipChecksEnabled,
+        voterCodes: poll.voterCodesEnabled,
+        captcha: poll.captchaEnabled,
+        vpnBlocking: poll.vpnBlockingEnabled,
+      }
+    : null;
+
+const securityValues: PollSecurityToggles =
+  forceSecurityFromPersisted || !securityDraft
+    ? (persistedSecurity ?? {
+        sessionChecks: true,
+        ipChecks: false,
+        voterCodes: false,
+        captcha: false,
+        vpnBlocking: false,
+      })
+    : securityDraft;
+
+const securityVotesIn = voterCount > 0;
 
 const title = poll
   ? outcome
@@ -547,6 +635,49 @@ const detailPath = `/creator/polls/${pollId}`;
                 showSave={true}
                 saveLabel="SAVE CHANGES"
               />
+            </form>
+
+            <form
+              method="post"
+              action={detailPath}
+              class="lifecycle-form security-form"
+              data-security-toggles
+              novalidate
+            >
+              <input type="hidden" name="csrf_token" value={csrfToken} />
+              <fieldset class="field-block">
+                <legend class="group-label">SECURITY TOGGLES</legend>
+                {
+                  securityVotesIn && (
+                    <p class="security-lock-note" data-security-lock-note>
+                      {SECURITY_COPY.locked}
+                    </p>
+                  )
+                }
+                <div class="security-toggle-list">
+                  {
+                    SECURITY_TOGGLES.map((key) => {
+                      const on = securityValues[key];
+                      const locked = securityVotesIn && on;
+                      return (
+                        <SecurityToggle
+                          id={`detail-security-${key}`}
+                          name={key}
+                          label={SECURITY_TOGGLE_META[key].name}
+                          description={SECURITY_TOGGLE_META[key].description}
+                          checked={on}
+                          locked={locked}
+                        />
+                      );
+                    })
+                  }
+                </div>
+              </fieldset>
+              <div class="security-save">
+                <ButtonSecondary type="submit" name="intent" value="update-security">
+                  SAVE SECURITY
+                </ButtonSecondary>
+              </div>
             </form>
 
             <div class="lifecycle-actions">
@@ -734,6 +865,40 @@ const detailPath = `/creator/polls/${pollId}`;
     margin-top: var(--space-8);
     display: grid;
     gap: var(--space-8);
+  }
+
+  .security-form .field-block {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    border: none;
+  }
+
+  .security-form .group-label {
+    display: block;
+    padding: 0;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .security-toggle-list {
+    display: grid;
+  }
+
+  .security-lock-note {
+    margin: 0 0 var(--space-2);
+    color: var(--color-dim);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .security-save {
+    margin-top: var(--space-2);
   }
 
   .lifecycle-actions {

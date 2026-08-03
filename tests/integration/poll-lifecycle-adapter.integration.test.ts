@@ -13,6 +13,7 @@ import {
   deletePoll,
   updatePollDefinition,
   updatePollDescription,
+  updatePollSecurityToggles,
   type PollPersistenceRows,
 } from "../../src/modules/polls/index";
 import { incrementRepresentationVersion } from "../../src/shared/application/index";
@@ -74,6 +75,10 @@ function pollRows(
       resultVisibility: "live",
       discoveryState: "unlisted",
       sessionChecksEnabled: true,
+      ipChecksEnabled: false,
+      voterCodesEnabled: false,
+      captchaEnabled: false,
+      vpnBlockingEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -687,5 +692,137 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
     await expect(votePersistence.insertVote(staleVote)).rejects.toBeInstanceOf(
       PollGoneError,
     );
+  });
+});
+
+
+describe("updateSecurityTogglesForOwner (Story 2.1)", () => {
+  const defaultToggles = {
+    sessionChecks: true,
+    ipChecks: false,
+    voterCodes: false,
+    captcha: false,
+    vpnBlocking: false,
+  } as const;
+
+  it("persists all five toggle columns on insert and round-trips them", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    const rows = pollRows(POLL_A, OWNER_A);
+    rows.poll.sessionChecksEnabled = false;
+    rows.poll.ipChecksEnabled = true;
+    rows.poll.captchaEnabled = true;
+    await persistence.insertPoll(rows);
+
+    const lifecycle = await persistence.loadLifecycleForOwner(POLL_A, OWNER_A);
+    expect(lifecycle).toMatchObject({
+      sessionChecksEnabled: false,
+      ipChecksEnabled: true,
+      voterCodesEnabled: false,
+      captchaEnabled: true,
+      vpnBlockingEnabled: false,
+    });
+    const owned = await persistence.findPollForOwner(POLL_A, OWNER_A);
+    expect(owned).toMatchObject({
+      sessionChecksEnabled: false,
+      ipChecksEnabled: true,
+      captchaEnabled: true,
+    });
+  });
+
+  it("allows disable before any Vote and bumps representation_version", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(pollRows(POLL_A, OWNER_A));
+    const result = await persistence.updateSecurityTogglesForOwner({
+      pollId: POLL_A,
+      ownerUserId: OWNER_A,
+      toggles: { ...defaultToggles, sessionChecks: false, captcha: true },
+      version: incrementRepresentationVersion(POLL_A, NOW + 1),
+    });
+    expect(result).toBe("updated");
+    expect(await versionOf(POLL_A)).toBe(2);
+    const lifecycle = await persistence.loadLifecycleForOwner(POLL_A, OWNER_A);
+    expect(lifecycle?.sessionChecksEnabled).toBe(false);
+    expect(lifecycle?.captchaEnabled).toBe(true);
+  });
+
+  it("allows enable after a Vote and leaves tally untouched", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(pollRows(POLL_A, OWNER_A));
+    await insertVote(POLL_A, "vote-sec-1");
+    const beforeVotes = await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS n FROM vote WHERE poll_id = ?1",
+    )
+      .bind(POLL_A)
+      .first<{ n: number }>();
+
+    const result = await persistence.updateSecurityTogglesForOwner({
+      pollId: POLL_A,
+      ownerUserId: OWNER_A,
+      toggles: { ...defaultToggles, captcha: true },
+      version: incrementRepresentationVersion(POLL_A, NOW + 2),
+    });
+    expect(result).toBe("updated");
+    const afterVotes = await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS n FROM vote WHERE poll_id = ?1",
+    )
+      .bind(POLL_A)
+      .first<{ n: number }>();
+    expect(afterVotes?.n).toBe(beforeVotes?.n);
+    const lifecycle = await persistence.loadLifecycleForOwner(POLL_A, OWNER_A);
+    expect(lifecycle?.captchaEnabled).toBe(true);
+    expect(lifecycle?.sessionChecksEnabled).toBe(true);
+  });
+
+  it("classifies post-vote disable as locked and leaves columns unchanged", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(pollRows(POLL_A, OWNER_A));
+    await insertVote(POLL_A, "vote-sec-2");
+    const beforeVersion = await versionOf(POLL_A);
+
+    const result = await persistence.updateSecurityTogglesForOwner({
+      pollId: POLL_A,
+      ownerUserId: OWNER_A,
+      toggles: { ...defaultToggles, sessionChecks: false },
+      version: incrementRepresentationVersion(POLL_A, NOW + 3),
+    });
+    expect(result).toBe("locked");
+    expect(await versionOf(POLL_A)).toBe(beforeVersion);
+    const lifecycle = await persistence.loadLifecycleForOwner(POLL_A, OWNER_A);
+    expect(lifecycle?.sessionChecksEnabled).toBe(true);
+  });
+
+  it("is unchanged with no version bump on a no-op write", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(pollRows(POLL_A, OWNER_A));
+    const result = await persistence.updateSecurityTogglesForOwner({
+      pollId: POLL_A,
+      ownerUserId: OWNER_A,
+      toggles: { ...defaultToggles },
+      version: incrementRepresentationVersion(POLL_A, NOW + 4),
+    });
+    expect(result).toBe("unchanged");
+    expect(await versionOf(POLL_A)).toBe(1);
+  });
+
+  it("command path maps locked adapter results to poll_security_locked", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(pollRows(POLL_A, OWNER_A));
+    await insertVote(POLL_A, "vote-sec-cmd");
+    const result = await updatePollSecurityToggles(
+      {
+        loadOwnedPoll: (pollId, ownerUserId) =>
+          persistence.loadLifecycleForOwner(pollId, ownerUserId),
+        updateSecurityToggles: (input) =>
+          persistence.updateSecurityTogglesForOwner(input),
+        nowMs: () => NOW + 5,
+      },
+      POLL_A,
+      OWNER_A,
+      { ...defaultToggles, sessionChecks: false },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("poll_security_locked");
+    }
   });
 });

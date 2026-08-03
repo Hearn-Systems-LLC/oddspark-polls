@@ -5,6 +5,7 @@ import ButtonPrimary from "../../components/button-primary.astro";
 import Input from "../../components/input.astro";
 import PollOption from "../../components/poll-option.astro";
 import PollDefinitionFields from "../../components/poll-definition-fields.astro";
+import SecurityToggle from "../../components/security-toggle.astro";
 import BaseLayout from "../../layouts/base-layout.astro";
 import { createPollPersistence } from "../../adapters/d1/index";
 import {
@@ -13,13 +14,18 @@ import {
   isUuidShape,
   CREATE_POLL_COPY,
   RECENTLY_CREATED_WINDOW_MS,
+  SECURITY_TOGGLE_META,
   type CreatePollDraft,
 } from "../../modules/polls/index";
 import {
   POLL_CAPS,
   RENDER_OPTION_CEILING,
 } from "../../modules/polls/caps";
-import type { PollId, UserId } from "../../shared/domain/index";
+import {
+  SECURITY_TOGGLES,
+  type PollId,
+  type UserId,
+} from "../../shared/domain/index";
 
 // Creator responses are never cached (AD-21).
 Astro.response.headers.set("cache-control", "private, no-store");
@@ -72,6 +78,11 @@ const formSchema = z.object({
   multiSelect: z.string().default("false"),
   minSelections: z.string().default(""),
   maxSelections: z.string().default(""),
+  sessionChecks: z.string().default(""),
+  ipChecks: z.string().default(""),
+  voterCodes: z.string().default(""),
+  captcha: z.string().default(""),
+  vpnBlocking: z.string().default(""),
   intent: z.string().default(""),
   pollId: z.string().default(""),
 });
@@ -81,6 +92,8 @@ const formSchema = z.object({
 // PRIMARY KEY instead of minting a second Poll.
 let formPollId = crypto.randomUUID() as PollId;
 
+// Fresh GET: Session Checks on, every other Toggle off (FR-15). Defaults live
+// in the render only — absent POST checkboxes still mean off.
 let values: CreatePollDraft = {
   question: "",
   description: "",
@@ -92,6 +105,11 @@ let values: CreatePollDraft = {
   multiSelect: "false",
   minSelections: "",
   maxSelections: "",
+  sessionChecks: "true",
+  ipChecks: "false",
+  voterCodes: "false",
+  captcha: "false",
+  vpnBlocking: "false",
   idempotencyId: formPollId,
 };
 let fieldErrors: Record<string, string> = {};
@@ -123,6 +141,12 @@ if (Astro.request.method === "POST") {
       multiSelect: text(formData.get("multiSelect")) || "false",
       minSelections: text(formData.get("minSelections")),
       maxSelections: text(formData.get("maxSelections")),
+      // Checkbox absent = off (multiSelect semantics) — never silent default on.
+      sessionChecks: text(formData.get("sessionChecks")),
+      ipChecks: text(formData.get("ipChecks")),
+      voterCodes: text(formData.get("voterCodes")),
+      captcha: text(formData.get("captcha")),
+      vpnBlocking: text(formData.get("vpnBlocking")),
       // Anything other than exactly "add-option" is a publish.
       intent: text(formData.get("intent")),
       pollId: text(formData.get("poll_id")),
@@ -140,6 +164,9 @@ if (Astro.request.method === "POST") {
     formPollId = parsed.pollId as PollId;
   }
 
+  const toggleOn = (raw: string): string =>
+    raw === "true" ? "true" : "false";
+
   values = {
     question: parsed.question,
     description: parsed.description,
@@ -151,6 +178,11 @@ if (Astro.request.method === "POST") {
     multiSelect: parsed.multiSelect,
     minSelections: parsed.minSelections,
     maxSelections: parsed.maxSelections,
+    sessionChecks: toggleOn(parsed.sessionChecks),
+    ipChecks: toggleOn(parsed.ipChecks),
+    voterCodes: toggleOn(parsed.voterCodes),
+    captcha: toggleOn(parsed.captcha),
+    vpnBlocking: toggleOn(parsed.vpnBlocking),
     idempotencyId: formPollId,
   };
 
@@ -259,6 +291,23 @@ while (values.options.length < 2) {
         showPollType={false}
         showDescription={false}
       />
+
+      <fieldset class="field-block" data-security-toggles>
+        <legend class="group-label">SECURITY TOGGLES</legend>
+        <div class="security-toggle-list">
+          {
+            SECURITY_TOGGLES.map((key) => (
+              <SecurityToggle
+                id={`create-security-${key}`}
+                name={key}
+                label={SECURITY_TOGGLE_META[key].name}
+                description={SECURITY_TOGGLE_META[key].description}
+                checked={values[key] === "true"}
+              />
+            ))
+          }
+        </div>
+      </fieldset>
 
       <fieldset
         class="field-block"
@@ -378,6 +427,10 @@ while (values.options.length < 2) {
   .field-block {
     display: grid;
     gap: var(--space-2);
+  }
+
+  .security-toggle-list {
+    display: grid;
   }
 
   .group-label {

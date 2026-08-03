@@ -1,0 +1,431 @@
+---
+/**
+ * Shared Multiple-Choice definition fields for create + edit (Story 1.12).
+ * Parent form owns CSRF, intent, and non-definition fields.
+ */
+import Input from "./input.astro";
+import ButtonSecondary from "./button-secondary.astro";
+import PollOption from "./poll-option.astro";
+import { RENDER_OPTION_CEILING } from "../modules/polls/caps";
+
+interface Props {
+  values: {
+    question: string;
+    description: string;
+    options: string[];
+    multiSelect: string;
+    minSelections: string;
+    maxSelections: string;
+  };
+  fieldErrors?: Record<string, string>;
+  optionNote?: string | null;
+  pollTypeLabel?: string;
+  showPollType?: boolean;
+  showDescription?: boolean;
+  /** When true, question/options/multi-select render read-only. */
+  locked?: boolean;
+  lockMessage?: string | null;
+  /** Label for the primary save submit (edit only; create uses external publish). */
+  saveLabel?: string | null;
+  showSave?: boolean;
+}
+
+const {
+  values,
+  fieldErrors = {},
+  optionNote = null,
+  pollTypeLabel = "MULTIPLE CHOICE",
+  showPollType = true,
+  showDescription = true,
+  locked = false,
+  lockMessage = null,
+  saveLabel = "SAVE CHANGES",
+  showSave = false,
+} = Astro.props;
+
+const MULTI_SELECT_CHOICES = [
+  { value: "false", label: "ONE" },
+  { value: "true", label: "SEVERAL" },
+] as const;
+---
+
+{
+  showSave && locked && (
+    <div class="save-block save-block-end">
+      <ButtonSecondary type="submit" name="intent" value="update-description">
+        SAVE DESCRIPTION
+      </ButtonSecondary>
+    </div>
+  )
+}
+
+{
+  showSave && !locked && (
+    <div class="save-block save-block-end">
+      <ButtonSecondary type="submit" name="intent" value="update-definition">
+        {saveLabel}
+      </ButtonSecondary>
+    </div>
+  )
+}
+
+{
+  showPollType && (
+    <div class="field-block">
+      <p class="group-label">POLL TYPE</p>
+      <p class="read-only-value" data-poll-type>{pollTypeLabel}</p>
+    </div>
+  )
+}
+
+{
+  locked ? (
+    <>
+      {lockMessage && (
+        <p class="lock-line" data-definition-locked>
+          {lockMessage}
+        </p>
+      )}
+      <div class="field-block">
+        <p class="group-label">QUESTION</p>
+        <p class="read-only-value" data-locked-question>
+          {values.question}
+        </p>
+      </div>
+      <div class="field-block">
+        <p class="group-label">OPTIONS</p>
+        <ol class="locked-options" data-locked-options>
+          {values.options
+            .filter((option) => option.trim().length > 0)
+            .map((option) => (
+              <li>{option}</li>
+            ))}
+        </ol>
+      </div>
+      <div class="field-block">
+        <p class="group-label">HOW MANY OPTIONS CAN A VOTER PICK</p>
+        <p class="read-only-value">
+          {values.multiSelect === "true" ? "SEVERAL" : "ONE"}
+          {values.multiSelect === "true" && (
+              <span>
+                {" "}
+                (min {values.minSelections || "1"}, max{" "}
+                {values.maxSelections || values.options.filter((option) => option.trim().length > 0).length})
+              </span>
+            )}
+        </p>
+      </div>
+    </>
+  ) : (
+    <>
+      <div class="field-block">
+        <Input
+          id="question"
+          name="question"
+          label="QUESTION"
+          value={values.question}
+          error={Boolean(fieldErrors.question)}
+          describedby={fieldErrors.question ? "question-error" : undefined}
+        />
+        {fieldErrors.question && (
+          <p class="field-error" id="question-error">
+            {fieldErrors.question}
+          </p>
+        )}
+      </div>
+
+      <fieldset
+        class="field-block options-block"
+        aria-invalid={fieldErrors.options ? "true" : undefined}
+        aria-describedby={fieldErrors.options ? "options-error" : undefined}
+      >
+        <legend class="group-label">OPTIONS</legend>
+        <div data-option-list>
+          {values.options
+            .slice(0, RENDER_OPTION_CEILING)
+            .map((option, index) => (
+              <div class="option-row" data-option-row>
+                <Input
+                  id={`option-${index + 1}`}
+                  name="option"
+                  label={`OPTION ${index + 1}`}
+                  value={option}
+                />
+              </div>
+            ))}
+        </div>
+        {fieldErrors.options && (
+          <p class="field-error" id="options-error">
+            {fieldErrors.options}
+          </p>
+        )}
+        <div class="add-option">
+          <ButtonSecondary type="submit" name="intent" value="add-option">
+            ADD OPTION
+          </ButtonSecondary>
+          {optionNote && <p class="helper-note">{optionNote}</p>}
+          <p class="helper-note">Blank options are dropped when you save.</p>
+        </div>
+      </fieldset>
+
+      <fieldset
+        class="field-block"
+        aria-invalid={fieldErrors.multiSelect ? "true" : undefined}
+        aria-describedby={
+          fieldErrors.multiSelect ? "multi-select-error" : undefined
+        }
+      >
+        <legend class="group-label">HOW MANY OPTIONS CAN A VOTER PICK</legend>
+        <div class="multi-select-choices">
+          {MULTI_SELECT_CHOICES.map((choice) => (
+            <PollOption
+              id={`multi-select-${choice.value}`}
+              name="multiSelect"
+              value={choice.value}
+              label={choice.label}
+              checked={values.multiSelect === choice.value}
+            />
+          ))}
+        </div>
+        {fieldErrors.multiSelect && (
+          <p class="field-error" id="multi-select-error">
+            {fieldErrors.multiSelect}
+          </p>
+        )}
+        <div
+          class="multi-select-bounds"
+          data-multi-select-bounds
+          data-has-bounds-error={Boolean(
+            fieldErrors.minSelections || fieldErrors.maxSelections,
+          )}
+        >
+          <div class="field-block">
+            <Input
+              id="min-selections"
+              name="minSelections"
+              label="MIN (OPTIONAL)"
+              type="number"
+              value={values.minSelections}
+              error={Boolean(fieldErrors.minSelections)}
+              describedby={
+                fieldErrors.minSelections
+                  ? "min-selections-error multi-select-bounds-help"
+                  : "multi-select-bounds-help"
+              }
+            />
+            {fieldErrors.minSelections && (
+              <p class="field-error" id="min-selections-error">
+                {fieldErrors.minSelections}
+              </p>
+            )}
+          </div>
+          <div class="field-block">
+            <Input
+              id="max-selections"
+              name="maxSelections"
+              label="MAX (OPTIONAL)"
+              type="number"
+              value={values.maxSelections}
+              error={Boolean(fieldErrors.maxSelections)}
+              describedby={
+                fieldErrors.maxSelections
+                  ? "max-selections-error multi-select-bounds-help"
+                  : "multi-select-bounds-help"
+              }
+            />
+            {fieldErrors.maxSelections && (
+              <p class="field-error" id="max-selections-error">
+                {fieldErrors.maxSelections}
+              </p>
+            )}
+          </div>
+          <p class="helper-note" id="multi-select-bounds-help">
+            Leave blank for 1 to all options.
+          </p>
+        </div>
+      </fieldset>
+    </>
+  )
+}
+
+{
+  showDescription && (
+    <div class="field-block">
+      <label class="group-label" for="description">DESCRIPTION (OPTIONAL)</label>
+      <textarea
+        class:list={[
+          "description-input",
+          fieldErrors.description && "is-error",
+        ]}
+        id="description"
+        name="description"
+        rows="4"
+        aria-invalid={fieldErrors.description ? "true" : undefined}
+        aria-describedby={
+          fieldErrors.description ? "description-error" : undefined
+        }
+      >{values.description}</textarea>
+      {
+        fieldErrors.description && (
+          <p class="field-error" id="description-error">
+            {fieldErrors.description}
+          </p>
+        )
+      }
+    </div>
+  )
+}
+
+<style>
+  .field-block {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .group-label {
+    display: block;
+    padding: 0;
+    margin: 0;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  fieldset {
+    margin: 0;
+    padding: 0;
+    border: none;
+  }
+
+  .options-block [data-option-list] {
+    display: grid;
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+  }
+
+  .option-row {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .option-row :global(.option-remove) {
+    justify-self: start;
+    padding: var(--space-1) 0;
+    border: none;
+    background: transparent;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    cursor: pointer;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .option-row :global(.option-remove:focus-visible) {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .add-option {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+    justify-items: start;
+  }
+
+  .multi-select-choices {
+    margin-top: var(--space-3);
+  }
+
+  .multi-select-bounds {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin-top: var(--space-3);
+  }
+
+  .multi-select-bounds[hidden] {
+    display: none;
+  }
+
+  .multi-select-bounds .helper-note {
+    grid-column: 1 / -1;
+  }
+
+  .description-input {
+    width: 100%;
+    padding: var(--space-2) 0;
+    border: none;
+    border-bottom: var(--input-border-bottom);
+    border-radius: var(--rounded-default);
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    resize: vertical;
+  }
+
+  .description-input:focus {
+    outline: none;
+    border-bottom: var(--input-border-bottom-focus);
+  }
+
+  .description-input:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .description-input.is-error {
+    border-bottom: var(--input-border-bottom-error);
+  }
+
+  .field-error {
+    margin: 0;
+    color: var(--color-alarm);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  .helper-note {
+    margin: 0;
+    color: var(--color-dim);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  .read-only-value {
+    margin: 0;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .locked-options {
+    margin: 0;
+    padding-inline-start: 1.25rem;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .lock-line {
+    margin: 0 0 var(--space-4);
+    color: var(--color-text);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .save-block {
+    display: grid;
+    gap: var(--space-3);
+    justify-items: start;
+  }
+
+  .save-block-end {
+    order: 10;
+  }
+</style>

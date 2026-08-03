@@ -15,6 +15,10 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Creator lifecycle controls on the poll detail page: edit the definition while no Votes
+  exist, edit the description anytime, close a Poll on demand, and delete a Poll with a
+  confirmed overlay. Closed Polls reject later Votes; deleted Polls return a plain 404 and
+  free their custom links for reuse.
 - Deployable Astro 7 skeleton on Cloudflare Workers with D1, R2, and KV session bindings
   across three environments (local, staging, production).
 - Creator sign-in with Google or GitHub via Better Auth, including a creator-surface

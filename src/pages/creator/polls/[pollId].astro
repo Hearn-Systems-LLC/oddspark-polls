@@ -2,33 +2,55 @@
 import { env } from "cloudflare:workers";
 import BaseLayout from "../../../layouts/base-layout.astro";
 import ButtonSecondary from "../../../components/button-secondary.astro";
+import ButtonDestructive from "../../../components/button-destructive.astro";
 import LiveIndicator from "../../../components/live-indicator.astro";
+import Overlay from "../../../components/overlay.astro";
 import PollCard from "../../../components/poll-card.astro";
+import PollDefinitionFields from "../../../components/poll-definition-fields.astro";
 import { buildPollCardViewModel } from "../../../components/poll-card";
 import { formatVoteTotal } from "../../../components/live-indicator";
 import { createPollPersistence } from "../../../adapters/d1/index";
-import { RECENTLY_CREATED_WINDOW_MS } from "../../../modules/polls/index";
+import { parseLifecycleForm } from "../../../lib/creator-lifecycle-form";
+import {
+  CREATE_POLL_COPY,
+  LIFECYCLE_COPY,
+  RECENTLY_CREATED_WINDOW_MS,
+  closePoll,
+  deletePoll,
+  updatePollDefinition,
+  updatePollDescription,
+  type PollDefinitionDraft,
+} from "../../../modules/polls/index";
+import {
+  POLL_CAPS,
+  RENDER_OPTION_CEILING,
+} from "../../../modules/polls/caps";
 import {
   effectivePollStatus,
   type PollId,
   type UserId,
 } from "../../../shared/domain/index";
 
-// Create-confirmation / poll detail (Stories 1.3 + 1.11). Creator responses
-// are never cached (AD-21).
+// Creator detail + lifecycle (Stories 1.3 / 1.11 / 1.12). Never cached (AD-21).
 Astro.response.headers.set("cache-control", "private, no-store");
 
-if (Astro.request.method !== "GET" && Astro.request.method !== "HEAD") {
+if (
+  Astro.request.method !== "GET" &&
+  Astro.request.method !== "HEAD" &&
+  Astro.request.method !== "POST"
+) {
   return new Response("Method not allowed.", {
     status: 405,
-    headers: { allow: "GET, HEAD", "cache-control": "private, no-store" },
+    headers: {
+      allow: "GET, HEAD, POST",
+      "cache-control": "private, no-store",
+    },
   });
 }
 
-const principal = Astro.locals.requestContext?.principal ?? null;
+const requestContext = Astro.locals.requestContext;
+const principal = requestContext?.principal ?? null;
 if (!principal) {
-  // Built manually so the no-store header rides along — an early
-  // Astro.redirect return doesn't compose Astro.response.headers.
   return new Response(null, {
     status: 303,
     headers: {
@@ -41,9 +63,277 @@ if (!principal) {
 const nowMs = Date.now();
 const ownerId = principal.userId as UserId;
 const pollId = (Astro.params.pollId ?? "") as PollId;
+const csrfToken = requestContext?.csrfToken?.value ?? "";
 const persistence = createPollPersistence(env.DB);
-const poll = await persistence.findPollForOwner(pollId, ownerId);
-// List for the left column (and the selected row's vote count) — one query.
+
+type OutcomeKind =
+  | "created"
+  | "poll-updated"
+  | "description-updated"
+  | "poll-closed"
+  | null;
+
+let fieldErrors: Record<string, string> = {};
+let formError: string | null = null;
+let optionNote: string | null = null;
+let outcome: OutcomeKind = null;
+let draftValues: PollDefinitionDraft | null = null;
+let forceLockedView = false;
+
+// Ownership gate — set pollId on telemetry only after success.
+let poll = await persistence.findPollForOwner(pollId, ownerId);
+if (poll && requestContext) {
+  requestContext.pollId = pollId;
+}
+
+const loadLifecycle = () =>
+  persistence.loadLifecycleForOwner(pollId, ownerId);
+const persistedDraft = (
+  owned: NonNullable<typeof poll>,
+  description = owned.description ?? "",
+): PollDefinitionDraft => ({
+  question: owned.question,
+  description,
+  options: owned.options.map((option) => option.label),
+  multiSelect: owned.multiSelectEnabled ? "true" : "false",
+  minSelections:
+    owned.minSelections != null ? String(owned.minSelections) : "",
+  maxSelections:
+    owned.maxSelections != null ? String(owned.maxSelections) : "",
+});
+
+if (Astro.request.method === "POST") {
+  let parsedForm;
+  try {
+    parsedForm = parseLifecycleForm(await Astro.request.formData());
+  } catch {
+    return new Response("Unreadable form submission.", {
+      status: 422,
+      headers: { "cache-control": "private, no-store" },
+    });
+  }
+
+  const intent = parsedForm.intent;
+  const submittedDraft: PollDefinitionDraft = {
+    question: parsedForm.question,
+    description: parsedForm.description,
+    options: parsedForm.options,
+    multiSelect: parsedForm.multiSelect,
+    minSelections: parsedForm.minSelections,
+    maxSelections: parsedForm.maxSelections,
+  };
+
+  if (!poll) {
+    Astro.response.status = 404;
+  } else if (intent === "add-option") {
+    const lifecycle = await loadLifecycle();
+    if (!lifecycle) {
+      poll = null;
+      Astro.response.status = 404;
+    } else if (
+      lifecycle.voterCount > 0 ||
+      lifecycle.pollType !== "multiple_choice"
+    ) {
+      forceLockedView = true;
+      Astro.response.status = 422;
+      poll = await persistence.findPollForOwner(pollId, ownerId);
+      if (poll) {
+        draftValues = persistedDraft(poll, submittedDraft.description);
+      }
+      if (lifecycle.pollType !== "multiple_choice") {
+        formError = LIFECYCLE_COPY.unsupportedPollType;
+      }
+    } else {
+      draftValues = submittedDraft;
+      const nonBlank = draftValues.options.filter(
+        (option) => option.trim().length > 0,
+      ).length;
+      if (
+        nonBlank < POLL_CAPS.maxOptions &&
+        draftValues.options.length < RENDER_OPTION_CEILING
+      ) {
+        draftValues.options = [...draftValues.options, ""];
+      } else {
+        optionNote =
+          nonBlank >= POLL_CAPS.maxOptions
+            ? CREATE_POLL_COPY.optionsTooMany
+            : CREATE_POLL_COPY.rowsTooMany;
+      }
+    }
+  } else if (intent === "close") {
+    const result = await closePoll(
+      {
+        loadOwnedPoll: loadLifecycle,
+        closePoll: (input) => persistence.closePollForOwner(input),
+        nowMs: () => nowMs,
+      },
+      pollId,
+      ownerId,
+    );
+    if (result.ok) {
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: `/creator/polls/${pollId}?outcome=poll-closed`,
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (result.error.code === "poll_not_found") {
+      poll = null;
+      Astro.response.status = 404;
+    } else {
+      formError = result.error.message;
+      Astro.response.status = 500;
+    }
+  } else if (intent === "delete") {
+    const result = await deletePoll(
+      {
+        loadOwnedPoll: loadLifecycle,
+        deletePoll: (input) => persistence.deletePollForOwner(input),
+      },
+      pollId,
+      ownerId,
+    );
+    if (result.ok) {
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: "/creator?outcome=poll-deleted",
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (result.error.code === "poll_not_found") {
+      poll = null;
+      Astro.response.status = 404;
+    } else {
+      formError = result.error.message;
+      Astro.response.status = 500;
+    }
+  } else if (intent === "update-description") {
+    const description = parsedForm.description;
+    draftValues = persistedDraft(poll, description);
+    const result = await updatePollDescription(
+      {
+        loadOwnedPoll: loadLifecycle,
+        updateDescription: (input) =>
+          persistence.updateDescriptionForOwner(input),
+        nowMs: () => nowMs,
+      },
+      pollId,
+      ownerId,
+      description,
+    );
+    if (result.ok) {
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: `/creator/polls/${pollId}?outcome=description-updated`,
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (result.error.code === "poll_not_found") {
+      poll = null;
+      Astro.response.status = 404;
+    } else if (result.error.fieldErrors) {
+      fieldErrors = result.error.fieldErrors;
+      Astro.response.status = 422;
+    } else {
+      formError = result.error.message;
+      Astro.response.status = 500;
+    }
+  } else if (intent === "update-definition") {
+    const submittedPollType = parsedForm.pollType;
+    if (
+      submittedPollType !== null &&
+      submittedPollType !== "multiple_choice"
+    ) {
+      formError = LIFECYCLE_COPY.unsupportedPollType;
+      Astro.response.status = 422;
+    }
+    draftValues = submittedDraft;
+    const result = formError
+      ? null
+      : await updatePollDefinition(
+      {
+        loadOwnedPoll: loadLifecycle,
+        updateDefinition: (input) =>
+          persistence.updateDefinitionForOwner(input),
+        updateDescription: (input) =>
+          persistence.updateDescriptionForOwner(input),
+        generateId: () => crypto.randomUUID(),
+        nowMs: () => nowMs,
+      },
+      pollId,
+      ownerId,
+      draftValues,
+    );
+    if (result?.ok) {
+      const location =
+        result.value.kind === "description_only"
+          ? `/creator/polls/${pollId}?outcome=description-updated`
+          : `/creator/polls/${pollId}?outcome=poll-updated`;
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location,
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (result && !result.ok && result.error.code === "poll_not_found") {
+      poll = null;
+      Astro.response.status = 404;
+    } else if (
+      result &&
+      !result.ok &&
+      result.error.code === "poll_definition_locked"
+    ) {
+      // First Vote won the race: switch to locked view, keep submitted description.
+      forceLockedView = true;
+      fieldErrors = {};
+      formError = null;
+      Astro.response.status = 422;
+      poll = await persistence.findPollForOwner(pollId, ownerId);
+      if (poll) {
+        draftValues = persistedDraft(poll, submittedDraft.description);
+      }
+    } else if (
+      result &&
+      !result.ok &&
+      result.error.code === "poll_definition_conflict"
+    ) {
+      formError = result.error.message;
+      fieldErrors = {};
+      draftValues = null;
+      Astro.response.status = 422;
+      poll = await persistence.findPollForOwner(pollId, ownerId);
+    } else if (
+      result &&
+      !result.ok &&
+      result.error.code === "poll_type_unsupported"
+    ) {
+      formError = result.error.message;
+      draftValues = null;
+      Astro.response.status = 422;
+      poll = await persistence.findPollForOwner(pollId, ownerId);
+      if (poll) {
+        forceLockedView = true;
+        draftValues = persistedDraft(poll, submittedDraft.description);
+      }
+    } else if (result && !result.ok && result.error.fieldErrors) {
+      fieldErrors = result.error.fieldErrors;
+      Astro.response.status = 422;
+    } else if (result && !result.ok) {
+      formError = result.error.message;
+      Astro.response.status = 500;
+    }
+  }
+}
+
+// Fresh list after mutations that stay on the page.
 const ownedPolls = await persistence.listPollsForOwner(ownerId, nowMs);
 const selectedListRow = ownedPolls.find((row) => row.pollId === pollId) ?? null;
 
@@ -51,17 +341,38 @@ if (!poll) {
   Astro.response.status = 404;
 }
 
-// The "just created" outcome (line + title) belongs to the publish redirect
-// (bare `?created` only), not to a bookmarked or shared link revisited later.
 const created =
   poll !== null &&
   Astro.url.searchParams.get("created") === "" &&
-  Date.now() - poll.createdAtMs < RECENTLY_CREATED_WINDOW_MS;
+  nowMs - poll.createdAtMs < RECENTLY_CREATED_WINDOW_MS;
+
+const outcomeParam = Astro.url.searchParams.get("outcome");
+if (created) {
+  outcome = "created";
+} else if (outcomeParam === "poll-updated") {
+  outcome = "poll-updated";
+} else if (outcomeParam === "description-updated") {
+  outcome = "description-updated";
+} else if (outcomeParam === "poll-closed") {
+  outcome = "poll-closed";
+}
+
+const confirmDelete = Astro.url.searchParams.get("confirm") === "delete";
+
+// The lifecycle snapshot is the last owner-qualified existence check before
+// rendering. If a concurrent delete won after the initial detail read, render
+// the ordinary missing state instead of stale Poll data.
+const lifecycleSnapshot = poll
+  ? await persistence.loadLifecycleForOwner(pollId, ownerId)
+  : null;
+if (poll && !lifecycleSnapshot) {
+  poll = null;
+  Astro.response.status = 404;
+}
+
 const canonicalUrl = poll
   ? `${Astro.url.origin}/${poll.canonicalReference}`
   : null;
-// Plain-text UTC echo of the resolved deadline (no-JS creators get zone
-// interpretation feedback): date, space, HH:MM:SS, " UTC".
 const deadlineNote =
   poll?.deadlineMs != null
     ? (() => {
@@ -72,7 +383,14 @@ const deadlineNote =
 
 const detailStatus =
   poll !== null ? effectivePollStatus(poll, nowMs) : null;
-const voterCount = selectedListRow?.voterCount ?? 0;
+// Prefer the lifecycle snapshot (same owner-qualified vote count as mutation
+// guards) over the list row so lock state never drifts from D1 truth.
+const voterCount =
+  lifecycleSnapshot?.voterCount ?? selectedListRow?.voterCount ?? 0;
+const definitionLocked =
+  forceLockedView ||
+  voterCount > 0 ||
+  (poll !== null && poll.pollType !== "multiple_choice");
 
 const listCards = ownedPolls.map((row) =>
   buildPollCardViewModel({
@@ -87,28 +405,63 @@ const listCards = ownedPolls.map((row) =>
   }),
 );
 
+const formValues: PollDefinitionDraft = draftValues ?? {
+  question: poll?.question ?? "",
+  description: poll?.description ?? "",
+  options:
+    poll?.options.map((option) => option.label) ??
+    Array.from({ length: 2 }, () => ""),
+  multiSelect: poll?.multiSelectEnabled ? "true" : "false",
+  minSelections:
+    poll?.minSelections != null ? String(poll.minSelections) : "",
+  maxSelections:
+    poll?.maxSelections != null ? String(poll.maxSelections) : "",
+};
+
+while (formValues.options.length < 2) {
+  formValues.options = [...formValues.options, ""];
+}
+
+const outcomeCopy: Record<Exclude<OutcomeKind, null>, string> = {
+  created: "Your Poll is live.",
+  "poll-updated": "Poll updated.",
+  "description-updated": "Description updated.",
+  "poll-closed": "Poll closed.",
+};
+
 const title = poll
-  ? created
-    ? "Poll created — Oddspark Polls"
+  ? outcome
+    ? `${outcomeCopy[outcome].replace(/\.$/, "")} — Oddspark Polls`
     : `${poll.question} — Oddspark Polls`
   : "Not found — Oddspark Polls";
+
+const deleteHeading = poll
+  ? `Delete "${poll.question}"?`
+  : 'Delete "this Poll"?';
+const deleteBody = `This removes the Poll and all ${voterCount} Votes in it. The link stops resolving. There is no undo.`;
+const detailPath = `/creator/polls/${pollId}`;
 ---
 
 <BaseLayout title={title}>
   <main
-    class:list={["creator-surface", { "has-created-outcome": created }]}
+    class:list={[
+      "creator-surface",
+      { "has-created-outcome": outcome !== null },
+    ]}
     data-creator-surface
   >
-    {created && (
-      <p
-        class="outcome-line"
-        data-outcome="created"
-        tabindex="-1"
-        autofocus
-      >
-        Your Poll is live.
-      </p>
-    )}
+    {
+      outcome && (
+        <p
+          class="outcome-line"
+          data-outcome={outcome === "created" ? "created" : outcome}
+          tabindex="-1"
+          autofocus
+        >
+          {outcomeCopy[outcome]}
+        </p>
+      )
+    }
 
     <section
       class="creator-list-region"
@@ -151,9 +504,12 @@ const title = poll
               </LiveIndicator>
             </p>
             <h1 id="poll-detail-heading">{poll.question}</h1>
-            {poll.description && (
-              <p class="poll-description">{poll.description}</p>
+            {formError && (
+              <p class="form-error" tabindex="-1" autofocus>
+                {formError}
+              </p>
             )}
+
             <section class="link-block" aria-labelledby="poll-link-label">
               <p class="group-label" id="poll-link-label">POLL LINK</p>
               <p class="canonical-url">{canonicalUrl}</p>
@@ -163,13 +519,85 @@ const title = poll
               </p>
               {deadlineNote && <p class="helper-note">{deadlineNote}</p>}
             </section>
-            <p class="results-link-row">
+
+            <form
+              method="post"
+              action={detailPath}
+              class="lifecycle-form"
+              data-edit-poll-form={!definitionLocked ? true : undefined}
+              data-edit-description-form={definitionLocked ? true : undefined}
+              data-poll-definition-form
+              novalidate
+            >
+              <input type="hidden" name="csrf_token" value={csrfToken} />
+              <PollDefinitionFields
+                values={formValues}
+                fieldErrors={fieldErrors}
+                optionNote={optionNote}
+                pollTypeLabel={poll.pollType.replaceAll("_", " ").toUpperCase()}
+                locked={definitionLocked}
+                lockMessage={
+                  poll.pollType !== "multiple_choice"
+                    ? LIFECYCLE_COPY.unsupportedPollType
+                    : definitionLocked
+                      ? LIFECYCLE_COPY.definitionLocked
+                      : null
+                }
+                showSave={true}
+                saveLabel="SAVE CHANGES"
+              />
+            </form>
+
+            <div class="lifecycle-actions">
+              {
+                detailStatus === "open" && (
+                  <form method="post" action={detailPath}>
+                    <input type="hidden" name="csrf_token" value={csrfToken} />
+                    <ButtonSecondary type="submit" name="intent" value="close">
+                      CLOSE POLL
+                    </ButtonSecondary>
+                  </form>
+                )
+              }
               <ButtonSecondary
-                href={`/${poll.canonicalReference}/results`}
+                href={`${detailPath}?confirm=delete`}
+                id="delete-poll-invoker"
+                aria-haspopup="dialog"
+                aria-controls="delete-poll-overlay"
+                data-overlay-open-for="delete-poll-overlay"
               >
-                VIEW LIVE RESULTS
+                DELETE POLL
               </ButtonSecondary>
-            </p>
+              <p class="results-link-row">
+                <ButtonSecondary href={`/${poll.canonicalReference}/results`}>
+                  VIEW LIVE RESULTS
+                </ButtonSecondary>
+              </p>
+            </div>
+
+            <Overlay
+              id="delete-poll-overlay"
+              open={confirmDelete}
+              titleId="delete-poll-title"
+              descriptionId="delete-poll-description"
+              title={deleteHeading}
+            >
+              <p slot="description">{deleteBody}</p>
+              <div slot="actions" class="overlay-action-row">
+                <ButtonSecondary
+                  href={detailPath}
+                  data-overlay-cancel={true}
+                >
+                  CANCEL
+                </ButtonSecondary>
+                <form method="post" action={detailPath}>
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <ButtonDestructive type="submit" name="intent" value="delete">
+                    DELETE POLL
+                  </ButtonDestructive>
+                </form>
+              </div>
+            </Overlay>
           </>
         ) : (
           <h1
@@ -187,6 +615,14 @@ const title = poll
   {
     listCards.some((card) => card.metadata.closing.kind === "absolute") && (
       <script src="../../../scripts/creator-dashboard.ts"></script>
+    )
+  }
+  {
+    poll && (
+      <>
+        <script src="../../../scripts/edit-poll-form.ts"></script>
+        <script src="../../../scripts/overlay.ts"></script>
+      </>
     )
   }
 </BaseLayout>
@@ -269,14 +705,6 @@ const title = poll
     line-height: var(--type-heading-lg-lh);
   }
 
-  .poll-description {
-    margin: 0 0 var(--space-6);
-    color: var(--color-dim);
-    font-size: var(--type-body-size);
-    line-height: var(--type-body-lh);
-    white-space: pre-wrap;
-  }
-
   .link-block {
     margin-top: var(--space-8);
     display: grid;
@@ -308,8 +736,29 @@ const title = poll
     line-height: var(--type-caption-lh);
   }
 
+  .lifecycle-form {
+    margin-top: var(--space-8);
+    display: grid;
+    gap: var(--space-8);
+  }
+
+  .lifecycle-actions {
+    margin-top: var(--space-8);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+  }
+
   .results-link-row {
-    margin: var(--space-8) 0 0;
+    margin: 0;
+  }
+
+  .form-error {
+    margin: 0 0 var(--space-4);
+    color: var(--color-alarm);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
   }
 
   @media (min-width: 640px) {
@@ -318,8 +767,6 @@ const title = poll
     }
   }
 
-  /* Creator surface two-column at lg (UX-DR25 / DESIGN.md:507): list left,
-     detail right. Below lg both regions remain in DOM order — nothing hidden. */
   @media (min-width: 1024px) {
     .creator-surface {
       display: grid;

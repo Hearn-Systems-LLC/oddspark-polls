@@ -1,0 +1,103 @@
+import { RENDER_OPTION_CEILING } from "../modules/polls/caps";
+
+export type LifecycleIntent =
+  | "add-option"
+  | "update-definition"
+  | "update-description"
+  | "close"
+  | "delete";
+
+export type ParsedLifecycleForm = {
+  intent: LifecycleIntent;
+  question: string;
+  description: string;
+  options: string[];
+  multiSelect: string;
+  minSelections: string;
+  maxSelections: string;
+  pollType: string | null;
+};
+
+const INTENTS = new Set<LifecycleIntent>([
+  "add-option",
+  "update-definition",
+  "update-description",
+  "close",
+  "delete",
+]);
+
+const DEFINITION_KEYS = [
+  "question",
+  "option",
+  "multiSelect",
+  "minSelections",
+  "maxSelections",
+  "pollType",
+] as const;
+
+const COMMON_KEYS = new Set(["csrf_token", "intent"]);
+const DEFINITION_FORM_KEYS = new Set([
+  ...COMMON_KEYS,
+  ...DEFINITION_KEYS,
+  "description",
+]);
+const DESCRIPTION_FORM_KEYS = new Set([...COMMON_KEYS, "description"]);
+
+function unreadable(): never {
+  throw new Error("unreadable_lifecycle_form");
+}
+
+function singleton(formData: FormData, key: string): string {
+  const values = formData.getAll(key);
+  if (values.length > 1 || values.some((value) => typeof value !== "string")) {
+    return unreadable();
+  }
+  return typeof values[0] === "string" ? values[0] : "";
+}
+
+export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
+  const rawIntent = singleton(formData, "intent");
+  if (!INTENTS.has(rawIntent as LifecycleIntent)) {
+    return unreadable();
+  }
+  const intent = rawIntent as LifecycleIntent;
+  const allowed =
+    intent === "add-option" || intent === "update-definition"
+      ? DEFINITION_FORM_KEYS
+      : intent === "update-description"
+        ? DESCRIPTION_FORM_KEYS
+        : COMMON_KEYS;
+
+  for (const [key, value] of formData.entries()) {
+    if (!allowed.has(key) || typeof value !== "string") {
+      return unreadable();
+    }
+  }
+
+  for (const key of allowed) {
+    if (key !== "option") {
+      singleton(formData, key);
+    }
+  }
+
+  const optionEntries = formData.getAll("option");
+  if (
+    optionEntries.length > RENDER_OPTION_CEILING ||
+    optionEntries.some((entry) => typeof entry !== "string")
+  ) {
+    return unreadable();
+  }
+
+  return {
+    intent,
+    question: singleton(formData, "question"),
+    description: singleton(formData, "description"),
+    options: optionEntries as string[],
+    multiSelect: singleton(formData, "multiSelect") || "false",
+    minSelections: singleton(formData, "minSelections"),
+    maxSelections: singleton(formData, "maxSelections"),
+    pollType: formData.has("pollType")
+      ? singleton(formData, "pollType")
+      : null,
+  };
+}

@@ -1,0 +1,77 @@
+---
+/**
+ * Destructive confirmation action (Story 1.12). Secondary metrics with
+ * mode-collapsed alarm text/border. Appears only behind a confirmation
+ * overlay — never as the initial invoker.
+ */
+interface Props {
+  type?: "button" | "submit" | "reset";
+  disabled?: boolean;
+  name?: string;
+  value?: string;
+  id?: string;
+  class?: string;
+}
+
+const {
+  type = "button",
+  disabled = false,
+  name,
+  value,
+  id,
+  class: className = "",
+} = Astro.props;
+
+const classes = ["btn-destructive", disabled ? "is-disabled" : "", className]
+  .filter(Boolean)
+  .join(" ");
+---
+
+<button
+  class={classes}
+  type={type}
+  disabled={disabled}
+  name={name}
+  value={value}
+  id={id}
+>
+  <slot />
+</button>
+
+<style>
+  .btn-destructive {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding: var(--space-4) var(--space-6);
+    border: var(--btn-destructive-border);
+    border-radius: var(--rounded-default);
+    background: var(--btn-destructive-bg);
+    color: var(--btn-destructive-color);
+    font-family: var(--font-machine);
+    font-size: var(--type-button-size);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: var(--type-button-ls);
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .btn-destructive:hover:not(:disabled):not(.is-disabled) {
+    border-color: var(--color-alarm);
+  }
+
+  .btn-destructive:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .btn-destructive:disabled,
+  .btn-destructive.is-disabled {
+    color: var(--btn-disabled-color);
+    border-color: var(--color-rule);
+    cursor: not-allowed;
+  }
+</style>

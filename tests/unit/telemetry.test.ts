@@ -124,6 +124,24 @@ describe("telemetry adapter", () => {
     ],
     ["GET", "/results", true, "GET /:reference"],
     ["POST", "/creator/new", false, "POST /creator/new"],
+    [
+      "GET",
+      "/creator/polls/11111111-1111-4111-8111-111111111111",
+      false,
+      "GET /creator/polls/:pollId",
+    ],
+    [
+      "POST",
+      "/creator/polls/11111111-1111-4111-8111-111111111111",
+      false,
+      "POST /creator/polls/:pollId",
+    ],
+    [
+      "GET",
+      "/creator/polls/11111111-1111-4111-8111-111111111111/",
+      false,
+      "GET /creator/polls/:pollId",
+    ],
     ["GET", "/creator/results", false, "GET /creator/results"],
   ])(
     "normalizes operation %s %s without obscuring static routes",
@@ -133,6 +151,19 @@ describe("telemetry adapter", () => {
       ).toBe(expected);
     },
   );
+
+  it("never includes an internal creator Poll UUID in operation labels", () => {
+    const pollId = "11111111-1111-4111-8111-111111111111";
+    for (const method of ["GET", "POST"]) {
+      expect(
+        telemetryOperationForRoute(
+          method,
+          `/creator/polls/${pollId}`,
+          false,
+        ),
+      ).not.toContain(pollId);
+    }
+  });
 
   it("keeps raw auth pathnames available for provider classification", () => {
     const pathname = "/api/auth/callback/google";

@@ -132,6 +132,10 @@
   --btn-secondary-bg: transparent;
   --btn-secondary-color: var(--color-text);
   --btn-secondary-border: var(--space-hairline) solid var(--color-rule);
+  /* Destructive confirm only (Story 1.12) — secondary metrics + alarm ink. */
+  --btn-destructive-bg: transparent;
+  --btn-destructive-color: var(--color-alarm);
+  --btn-destructive-border: var(--space-hairline) solid var(--color-alarm);
   --btn-disabled-color: var(--color-dim);
   --input-border-bottom: var(--space-hairline) solid var(--color-rule);
   --input-border-bottom-focus: var(--space-hairline) solid var(--color-solar-ink);

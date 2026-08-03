@@ -38,6 +38,8 @@ export const VOTE_COPY = {
   tooFewSelections: MULTIPLE_CHOICE_VOTE_COPY.tooFewSelections,
   tooManySelections: MULTIPLE_CHOICE_VOTE_COPY.tooManySelections,
   pollDeleted: "This Poll no longer exists.",
+  pollDefinitionChanged:
+    "This Poll changed while you were deciding. Your Vote wasn't recorded — review the options and try again.",
   idempotencyConflict:
     "Your earlier Vote stands — this change wasn't recorded.",
 } as const;
@@ -67,6 +69,16 @@ export class PollGoneError extends Error {
   constructor() {
     super("poll no longer exists");
     this.name = "PollGoneError";
+  }
+}
+
+// Option FK race after a definition edit: the Poll still exists but the
+// selected option IDs do not. Distinct from PollGone so the delivery boundary
+// never renders a live Poll as deleted (Story 1.12).
+export class PollDefinitionChangedError extends Error {
+  constructor() {
+    super("poll definition changed");
+    this.name = "PollDefinitionChangedError";
   }
 }
 
@@ -171,6 +183,15 @@ export type CastVoteDeps = {
     pollId: PollId,
     submissionId: string,
   ) => Promise<StoredVoteOutcome | null>;
+  /**
+   * After an option-FK failure: return true when every selected option still
+   * exists on the Poll. Used to distinguish poll_definition_changed from a
+   * generic vote failure (Story 1.12).
+   */
+  optionsStillReachable?: (
+    pollId: PollId,
+    optionIds: readonly PollOptionId[],
+  ) => Promise<boolean>;
   strategyFor: (pollType: PollType) => VotingPollTypeStrategy | null;
   createDigest: (input: {
     pollId: PollId;
@@ -471,8 +492,44 @@ export async function castVote(
         closedAtMs: poll.closedAtMs ?? poll.deadlineMs ?? nowMs,
       });
     }
+    if (cause instanceof PollDefinitionChangedError) {
+      return failure(
+        "poll_definition_changed",
+        VOTE_COPY.pollDefinitionChanged,
+      );
+    }
     if (cause instanceof PollGoneError) {
-      return failure("poll_deleted", VOTE_COPY.pollDeleted);
+      // Option FK failures historically mapped to PollGone. Re-read the Poll
+      // and selected option reachability so an edited-but-living Poll gets
+      // poll_definition_changed instead of a false deleted 404 (Story 1.12).
+      try {
+        const stillThere = await deps.findPoll(poll.id);
+        if (!stillThere) {
+          return failure("poll_deleted", VOTE_COPY.pollDeleted);
+        }
+        if (deps.optionsStillReachable) {
+          const reachable = await deps.optionsStillReachable(
+            poll.id,
+            validated.value.selectedOptionIds,
+          );
+          if (!reachable) {
+            return failure(
+              "poll_definition_changed",
+              VOTE_COPY.pollDefinitionChanged,
+            );
+          }
+        } else {
+          // Without a reachability probe, prefer the changed-definition
+          // outcome when the Poll still loads — never call a live Poll deleted.
+          return failure(
+            "poll_definition_changed",
+            VOTE_COPY.pollDefinitionChanged,
+          );
+        }
+      } catch {
+        return failure("vote_failed", VOTE_COPY.retry);
+      }
+      return failure("vote_failed", VOTE_COPY.retry);
     }
     return failure("vote_failed", VOTE_COPY.retry);
   }

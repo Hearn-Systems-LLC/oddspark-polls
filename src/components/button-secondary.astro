@@ -5,7 +5,13 @@ interface Props {
   href?: string;
   name?: string;
   value?: string;
+  id?: string;
   class?: string;
+  "aria-haspopup"?: string | boolean | null;
+  "aria-controls"?: string | null;
+  "aria-expanded"?: string | boolean | null;
+  "data-overlay-open-for"?: string | null;
+  "data-overlay-cancel"?: boolean | string | null;
 }
 
 const {
@@ -14,7 +20,13 @@ const {
   href,
   name,
   value,
+  id,
   class: className = "",
+  "aria-haspopup": ariaHaspopup = undefined,
+  "aria-controls": ariaControls = undefined,
+  "aria-expanded": ariaExpanded = undefined,
+  "data-overlay-open-for": dataOverlayOpenFor = undefined,
+  "data-overlay-cancel": dataOverlayCancel = undefined,
 } = Astro.props;
 
 const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
@@ -24,11 +36,32 @@ const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
 
 {
   href && !disabled ? (
-    <a class={classes} href={href}>
+    <a
+      class={classes}
+      href={href}
+      id={id}
+      aria-haspopup={ariaHaspopup ?? undefined}
+      aria-controls={ariaControls ?? undefined}
+      aria-expanded={ariaExpanded ?? undefined}
+      data-overlay-open-for={dataOverlayOpenFor ?? undefined}
+      data-overlay-cancel={dataOverlayCancel != null ? "" : undefined}
+    >
       <slot />
     </a>
   ) : (
-    <button class={classes} type={type} disabled={disabled} name={name} value={value}>
+    <button
+      class={classes}
+      type={type}
+      disabled={disabled}
+      name={name}
+      value={value}
+      id={id}
+      aria-haspopup={ariaHaspopup ?? undefined}
+      aria-controls={ariaControls ?? undefined}
+      aria-expanded={ariaExpanded ?? undefined}
+      data-overlay-open-for={dataOverlayOpenFor ?? undefined}
+      data-overlay-cancel={dataOverlayCancel != null ? "" : undefined}
+    >
       <slot />
     </button>
   )

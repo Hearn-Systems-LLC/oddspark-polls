@@ -2,7 +2,7 @@ import {
   cloudflareTest,
   readD1Migrations,
 } from "@cloudflare/vitest-pool-workers";
-import { defineConfig } from "vitest/config";
+import { getViteConfig } from "astro/config";
 
 const migrations = await readD1Migrations("./db/migrations");
 
@@ -10,7 +10,7 @@ const migrations = await readD1Migrations("./db/migrations");
  * Integration project: Vitest 4 + @cloudflare/vitest-pool-workers 0.19
  * via the cloudflareTest() plugin (replaces defineWorkersConfig).
  */
-export default defineConfig({
+export default getViteConfig({
   plugins: [
     cloudflareTest({
       main: "./tests/integration/worker-entry.ts",
@@ -34,16 +34,27 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    alias: {
+    alias: [
       // Astro virtual module — lets tests import the real src/middleware.ts
-      "astro:middleware": new URL(
-        "./tests/integration/astro-middleware-shim.ts",
-        import.meta.url,
-      ).pathname,
-    },
+      {
+        find: "astro:middleware",
+        replacement: new URL(
+          "./tests/integration/astro-middleware-shim.ts",
+          import.meta.url,
+        ).pathname,
+      },
+      // workerd prohibits runtime WebAssembly compilation; Astro's test
+      // container only needs the lexer's equivalent JavaScript build.
+      { find: /^es-module-lexer$/, replacement: "es-module-lexer/js" },
+    ],
   },
   test: {
     name: "integration",
     include: ["tests/integration/**/*.{test,spec}.ts"],
   },
+}, {
+  // Compile .astro imports without loading the production Cloudflare adapter;
+  // the workerd pool plugin above owns this test environment.
+  configFile: false,
+  output: "server",
 });

@@ -15,6 +15,14 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Trust badge on the voting page and both Tally surfaces: a label-caps line
+  above `VOTE` (and below the bars on results) names each protection actually
+  enforcing the count in the Voter's terms — `ONE VOTE PER BROWSER`,
+  `ONE VOTE PER NETWORK`, `HUMAN CHECK ON SUBMIT` — with an entropy glyph and
+  a hairline, never a "verified"/"secure" claim or shield iconography. Polls
+  with every Security Toggle off render no badge at all, and items stack one
+  per line on narrow screens without truncation. Voter Codes and VPN Blocking
+  stay out of the badge until their enforcement lands (Epic 8).
 - Per-Poll CAPTCHA on the vote action via Cloudflare Turnstile: when a Creator
   enables CAPTCHA, the voting form loads an interaction-only challenge above
   `VOTE`, the server verifies the token with Siteverify before any Vote is

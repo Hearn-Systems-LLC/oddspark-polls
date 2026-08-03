@@ -1146,3 +1146,73 @@ describe("POST /:reference CAPTCHA delivery boundary", () => {
     expect(await counts(poll.pollId)).toMatchObject({ votes: 0 });
   });
 });
+
+describe("GET /:reference trust badge (Story 2.4)", () => {
+  const BADGE_ORIGIN = "http://127.0.0.1:8787";
+  const voteButtonIndex = (html: string): number =>
+    html.search(/<button[^>]*>\s*VOTE\s*<\/button>/);
+
+  it("renders the badge above the vote button on a session-only Poll", async () => {
+    const poll = await seedPoll({});
+    const response = await runVoteRoute(
+      makeContext(new Request(`${BADGE_ORIGIN}/${poll.reference}`)),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("data-trust-badge");
+    expect(html).toContain("ONE VOTE PER BROWSER");
+    // Enforced-set rendering: only the active protection appears.
+    expect(html).not.toContain("ONE VOTE PER NETWORK");
+    expect(html).not.toContain("INVITE CODE REQUIRED");
+    expect(html).not.toContain("HUMAN CHECK ON SUBMIT");
+    expect(html).not.toContain("NO VPN OR DATACENTER CONNECTIONS");
+    expect(html.indexOf("data-trust-badge")).toBeLessThan(
+      voteButtonIndex(html),
+    );
+  });
+
+  it("orders badge before challenge before button on a CAPTCHA Poll", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: true,
+    });
+    const response = await runVoteRoute(
+      makeContext(new Request(`${BADGE_ORIGIN}/${poll.reference}`)),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("data-trust-badge");
+    expect(html).toContain("HUMAN CHECK ON SUBMIT");
+    expect(html).not.toContain("ONE VOTE PER BROWSER");
+    // Story 2.3 AC #4 is binding: no trust line may sit between the
+    // challenge and the button it protects.
+    const badgeIndex = html.indexOf("data-trust-badge");
+    const challengeIndex = html.indexOf("data-turnstile");
+    const buttonIndex = voteButtonIndex(html);
+    expect(badgeIndex).toBeGreaterThanOrEqual(0);
+    expect(challengeIndex).toBeGreaterThanOrEqual(0);
+    expect(buttonIndex).toBeGreaterThanOrEqual(0);
+    expect(badgeIndex).toBeLessThan(challengeIndex);
+    expect(challengeIndex).toBeLessThan(buttonIndex);
+  });
+
+  it("renders no badge markup at all when every Toggle is off", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: false,
+    });
+    const response = await runVoteRoute(
+      makeContext(new Request(`${BADGE_ORIGIN}/${poll.reference}`)),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    // Absent entirely — no empty container, no hairline (SM-C1).
+    expect(html).not.toContain("data-trust-badge");
+    expect(html).not.toContain("trust-badge");
+    // The vote form itself is unaffected.
+    expect(voteButtonIndex(html)).toBeGreaterThanOrEqual(0);
+  });
+});

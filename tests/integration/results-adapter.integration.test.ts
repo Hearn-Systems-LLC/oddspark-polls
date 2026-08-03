@@ -130,7 +130,33 @@ describe("createResultsPersistence access read", () => {
       deadlineMs: NOW + 60_000,
       closedAtMs: null,
       multiSelectEnabled: true,
+      securityToggles: {
+        sessionChecks: true,
+        ipChecks: false,
+        voterCodes: false,
+        captcha: false,
+        vpnBlocking: false,
+      },
       canonicalReference: "results-it-link",
+    });
+  });
+
+  it("maps all five persisted toggle columns onto the envelope (Story 2.4)", async () => {
+    await insertPoll();
+    await testEnv.DB.prepare(
+      "UPDATE poll SET ip_checks_enabled = 1, captcha_enabled = 1 WHERE id = ?1",
+    )
+      .bind(POLL_ID)
+      .run();
+    const persistence = createResultsPersistence(testEnv.DB);
+
+    const envelope = await persistence.findAccessEnvelope("results-it-link");
+    expect(envelope?.securityToggles).toEqual({
+      sessionChecks: true,
+      ipChecks: true,
+      voterCodes: false,
+      captcha: true,
+      vpnBlocking: false,
     });
   });
 

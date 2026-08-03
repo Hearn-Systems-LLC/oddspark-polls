@@ -39,6 +39,13 @@ function envelope(
     deadlineMs: null,
     closedAtMs: null,
     multiSelectEnabled: false,
+    securityToggles: {
+      sessionChecks: true,
+      ipChecks: false,
+      voterCodes: false,
+      captcha: false,
+      vpnBlocking: false,
+    },
     canonicalReference: "team-lunch",
     ...overrides,
   };

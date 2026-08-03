@@ -1,0 +1,90 @@
+---
+/**
+ * Trust Badge (Story 2.4, UX-DR7) — the product's core trust claim, rendered
+ * as information rather than structure: a hairline above, an entropy glyph,
+ * and one label-caps-lg line per active protection in the Voter's terms. It
+ * names mechanisms only — never "verified", never "secure", no shield or lock
+ * iconography (EXPERIENCE.md § Trust Surfaces). This component owns the badge
+ * presentation and nothing else: not the vote action, not the challenge row,
+ * not the Tally. It renders nothing at all when no Toggle is enforced — it
+ * never says "no protections" (SM-C1). Static informational text: no control,
+ * no focus stop, no live region. The glyph is decoration; the words carry the
+ * entire meaning.
+ */
+import type { PollSecurityToggles } from "../shared/domain/index";
+import { trustBadgeItems } from "./trust-badge";
+
+interface Props {
+  /** Persisted toggle state for the Poll; the badge filters to the enforced
+   * subset (FR-17/FR-19 deferred — see trust-badge.ts). */
+  toggles: PollSecurityToggles;
+  class?: string;
+}
+
+const { toggles, class: className = "" } = Astro.props;
+const items = trustBadgeItems(toggles);
+---
+
+{
+  /* Absent entirely when nothing is enforced — no wrapper, no hairline. */
+  items.length > 0 && (
+    <div class:list={["trust-badge", className]} data-trust-badge>
+      <span class="trust-badge-glyph" aria-hidden="true">
+        ▪
+      </span>
+      <ul class="trust-badge-items" role="list">
+        {items.map((item) => (
+          <li class="trust-badge-item">{item}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+<style>
+  /* Glyph hangs outside the text column (grid col 1) so items that wrap at
+     375px stack one per line with aligned left edges (UX-DR7 / AC #3). */
+  .trust-badge {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: var(--trust-badge-gap);
+    align-items: baseline;
+    border-top: var(--trust-badge-border-top);
+    padding-block: var(--trust-badge-padding-y);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--trust-badge-color);
+  }
+
+  /* `hidden` loses to author display rules without an explicit guard. */
+  .trust-badge[hidden] {
+    display: none;
+  }
+
+  /* One type step below the 12px text; entropy blue, never gold. */
+  .trust-badge-glyph {
+    font-size: var(--type-label-caps-size);
+    color: var(--trust-badge-glyph-color);
+  }
+
+  .trust-badge-items {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .trust-badge-item {
+    white-space: nowrap;
+  }
+
+  /* Trailing separator: a stacked line never begins with punctuation. */
+  .trust-badge-item:not(:last-child)::after {
+    content: " ·";
+  }
+</style>

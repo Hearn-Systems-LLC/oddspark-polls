@@ -15,6 +15,9 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Share action beside the canonical Poll URL on the create-confirmation, voting, and
+  results surfaces: native share sheet when available, clipboard copy with a persistent
+  `LINK COPIED` confirmation otherwise, and a no-JavaScript floor of the selectable URL.
 - Creator lifecycle controls on the poll detail page: edit the definition while no Votes
   exist, edit the description anytime, close a Poll on demand, and delete a Poll with a
   confirmed overlay. Closed Polls reject later Votes; deleted Polls return a plain 404 and

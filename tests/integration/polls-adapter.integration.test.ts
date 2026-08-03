@@ -286,6 +286,7 @@ describe("createPollPersistence reads", () => {
     const page = await persistence.findPollByReference("team-lunch");
     expect(page).toEqual({
       pollId: "poll-1",
+      canonicalReference: "team-lunch",
       question: "Where should we eat?",
       description: null,
       pollType: "multiple_choice",
@@ -299,6 +300,33 @@ describe("createPollPersistence reads", () => {
         { id: "opt-1", label: "Pizza", position: 0 },
         { id: "opt-2", label: "Tacos", position: 1 },
       ],
+    });
+  });
+
+  it("resolves an exact alias while returning the canonical reference for sharing", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(
+      rows({
+        reference: {
+          reference: "team-lunch",
+          pollId: POLL_1,
+          kind: "custom",
+          createdAtMs: NOW,
+        },
+      }),
+    );
+    await testEnv.DB.prepare(
+      "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('old-lunch', ?1, 'custom', 0, ?2)",
+    )
+      .bind(POLL_1, NOW)
+      .run();
+
+    await expect(
+      persistence.findPollByReference("old-lunch"),
+    ).resolves.toMatchObject({
+      pollId: POLL_1,
+      question: "Where should we eat?",
+      canonicalReference: "team-lunch",
     });
   });
 

@@ -12,6 +12,8 @@ interface Props {
   "aria-expanded"?: string | boolean | null;
   "data-overlay-open-for"?: string | null;
   "data-overlay-cancel"?: boolean | string | null;
+  /** HTML hidden — progressive enhancers reveal JS-only controls. */
+  hidden?: boolean;
 }
 
 const {
@@ -27,6 +29,7 @@ const {
   "aria-expanded": ariaExpanded = undefined,
   "data-overlay-open-for": dataOverlayOpenFor = undefined,
   "data-overlay-cancel": dataOverlayCancel = undefined,
+  hidden = false,
 } = Astro.props;
 
 const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
@@ -40,6 +43,7 @@ const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
       class={classes}
       href={href}
       id={id}
+      hidden={hidden || undefined}
       aria-haspopup={ariaHaspopup ?? undefined}
       aria-controls={ariaControls ?? undefined}
       aria-expanded={ariaExpanded ?? undefined}
@@ -56,6 +60,7 @@ const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
       name={name}
       value={value}
       id={id}
+      hidden={hidden || undefined}
       aria-haspopup={ariaHaspopup ?? undefined}
       aria-controls={ariaControls ?? undefined}
       aria-expanded={ariaExpanded ?? undefined}
@@ -101,5 +106,10 @@ const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
   .btn-secondary.is-disabled {
     color: var(--btn-disabled-color);
     cursor: not-allowed;
+  }
+
+  /* display:inline-flex above would override UA [hidden] — keep enhancers honest. */
+  .btn-secondary[hidden] {
+    display: none;
   }
 </style>

@@ -4,6 +4,7 @@ import { z } from "zod";
 import ButtonPrimary from "../components/button-primary.astro";
 import PollOption from "../components/poll-option.astro";
 import ResultsTally from "../components/results-tally.astro";
+import ShareAction from "../components/share-action.astro";
 import BaseLayout from "../layouts/base-layout.astro";
 import { formatUtc } from "../lib/datetime";
 import {
@@ -944,6 +945,13 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
               initialRenderAtMs={resultsRenderedAtMs}
             />
           )}
+          {/* Share is secondary and sits after vote/tally — never primary (AC #3).
+              Outside data-results-tally so the live reconciler never clobbers it. */}
+          <section class="share-block" aria-label="Share this Poll">
+            <ShareAction
+              canonicalUrl={`${Astro.url.origin}/${poll.canonicalReference}`}
+            />
+          </section>
         </>
       ) : (
         <h1 class="not-found" tabindex="-1" autofocus>This Poll doesn't exist.</h1>
@@ -951,6 +959,7 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     }
   </main>
   {poll && <script src="../scripts/vote-form.ts"></script>}
+  {poll && <script src="../scripts/share-action.ts"></script>}
   {
     showTally && postVoteResults?.kind === "visible" && (
       <script src="../scripts/chart-form-toggle.ts"></script>
@@ -1075,6 +1084,12 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     margin-top: var(--space-6);
   }
 
+  .share-block {
+    margin-top: var(--space-10);
+    padding-top: var(--space-6);
+    border-top: var(--space-hairline) solid var(--color-rule);
+  }
+
   .vote-bounds-hint {
     margin: 0 0 var(--space-3);
     color: var(--color-dim);
@@ -1176,6 +1191,12 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     .poll-shell[data-post-vote="true"] :global(.chart-form-pie) {
       grid-column: 2;
       grid-row: 5;
+    }
+
+    /* Share stays below both columns — secondary, never competes with VOTE. */
+    .poll-shell[data-post-vote="true"] > .share-block {
+      grid-column: 1 / -1;
+      grid-row: 6;
     }
   }
 </style>

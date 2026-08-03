@@ -1,0 +1,85 @@
+---
+/**
+ * Share action (Story 1.13 / FR-28 / AD-13).
+ * Canonical URL is always visible and selectable. SHARE is hidden until the
+ * progressive enhancer proves the browser can share or copy (UX-DR9).
+ */
+import ButtonSecondary from "./button-secondary.astro";
+
+interface Props {
+  /** Absolute canonical voting URL — never a /results path. */
+  canonicalUrl: string;
+  class?: string;
+}
+
+const { canonicalUrl, class: className = "" } = Astro.props;
+---
+
+<div
+  class:list={["share-action", className]}
+  data-share-action
+  data-share-url={canonicalUrl}
+>
+  <p class="canonical-url" data-share-url-text>{canonicalUrl}</p>
+  <div class="share-controls">
+    {/* Hidden pre-enhancement: no-JS floor is the selectable URL alone. */}
+    <ButtonSecondary
+      type="button"
+      class="share-trigger"
+      hidden={true}
+    >
+      SHARE
+    </ButtonSecondary>
+    <p
+      class="share-confirmation"
+      data-share-confirmation
+      aria-live="polite"
+      hidden
+    >
+      LINK COPIED
+    </p>
+  </div>
+</div>
+
+<style>
+  .share-action {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .canonical-url {
+    flex: 1 1 16rem;
+    min-width: 0;
+    margin: 0;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-text);
+    user-select: all;
+    overflow-wrap: anywhere;
+  }
+
+  .share-controls {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .share-confirmation {
+    margin: 0;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .share-confirmation[hidden],
+  .share-trigger[hidden] {
+    display: none;
+  }
+</style>

@@ -392,9 +392,12 @@ test.describe("direct results route", () => {
     expectNoAggregateResultFacts(hiddenMain);
 
     await page.goto(poll.path);
-    await expect(page.locator("h1")).toHaveText("Where to lunch?");
+    const main = page.locator("main");
+    await expect(main.getByRole("heading", { level: 1 })).toHaveText(
+      "Where to lunch?",
+    );
     // Question precedes the explanation in reading order.
-    const mainText = await page.locator("main").innerText();
+    const mainText = await main.innerText();
     expect(mainText.indexOf("Where to lunch?")).toBeLessThan(
       mainText.indexOf("Results open when the Poll closes"),
     );
@@ -405,10 +408,14 @@ test.describe("direct results route", () => {
       new Date(deadlineMs).toISOString(),
     );
     await expect(time).toHaveText(await formatDeadlineLocally(page, deadlineMs));
-    // No vote affordances and no new interactive controls inside <main>
-    // (the Astro dev toolbar lives outside it in dev).
-    await expect(page.locator("main").getByRole("button")).toHaveCount(0);
-    await expect(page.locator("main").getByRole("radio")).toHaveCount(0);
+    // The hidden Tally still exposes the canonical Share action (Story 1.13),
+    // but never a vote affordance or any result-shape control.
+    await expect(main.getByRole("button", { name: "SHARE" })).toBeVisible();
+    await expect(main.getByRole("button")).toHaveCount(1);
+    await expect(main.locator("[data-share-url-text]")).toContainText(
+      `/${poll.reference}`,
+    );
+    await expect(main.getByRole("radio")).toHaveCount(0);
 
     // Deadline comparison opens the Tally with no write: closed_at stays
     // NULL and the representation version never moves.

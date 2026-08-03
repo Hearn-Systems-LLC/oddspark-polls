@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import {
   AlreadyVotedError,
+  asVoterClaimDigest,
   PollClosedError,
   PollGoneError,
   SubmissionReplayError,
@@ -11,6 +12,7 @@ import {
   type CastVoteDeps,
   type VotePersistenceBatch,
   type VoteSubmission,
+  type VoterClaimDigest,
   type VotingPollSnapshot,
 } from "../../src/modules/voting/index";
 import type {
@@ -24,6 +26,22 @@ const OPTION_A = "option-a" as PollOptionId;
 const OPTION_B = "option-b" as PollOptionId;
 const OPTION_C = "option-c" as PollOptionId;
 
+/** Deterministic lowercase 64-hex claim digest for unit fixtures. */
+function digestOf(seed: string): VoterClaimDigest {
+  let out = "";
+  for (let i = 0; i < 64; i += 1) {
+    out += (seed.charCodeAt(i % seed.length) % 16).toString(16);
+  }
+  const branded = asVoterClaimDigest(out);
+  if (branded === null) {
+    throw new Error("fixture digest construction failed");
+  }
+  return branded;
+}
+
+const SESSION_DIGEST = digestOf("poll-1:session:browser-token");
+const IP_DIGEST = digestOf("poll-1:ip:v4:203.0.113.8");
+
 function poll(
   overrides: Partial<VotingPollSnapshot> = {},
 ): VotingPollSnapshot {
@@ -35,6 +53,7 @@ function poll(
       { id: OPTION_B, label: "B", position: 1 },
     ],
     sessionChecksEnabled: true,
+    ipChecksEnabled: false,
     multiSelectEnabled: false,
     minSelections: null,
     maxSelections: null,
@@ -81,7 +100,7 @@ function deps(
       }),
     }),
     createDigest: async ({ pollId, checkKind, token }) =>
-      `digest:${pollId}:${checkKind}:${token}`,
+      digestOf(`${pollId}:${checkKind}:${token}`),
     hashPayload: async (payload) => `hash:${payload}`,
     persistVote: async (batch) => {
       persisted.push(batch);
@@ -97,6 +116,7 @@ const input = {
   submissionId: "submission-1",
   selectedOptionIds: [OPTION_A],
   browserToken: "browser-token",
+  ipDigest: null as VoterClaimDigest | null,
 };
 
 describe("normalizeVotePayload", () => {
@@ -200,7 +220,7 @@ describe("castVote", () => {
         kind: "voter_claim",
         pollId: POLL_ID,
         checkKind: "session",
-        digest: `digest:${POLL_ID}:session:browser-token`,
+        digest: SESSION_DIGEST,
         voteId: "vote-1",
         createdAtMs: NOW,
       },
@@ -248,7 +268,7 @@ describe("castVote", () => {
           kind: "voter_claim",
           pollId: POLL_ID,
           checkKind: "session",
-          digest: `digest:${POLL_ID}:session:browser-token`,
+          digest: SESSION_DIGEST,
           voteId: "vote-1",
           createdAtMs: NOW,
         },
@@ -391,7 +411,16 @@ describe("castVote", () => {
   });
 
   it.each([
-    [new AlreadyVotedError(), "already_voted", VOTE_COPY.alreadyVoted],
+    [
+      new AlreadyVotedError("session"),
+      "already_voted",
+      VOTE_COPY.alreadyVoted,
+    ],
+    [
+      new AlreadyVotedError("ip"),
+      "already_voted_ip",
+      VOTE_COPY.alreadyVotedIp,
+    ],
     [new PollClosedError(), "poll_closed", VOTE_COPY.pollClosed],
     [new Error("driver detail"), "vote_failed", VOTE_COPY.retry],
   ])(
@@ -857,6 +886,195 @@ describe("castVote", () => {
     });
     expect(commandDeps.persisted).toHaveLength(0);
   });
+
+  it("creates no claims when both Session and IP checks are off", async () => {
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({ sessionChecksEnabled: false, ipChecksEnabled: false }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      browserToken: null,
+      ipDigest: IP_DIGEST,
+    });
+    expect(result.ok).toBe(true);
+    expect(
+      commandDeps.persisted[0]?.contributions.filter(
+        (c) => c.kind === "voter_claim",
+      ),
+    ).toEqual([]);
+  });
+
+  it("creates only a Session claim when Session is on and IP is off", async () => {
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({ sessionChecksEnabled: true, ipChecksEnabled: false }),
+    });
+    await castVote(commandDeps, { ...input, ipDigest: IP_DIGEST });
+    const claims = commandDeps.persisted[0]?.contributions.filter(
+      (c) => c.kind === "voter_claim",
+    );
+    expect(claims).toEqual([
+      {
+        kind: "voter_claim",
+        pollId: POLL_ID,
+        checkKind: "session",
+        digest: SESSION_DIGEST,
+        voteId: "vote-1",
+        createdAtMs: NOW,
+      },
+    ]);
+  });
+
+  it("creates only an IP claim when IP is on and Session is off", async () => {
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({ sessionChecksEnabled: false, ipChecksEnabled: true }),
+    });
+    await castVote(commandDeps, {
+      ...input,
+      browserToken: null,
+      ipDigest: IP_DIGEST,
+    });
+    const claims = commandDeps.persisted[0]?.contributions.filter(
+      (c) => c.kind === "voter_claim",
+    );
+    expect(claims).toEqual([
+      {
+        kind: "voter_claim",
+        pollId: POLL_ID,
+        checkKind: "ip",
+        digest: IP_DIGEST,
+        voteId: "vote-1",
+        createdAtMs: NOW,
+      },
+    ]);
+  });
+
+  it("creates Session then IP claims in stable order when both are on", async () => {
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({ sessionChecksEnabled: true, ipChecksEnabled: true }),
+    });
+    await castVote(commandDeps, { ...input, ipDigest: IP_DIGEST });
+    const claims = commandDeps.persisted[0]?.contributions.filter(
+      (c) => c.kind === "voter_claim",
+    );
+    expect(claims).toEqual([
+      {
+        kind: "voter_claim",
+        pollId: POLL_ID,
+        checkKind: "session",
+        digest: SESSION_DIGEST,
+        voteId: "vote-1",
+        createdAtMs: NOW,
+      },
+      {
+        kind: "voter_claim",
+        pollId: POLL_ID,
+        checkKind: "ip",
+        digest: IP_DIGEST,
+        voteId: "vote-1",
+        createdAtMs: NOW,
+      },
+    ]);
+  });
+
+  it("returns ip_check_unavailable when IP is on and the digest is missing", async () => {
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({ sessionChecksEnabled: false, ipChecksEnabled: true }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      browserToken: null,
+      ipDigest: null,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "ip_check_unavailable",
+        message: VOTE_COPY.retry,
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it("returns ip_check_unavailable when IP is on and the digest is malformed", async () => {
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({ sessionChecksEnabled: false, ipChecksEnabled: true }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      browserToken: null,
+      // Deliberately forged non-hex value — cast is the hostile call site.
+      ipDigest: "not-a-digest" as unknown as VoterClaimDigest,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "ip_check_unavailable",
+        message: VOTE_COPY.retry,
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it("ignores a prepared IP digest when the authoritative snapshot has IP off", async () => {
+    const commandDeps = deps({
+      findPoll: async () =>
+        poll({ sessionChecksEnabled: false, ipChecksEnabled: false }),
+    });
+    await castVote(commandDeps, {
+      ...input,
+      browserToken: null,
+      ipDigest: IP_DIGEST,
+    });
+    expect(
+      commandDeps.persisted[0]?.contributions.some(
+        (c) => c.kind === "voter_claim" && c.checkKind === "ip",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not prepare claims when an exact replay is adjudicated first", async () => {
+    const createDigest = vi.fn(async () => SESSION_DIGEST);
+    const persistVote = vi.fn();
+    const normalized = normalizeVotePayload(POLL_ID, [OPTION_A]);
+    const commandDeps = deps({
+      createDigest,
+      persistVote,
+      findVoteBySubmission: async () => ({
+        voteId: "stored-vote",
+        payloadHash: `hash:${normalized}`,
+        createdAtMs: NOW - 10,
+      }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      ipDigest: IP_DIGEST,
+    });
+    expect(result.ok).toBe(true);
+    expect(createDigest).not.toHaveBeenCalled();
+    expect(persistVote).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Session digest that fails runtime validation", async () => {
+    const commandDeps = deps({
+      // Deliberately hostile adapter result despite the branded port.
+      createDigest: async () => "short" as unknown as VoterClaimDigest,
+    });
+    const result = await castVote(commandDeps, input);
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "vote_failed",
+        message: VOTE_COPY.retry,
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
 });
 
 describe("VOTE_COPY", () => {
@@ -869,6 +1087,8 @@ describe("VOTE_COPY", () => {
       countedCreatorOnly: "These results go to the Creator only.",
       alreadyVoted:
         "You've already voted here. Enthusiasm noted; the Tally is unchanged.",
+      alreadyVotedIp:
+        "Someone on this connection already voted. The Creator turned on one-vote-per-network, and it can't tell roommates apart. If that's you, ask them to send you the results instead.",
       pollClosed:
         "This Poll closed while you were deciding — {when}. Your Vote wasn't recorded.",
       closedOnGet: "This Poll closed {when}.",

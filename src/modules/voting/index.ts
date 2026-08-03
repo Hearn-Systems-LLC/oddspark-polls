@@ -16,6 +16,27 @@ import {
   type PollType,
 } from "../../shared/domain/index";
 import { MULTIPLE_CHOICE_VOTE_COPY } from "../polls/types/multiple-choice";
+import {
+  asVoterClaimDigest,
+  type VoterClaimCheckKind,
+  type VoterClaimDigest,
+} from "./ip-address";
+
+export {
+  asVoteRateLimitDigest,
+  asVoterClaimDigest,
+  isVoteDigestPurpose,
+  isVoteRateLimitDigest,
+  isVoterClaimCheckKind,
+  isVoterClaimDigest,
+  normalizeIpIdentity,
+  type IpIdentityResult,
+  type NormalizedIpIdentity,
+  type VoteDigestPurpose,
+  type VoteRateLimitDigest,
+  type VoterClaimCheckKind,
+  type VoterClaimDigest,
+} from "./ip-address";
 
 export const VOTE_COPY = {
   counted: "Counted.",
@@ -25,6 +46,8 @@ export const VOTE_COPY = {
   countedCreatorOnly: "These results go to the Creator only.",
   alreadyVoted:
     "You've already voted here. Enthusiasm noted; the Tally is unchanged.",
+  alreadyVotedIp:
+    "Someone on this connection already voted. The Creator turned on one-vote-per-network, and it can't tell roommates apart. If that's you, ask them to send you the results instead.",
   pollClosed:
     "This Poll closed while you were deciding — {when}. Your Vote wasn't recorded.",
   closedOnGet: "This Poll closed {when}.",
@@ -45,9 +68,12 @@ export const VOTE_COPY = {
 } as const;
 
 export class AlreadyVotedError extends Error {
-  constructor() {
+  readonly checkKind: VoterClaimCheckKind;
+
+  constructor(checkKind: VoterClaimCheckKind) {
     super("voter claim already exists");
     this.name = "AlreadyVotedError";
+    this.checkKind = checkKind;
   }
 }
 
@@ -91,6 +117,7 @@ export type VotingPollSnapshot = {
     position: number;
   }[];
   sessionChecksEnabled: boolean;
+  ipChecksEnabled: boolean;
   multiSelectEnabled: boolean;
   minSelections: number | null;
   maxSelections: number | null;
@@ -131,8 +158,8 @@ export type VoteSelectionContribution = {
 export type VoterClaimContribution = {
   kind: "voter_claim";
   pollId: PollId;
-  checkKind: "session";
-  digest: string;
+  checkKind: VoterClaimCheckKind;
+  digest: VoterClaimDigest;
   voteId: string;
   createdAtMs: number;
 };
@@ -195,9 +222,9 @@ export type CastVoteDeps = {
   strategyFor: (pollType: PollType) => VotingPollTypeStrategy | null;
   createDigest: (input: {
     pollId: PollId;
-    checkKind: "session";
+    checkKind: VoterClaimCheckKind;
     token: string;
-  }) => Promise<string>;
+  }) => Promise<VoterClaimDigest>;
   hashPayload: (payload: string) => Promise<string>;
   persistVote: (batch: VotePersistenceBatch) => Promise<void>;
   generateId: () => string;
@@ -210,6 +237,12 @@ export type CastVoteInput = {
   submissionId: string;
   selectedOptionIds: readonly string[];
   browserToken: string | null;
+  /**
+   * Prepared IP claim digest from the inbound delivery boundary, or null when
+   * identity is unavailable. CastVote's authoritative Poll snapshot decides
+   * whether the claim is required — the route does not.
+   */
+  ipDigest: VoterClaimDigest | null;
 };
 
 export type CastVoteOutcome = {
@@ -381,19 +414,38 @@ export async function castVote(
     return failure("invalid_selection", message, detail);
   }
 
-  let digest: string | null = null;
+  // Session claim: required only when the authoritative snapshot enables it.
+  let sessionDigest: VoterClaimDigest | null = null;
   if (poll.sessionChecksEnabled) {
     if (!input.browserToken) {
       return failure("session_token_missing", VOTE_COPY.retry);
     }
     try {
-      digest = await deps.createDigest({
+      const raw = await deps.createDigest({
         pollId: poll.id,
         checkKind: "session",
         token: input.browserToken,
       });
+      sessionDigest = asVoterClaimDigest(raw);
+      if (sessionDigest === null) {
+        return failure("vote_failed", VOTE_COPY.retry);
+      }
     } catch {
       return failure("vote_failed", VOTE_COPY.retry);
+    }
+  }
+
+  // IP claim: required only when the authoritative snapshot enables it. A
+  // missing/malformed digest is infrastructure `ip_check_unavailable`, never a
+  // voter-correctable rejection. With IP off, a prepared digest is ignored.
+  let ipDigest: VoterClaimDigest | null = null;
+  if (poll.ipChecksEnabled) {
+    if (input.ipDigest === null) {
+      return failure("ip_check_unavailable", VOTE_COPY.retry);
+    }
+    ipDigest = asVoterClaimDigest(input.ipDigest);
+    if (ipDigest === null) {
+      return failure("ip_check_unavailable", VOTE_COPY.retry);
     }
   }
 
@@ -416,12 +468,23 @@ export async function castVote(
       pollOptionId,
     }),
   );
-  if (digest !== null) {
+  // Stable claim order: Session first, IP second (dual-collision precedence).
+  if (sessionDigest !== null) {
     contributions.push({
       kind: "voter_claim",
       pollId: poll.id,
       checkKind: "session",
-      digest,
+      digest: sessionDigest,
+      voteId,
+      createdAtMs: nowMs,
+    });
+  }
+  if (ipDigest !== null) {
+    contributions.push({
+      kind: "voter_claim",
+      pollId: poll.id,
+      checkKind: "ip",
+      digest: ipDigest,
       voteId,
       createdAtMs: nowMs,
     });
@@ -470,6 +533,9 @@ export async function castVote(
       }
     }
     if (cause instanceof AlreadyVotedError) {
+      if (cause.checkKind === "ip") {
+        return failure("already_voted_ip", VOTE_COPY.alreadyVotedIp);
+      }
       return failure("already_voted", VOTE_COPY.alreadyVoted);
     }
     if (cause instanceof PollClosedError) {

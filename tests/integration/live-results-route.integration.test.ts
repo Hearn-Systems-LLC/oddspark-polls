@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createVotePersistence } from "../../src/adapters/d1/index";
 import type { RequestContext } from "../../src/lib/request-context";
 import type { VotePersistenceBatch } from "../../src/modules/voting/index";
+import { asVoterClaimDigest } from "../../src/modules/voting/ip-address";
 import { incrementRepresentationVersion } from "../../src/shared/application/index";
 import type {
   PollId,
@@ -18,6 +19,16 @@ import {
   GET,
   HEAD,
 } from "../../src/pages/[reference]/results/live";
+
+function fixtureDigest(seed: string) {
+  let out = "";
+  for (let i = 0; i < 64; i += 1) {
+    out += (seed.charCodeAt(i % seed.length) % 16).toString(16);
+  }
+  const branded = asVoterClaimDigest(out);
+  if (branded === null) throw new Error("fixture digest construction failed");
+  return branded;
+}
 
 type MigrationTestEnv = Cloudflare.Env & {
   TEST_MIGRATIONS: D1Migration[];
@@ -152,7 +163,7 @@ async function castAcceptedVote(): Promise<void> {
         kind: "voter_claim",
         pollId: POLL_ID,
         checkKind: "session",
-        digest: "live-route-digest",
+        digest: fixtureDigest("live-route-digest"),
         voteId: "live-route-vote",
         createdAtMs: Date.now(),
       },

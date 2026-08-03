@@ -7,6 +7,7 @@ import ResultsTally from "../components/results-tally.astro";
 import ShareAction from "../components/share-action.astro";
 import BaseLayout from "../layouts/base-layout.astro";
 import { formatUtc } from "../lib/datetime";
+import { selectCloudflareClientAddress } from "../lib/cloudflare-client-address";
 import {
   createPollPersistence,
   createResultsPersistence,
@@ -37,8 +38,12 @@ import {
 import { resolveAuthorizedBallotLabels } from "../modules/results/post-vote";
 import {
   VOTE_COPY,
+  asVoteRateLimitDigest,
+  asVoterClaimDigest,
   castVote,
   type VoteApplicationError,
+  type VoteRateLimitDigest,
+  type VoterClaimDigest,
   type VotingPollTypeStrategy,
 } from "../modules/voting/index";
 import {
@@ -216,6 +221,14 @@ const outcomeFromError = (
         titlePrefix: "Already voted",
         tone: "rejection",
       };
+    case "already_voted_ip":
+      return {
+        code: error.code,
+        ...splitCopy(VOTE_COPY.alreadyVotedIp),
+        time: null,
+        titlePrefix: "Already voted",
+        tone: "rejection",
+      };
     case "poll_closed": {
       return {
         code: error.code,
@@ -385,18 +398,51 @@ if (poll && method === "POST") {
     } else {
       const submittedId = parsed.data.submissionId;
 
-      // Replay adjudication precedes the limiter: replays of an existing
-      // submission_id are the designed exactly-once path — they must not
-      // consume limiter budget or be 429'd; castVote adjudicates them.
+      // Replay adjudication precedes network preparation and the limiter:
+      // committed replays must not depend on the request's current network,
+      // consume limiter budget, or add IP identity to the payload hash.
       const existing = await votePersistence.findVoteBySubmission(
         poll.pollId,
         submittedId,
       );
+
+      // Purpose-separated digests. Derive independently so a rate-limit
+      // failure never discards a valid claim digest and vice versa.
+      let ipClaimDigest: VoterClaimDigest | null = null;
+      let rateLimitDigest: VoteRateLimitDigest | null = null;
+      if (existing === null) {
+        const identity = selectCloudflareClientAddress(Astro.request.headers);
+        if (identity.ok) {
+          try {
+            const claimRaw = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
+              pollId: poll.pollId,
+              checkKind: "ip",
+              token: identity.value.claimToken,
+            });
+            ipClaimDigest = asVoterClaimDigest(claimRaw);
+          } catch {
+            // Claim preparation failed; CastVote decides if IP is required.
+            ipClaimDigest = null;
+          }
+          try {
+            const limitRaw = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
+              pollId: poll.pollId,
+              checkKind: "rate_limit",
+              token: identity.value.rateLimitToken,
+            });
+            rateLimitDigest = asVoteRateLimitDigest(limitRaw);
+          } catch {
+            // Limiter degrades to fail-open only.
+            rateLimitDigest = null;
+          }
+        }
+      }
+
       const admitted =
         existing !== null ||
         (await allowVoteSubmission(
           env.VOTE_RATE_LIMITER,
-          Astro.request.headers.get("cf-connecting-ip"),
+          rateLimitDigest,
           poll.pollId,
         ));
       if (!admitted) {
@@ -438,6 +484,7 @@ if (poll && method === "POST") {
             submissionId: submittedId,
             selectedOptionIds,
             browserToken: voterToken,
+            ipDigest: ipClaimDigest,
           },
         );
 
@@ -457,6 +504,14 @@ if (poll && method === "POST") {
             },
           });
         }
+        if (result.error.code === "ip_check_unavailable") {
+          // Toggle enabled after delivery snapshot, or identity missing when
+          // required: infrastructure 500, no write, no vote-rejection flag.
+          return new Response("Voting is unavailable.", {
+            status: 500,
+            headers: { "cache-control": "private, no-store" },
+          });
+        }
         if (result.error.code === "poll_deleted") {
           poll = null;
           Astro.response.status = 404;
@@ -474,6 +529,7 @@ if (poll && method === "POST") {
           }
           readOnly =
             result.error.code === "already_voted" ||
+            result.error.code === "already_voted_ip" ||
             result.error.code === "poll_closed";
           Astro.response.status = 422;
           markVoteRejection();
@@ -523,17 +579,42 @@ if (poll && method === "POST") {
 
   // One digest for the current browser token, reused by the already-voted
   // lookup and the read-only selection marker below.
-  let voterDigest: string | null = null;
+  let voterDigest: VoterClaimDigest | null = null;
+  let sessionPreflightUnavailable = false;
   if (voterToken !== null) {
     try {
-      voterDigest = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
+      const raw = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
         pollId: poll.pollId,
         checkKind: "session",
         token: voterToken,
       });
+      voterDigest = asVoterClaimDigest(raw);
+      sessionPreflightUnavailable = voterDigest === null;
     } catch {
       // The Poll stays readable; a submission will surface the retry outcome
-      // until the missing/misconfigured secret is restored.
+      // until the missing/misconfigured secret is restored. Do not fall
+      // through to an IP result: Session-first priority requires a confirmed
+      // Session miss, not an unavailable Session check.
+      sessionPreflightUnavailable = true;
+    }
+  }
+
+  // IP preflight only when the Toggle is on. Missing/invalid identity leaves
+  // the Poll readable; an IP match never attributes a roommate's ballot.
+  let ipPreflightDigest: VoterClaimDigest | null = null;
+  if (poll.ipChecksEnabled) {
+    const identity = selectCloudflareClientAddress(Astro.request.headers);
+    if (identity.ok) {
+      try {
+        const raw = await createVoteDigest(env.VOTE_DIGEST_SECRET, {
+          pollId: poll.pollId,
+          checkKind: "ip",
+          token: identity.value.claimToken,
+        });
+        ipPreflightDigest = asVoterClaimDigest(raw);
+      } catch {
+        ipPreflightDigest = null;
+      }
     }
   }
 
@@ -562,6 +643,7 @@ if (poll && method === "POST") {
     }
   }
 
+  // Priority: Counted flash → closed → Session claim → IP claim.
   if (outcome === null && effectivePollStatus(poll, Date.now()) === "closed") {
     const closedAtMs = poll.closedAtMs ?? poll.deadlineMs ?? Date.now();
     outcome = {
@@ -581,6 +663,28 @@ if (poll && method === "POST") {
         outcome = outcomeFromError({
           code: "already_voted",
           message: VOTE_COPY.alreadyVoted,
+        });
+        readOnly = true;
+      }
+    } catch {
+      // Degrades to the open form; a submission surfaces the real outcome.
+      // Suppress the lower-priority IP probe because this was not a confirmed
+      // Session miss and could otherwise mislabel the same browser.
+      sessionPreflightUnavailable = true;
+    }
+  }
+  if (
+    outcome === null &&
+    !sessionPreflightUnavailable &&
+    ipPreflightDigest !== null
+  ) {
+    try {
+      if (
+        await votePersistence.findClaim(poll.pollId, "ip", ipPreflightDigest)
+      ) {
+        outcome = outcomeFromError({
+          code: "already_voted_ip",
+          message: VOTE_COPY.alreadyVotedIp,
         });
         readOnly = true;
       }

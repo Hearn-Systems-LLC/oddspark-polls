@@ -17,12 +17,18 @@ import type {
 } from "../../modules/results/index";
 import {
   AlreadyVotedError,
+  asVoterClaimDigest,
+  isVoterClaimCheckKind,
   PollClosedError,
   PollDefinitionChangedError,
   PollGoneError,
   SubmissionReplayError,
   type StoredVoteOutcome,
   type VotePersistenceBatch,
+  type VoteSelectionContribution,
+  type VoterClaimCheckKind,
+  type VoterClaimContribution,
+  type VoterClaimDigest,
   type VotingPollSnapshot,
 } from "../../modules/voting/index";
 import type { RepresentationVersionIncrement } from "../../shared/application/index";
@@ -708,6 +714,34 @@ export function createPollPersistence(db: D1Database) {
 export function createVotePersistence(db: D1Database) {
   return {
     async insertVote(batch: VotePersistenceBatch): Promise<void> {
+      // Validate and sanitize the complete contribution set before touching
+      // D1. A malformed claim anywhere in the batch must cause zero
+      // prepare/bind/batch calls, including when it follows valid facts.
+      const contributions: Array<
+        VoteSelectionContribution | VoterClaimContribution
+      > = batch.contributions.map((contribution) => {
+        if (contribution.kind === "vote_selection") {
+          return contribution;
+        }
+        if (contribution.kind === "voter_claim") {
+          const digest = asVoterClaimDigest(contribution.digest);
+          if (
+            digest === null ||
+            !isVoterClaimCheckKind(contribution.checkKind)
+          ) {
+            throw new Error("invalid voter claim digest");
+          }
+          return {
+            ...contribution,
+            checkKind: contribution.checkKind,
+            digest,
+          };
+        }
+        throw new Error(
+          `Unsupported vote contribution kind: ${contribution.kind}`,
+        );
+      });
+
       const statements: D1PreparedStatement[] = [
         db
           .prepare(
@@ -722,7 +756,7 @@ export function createVotePersistence(db: D1Database) {
           ),
       ];
 
-      for (const contribution of batch.contributions) {
+      for (const contribution of contributions) {
         if (contribution.kind === "vote_selection") {
           statements.push(
             db
@@ -733,23 +767,19 @@ export function createVotePersistence(db: D1Database) {
           );
           continue;
         }
-        if (contribution.kind === "voter_claim") {
-          statements.push(
-            db
-              .prepare(
-                "INSERT INTO voter_claim (poll_id, check_kind, digest, vote_id, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
-              )
-              .bind(
-                contribution.pollId,
-                contribution.checkKind,
-                contribution.digest,
-                contribution.voteId,
-                contribution.createdAtMs,
-              ),
-          );
-          continue;
-        }
-        throw new Error(`Unsupported vote contribution kind: ${contribution.kind}`);
+        statements.push(
+          db
+            .prepare(
+              "INSERT INTO voter_claim (poll_id, check_kind, digest, vote_id, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .bind(
+              contribution.pollId,
+              contribution.checkKind,
+              contribution.digest,
+              contribution.voteId,
+              contribution.createdAtMs,
+            ),
+        );
       }
 
       statements.push(
@@ -780,7 +810,38 @@ export function createVotePersistence(db: D1Database) {
             error.message,
           )
         ) {
-          throw new AlreadyVotedError();
+          // Classify the already-decided constraint failure. Session-first
+          // dual-collision precedence; do not guess when no candidate exists.
+          const submittedClaims = contributions.filter(
+            (contribution): contribution is VoterClaimContribution =>
+              contribution.kind === "voter_claim",
+          );
+          const ordered = [...submittedClaims].sort((left, right) => {
+            if (left.checkKind === right.checkKind) {
+              return 0;
+            }
+            return left.checkKind === "session" ? -1 : 1;
+          });
+          try {
+            for (const claim of ordered) {
+              const row = await db
+                .prepare(
+                  "SELECT 1 AS found FROM voter_claim WHERE poll_id = ?1 AND check_kind = ?2 AND digest = ?3",
+                )
+                .bind(claim.pollId, claim.checkKind, claim.digest)
+                .first<{ found: number }>();
+              if (row?.found === 1) {
+                throw new AlreadyVotedError(claim.checkKind);
+              }
+            }
+          } catch (classificationError) {
+            if (classificationError instanceof AlreadyVotedError) {
+              throw classificationError;
+            }
+            // Adjudication read failed — generic safe failure, not a guess.
+            throw new Error("voter claim collision could not be classified");
+          }
+          throw new Error("voter claim collision without confirmed candidate");
         }
         if (error instanceof Error && /poll_closed/.test(error.message)) {
           throw new PollClosedError();
@@ -798,7 +859,7 @@ export function createVotePersistence(db: D1Database) {
           if (!pollStillExists) {
             throw new PollGoneError();
           }
-          const selectedOptionIds = batch.contributions
+          const selectedOptionIds = contributions
             .filter(
               (contribution): contribution is {
                 kind: "vote_selection";
@@ -850,13 +911,14 @@ export function createVotePersistence(db: D1Database) {
     async findPoll(pollId: PollId): Promise<VotingPollSnapshot | null> {
       const row = await db
         .prepare(
-          "SELECT id, poll_type, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
+          "SELECT id, poll_type, session_checks_enabled, ip_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
         )
         .bind(pollId)
         .first<{
           id: PollId;
           poll_type: PollType;
           session_checks_enabled: number;
+          ip_checks_enabled: number;
           multi_select_enabled: number;
           min_selections: number | null;
           max_selections: number | null;
@@ -871,6 +933,7 @@ export function createVotePersistence(db: D1Database) {
         pollType: row.poll_type,
         options: await loadOptions(db, row.id),
         sessionChecksEnabled: row.session_checks_enabled === 1,
+        ipChecksEnabled: row.ip_checks_enabled === 1,
         multiSelectEnabled: row.multi_select_enabled === 1,
         minSelections: row.min_selections,
         maxSelections: row.max_selections,
@@ -904,14 +967,21 @@ export function createVotePersistence(db: D1Database) {
 
     async findClaim(
       pollId: PollId,
-      checkKind: "session" | "ip",
-      digest: string,
+      checkKind: VoterClaimCheckKind,
+      digest: VoterClaimDigest,
     ): Promise<boolean> {
+      if (!isVoterClaimCheckKind(checkKind)) {
+        return false;
+      }
+      const validated = asVoterClaimDigest(digest);
+      if (validated === null) {
+        return false;
+      }
       const row = await db
         .prepare(
           "SELECT 1 AS found FROM voter_claim WHERE poll_id = ?1 AND check_kind = ?2 AND digest = ?3",
         )
-        .bind(pollId, checkKind, digest)
+        .bind(pollId, checkKind, validated)
         .first<{ found: number }>();
       return row?.found === 1;
     },
@@ -920,14 +990,21 @@ export function createVotePersistence(db: D1Database) {
     // claim to its vote, then to that vote's selected options.
     async findVoteSelectionByClaim(
       pollId: PollId,
-      checkKind: "session" | "ip",
-      digest: string,
+      checkKind: VoterClaimCheckKind,
+      digest: VoterClaimDigest,
     ): Promise<PollOptionId[]> {
+      if (!isVoterClaimCheckKind(checkKind)) {
+        return [];
+      }
+      const validated = asVoterClaimDigest(digest);
+      if (validated === null) {
+        return [];
+      }
       const rows = await db
         .prepare(
           "SELECT vs.poll_option_id AS poll_option_id FROM voter_claim vc JOIN vote_selection vs ON vs.vote_id = vc.vote_id WHERE vc.poll_id = ?1 AND vc.check_kind = ?2 AND vc.digest = ?3",
         )
-        .bind(pollId, checkKind, digest)
+        .bind(pollId, checkKind, validated)
         .all<{ poll_option_id: PollOptionId }>();
       return rows.results.map((row) => row.poll_option_id);
     },

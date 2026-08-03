@@ -9,8 +9,21 @@ import {
   createVotePersistence,
 } from "../../src/adapters/d1/index";
 import type { VotePersistenceBatch } from "../../src/modules/voting/index";
+// claim digests must be lowercase 64-hex
+import { asVoterClaimDigest } from "../../src/modules/voting/ip-address";
 import { incrementRepresentationVersion } from "../../src/shared/application/index";
 import type { PollId, PollOptionId } from "../../src/shared/domain/index";
+
+function fixtureDigest(seed: string) {
+  let out = "";
+  for (let i = 0; i < 64; i += 1) {
+    out += (seed.charCodeAt(i % seed.length) % 16).toString(16);
+  }
+  const branded = asVoterClaimDigest(out);
+  if (branded === null) throw new Error("fixture digest construction failed");
+  return branded;
+}
+
 
 type MigrationTestEnv = Cloudflare.Env & {
   TEST_MIGRATIONS: D1Migration[];
@@ -316,7 +329,7 @@ describe("createResultsPersistence live projection", () => {
           kind: "voter_claim",
           pollId: POLL_ID,
           checkKind: "session",
-          digest: "live-results-digest-1",
+          digest: fixtureDigest("live-results-digest-1"),
           voteId: "live-results-vote-1",
           createdAtMs: NOW,
         },

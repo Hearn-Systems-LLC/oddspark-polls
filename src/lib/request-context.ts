@@ -2,6 +2,7 @@
  * Per-request context attached by delivery middleware.
  */
 
+import type { ProviderOutcome } from "../shared/application/index";
 import type { SessionCsrfToken } from "./csrf";
 import type { CreatorPrincipal } from "../modules/identity/index";
 
@@ -24,6 +25,12 @@ export type RequestContext = {
    * Only then does telemetry record 422/429 as an error — a creator-surface
    * validation 422 keeps its ordinary "ok" semantics. */
   voteRejection: boolean;
+  /**
+   * Turnstile Siteverify outcome override for voting requests (Story 2.3).
+   * Initialized to `none`. When non-`none`, telemetry uses this instead of
+   * auth-route classification so exactly one six-field record is emitted.
+   */
+  providerOutcome: ProviderOutcome;
 };
 
 export const REQUEST_CONTEXT_KEY = "requestContext" as const;

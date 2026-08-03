@@ -16,6 +16,17 @@ declare global {
     GITHUB_CLIENT_SECRET: string;
   }
 
+  /**
+   * Turnstile binding contract (Story 2.3).
+   * - TURNSTILE_SITE_KEY is public configuration (may appear in vote-page HTML).
+   * - TURNSTILE_SECRET_KEY is a server-only Worker secret — never client markup,
+   *   bundled scripts, errors, or generated data attributes.
+   */
+  interface TurnstileBindings {
+    TURNSTILE_SITE_KEY: string;
+    TURNSTILE_SECRET_KEY: string;
+  }
+
   namespace App {
     interface Locals extends Runtime {
       requestContext?: RequestContext;
@@ -24,12 +35,12 @@ declare global {
   }
 
   namespace Cloudflare {
-    interface Env extends AuthBindings {}
-    interface StagingEnv extends AuthBindings {}
-    interface ProductionEnv extends AuthBindings {}
+    interface Env extends AuthBindings, TurnstileBindings {}
+    interface StagingEnv extends AuthBindings, TurnstileBindings {}
+    interface ProductionEnv extends AuthBindings, TurnstileBindings {}
   }
 
-  interface Env extends AuthBindings {
+  interface Env extends AuthBindings, TurnstileBindings {
     DB: D1Database;
     MEDIA: R2Bucket;
     ASSETS: Fetcher;

@@ -22,6 +22,7 @@ import {
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { buildRemoteDeployConfig } from "./deploy-config.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const envName = process.argv[2];
@@ -240,26 +241,8 @@ await cp(join(root, "dist/client"), join(outDir, "client"), {
   recursive: true,
 });
 
-// 5. Write deploy wrangler config
-const deployConfig = {
-  name: envCfg.name,
-  main: "worker/index.mjs",
-  no_bundle: true,
-  rules: [{ type: "ESModule", globs: ["**/*.js", "**/*.mjs"] }],
-  compatibility_date: wranglerJson.compatibility_date,
-  compatibility_flags: wranglerJson.compatibility_flags,
-  assets: {
-    binding: "ASSETS",
-    directory: "./client",
-  },
-  observability: { enabled: true },
-  workers_dev: true,
-  kv_namespaces: envCfg.kv_namespaces,
-  d1_databases: (envCfg.d1_databases ?? []).map(
-    ({ migrations_dir: _m, ...rest }) => rest,
-  ),
-  r2_buckets: envCfg.r2_buckets,
-};
+// 5. Write deploy wrangler config (vars/secrets/ratelimits from target env)
+const deployConfig = buildRemoteDeployConfig(wranglerJson, envName);
 
 await writeFile(
   join(outDir, "wrangler.json"),

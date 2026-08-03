@@ -2,9 +2,9 @@ import { defineMiddleware, sequence } from "astro:middleware";
 import { env as workerEnv } from "cloudflare:workers";
 import { createAuth } from "./adapters/auth/index";
 import {
-  classifyAuthProviderOutcome,
   createRequestId,
   emitTelemetry,
+  resolveProviderOutcome,
   telemetryOperationForRoute,
   telemetryResultForStatus,
 } from "./adapters/telemetry/index";
@@ -103,6 +103,7 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     sessionLookupFailed: false,
     resultsLookupFailed: false,
     voteRejection: false,
+    providerOutcome: "none",
   };
 
   context.locals.requestContext = requestContext;
@@ -294,10 +295,11 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
         operation,
         result,
         durationMs: Date.now() - rc.startedAtMs,
-        providerOutcome: classifyAuthProviderOutcome(
+        providerOutcome: resolveProviderOutcome(
           pathname,
           status,
           response.headers.get("location"),
+          rc.providerOutcome,
         ),
         pollId: rc.pollId,
       });
@@ -313,7 +315,12 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
         operation,
         result: "error",
         durationMs: Date.now() - rc.startedAtMs,
-        providerOutcome: classifyAuthProviderOutcome(pathname, 500, null),
+        providerOutcome: resolveProviderOutcome(
+          pathname,
+          500,
+          null,
+          rc.providerOutcome,
+        ),
         pollId: rc.pollId,
       });
     }

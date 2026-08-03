@@ -14,7 +14,7 @@ umask 077
 ulimit -c 0 2>/dev/null || true
 
 if (( $# != 2 )); then
-  print -u2 "Usage: $0 local|staging|production initialize|initialize-voting|rotate-providers"
+  print -u2 "Usage: $0 local|staging|production initialize|initialize-voting|initialize-turnstile|rotate-providers|rotate-turnstile"
   exit 2
 fi
 
@@ -37,7 +37,7 @@ case "$target" in
 esac
 
 case "$operation" in
-  initialize|initialize-voting|rotate-providers)
+  initialize|initialize-voting|initialize-turnstile|rotate-providers|rotate-turnstile)
     ;;
   *)
     print -u2 "Unknown operation: $operation"
@@ -107,6 +107,7 @@ managed_keys=(
   BETTER_AUTH_SECRET 1
   BETTER_AUTH_URL 1
   VOTE_DIGEST_SECRET 1
+  TURNSTILE_SECRET_KEY 1
   GOOGLE_CLIENT_ID 1
   GOOGLE_CLIENT_SECRET 1
   GITHUB_CLIENT_ID 1
@@ -187,10 +188,24 @@ emit_initial_bindings() {
   printf 'BETTER_AUTH_SECRET=%s\n' "$better_auth_secret"
   printf 'BETTER_AUTH_URL=%s\n' "$base_url"
   emit_provider_bindings
-  # VOTE_DIGEST_SECRET stays last: `wrangler types` emits .dev.vars keys in
-  # file order, and the committed worker-configuration.d.ts (plus CI's
-  # throwaway .dev.vars and binding-types drift check) expects digest-last.
+  # Local always-pass Turnstile dummy (public test secret). Staging/production
+  # use rotate-turnstile with a provider-issued secret.
+  printf 'TURNSTILE_SECRET_KEY=%s\n' "1x0000000000000000000000000000000AA"
+  # VOTE_DIGEST_SECRET stays last for provisioning-script consistency.
+  # Binding/type/deploy truth is secrets.required in wrangler.jsonc.
   printf 'VOTE_DIGEST_SECRET=%s\n' "$vote_digest_secret"
+}
+
+
+# Cloudflare's documented Turnstile dummy secrets — never valid for staging/production.
+is_dummy_turnstile_secret() {
+  local value="$1"
+  case "$value" in
+    1x0000000000000000000000000000000AA|2x0000000000000000000000000000000AA|3x0000000000000000000000000000000AA)
+      return 0
+      ;;
+  esac
+  return 1
 }
 
 # No mode proceeds against an ambiguous .dev.vars.
@@ -237,10 +252,124 @@ if [[ "$operation" == "initialize-voting" ]]; then
   exit 0
 fi
 
+if [[ "$operation" == "initialize-turnstile" ]]; then
+  if [[ "$target" != "local" ]]; then
+    print -u2 "Remote Turnstile initialization is not automated because Cloudflare secret writes are not create-only."
+    print -u2 "Bootstrap TURNSTILE_SECRET_KEY in the target Worker dashboard (provider-issued secret), or use rotate-turnstile after bootstrap."
+    exit 1
+  fi
+  if [[ ! -f "$destination" ]]; then
+    print -u2 "Local auth is not initialized; run initialize first."
+    exit 1
+  fi
+  if has_nonempty_local_binding TURNSTILE_SECRET_KEY; then
+    print -u2 "Local Turnstile is already initialized."
+    exit 1
+  fi
+  if ! has_nonempty_local_binding BETTER_AUTH_SECRET ||
+     ! has_nonempty_local_binding BETTER_AUTH_URL ||
+     ! has_nonempty_local_binding VOTE_DIGEST_SECRET; then
+    print -u2 "Local Turnstile initialization requires nonempty BETTER_AUTH_SECRET, BETTER_AUTH_URL, and VOTE_DIGEST_SECRET bindings."
+    exit 1
+  fi
+
+  temporary_file="$(mktemp "$project_root/.dev.vars.tmp.XXXXXX")"
+  trap 'rm -f -- "$temporary_file"' EXIT HUP INT TERM
+  digest_line=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    local_key="$(binding_key "$line")" || local_key=""
+    if [[ "$local_key" == TURNSTILE_SECRET_KEY ]]; then
+      continue
+    fi
+    if [[ "$local_key" == VOTE_DIGEST_SECRET ]]; then
+      digest_line="$line"
+      continue
+    fi
+    printf '%s\n' "$line" >> "$temporary_file"
+  done < "$destination"
+  printf 'TURNSTILE_SECRET_KEY=%s\n' "1x0000000000000000000000000000000AA" >> "$temporary_file"
+  if [[ -n "$digest_line" ]]; then
+    printf '%s\n' "$digest_line" >> "$temporary_file"
+  fi
+  chmod 600 "$temporary_file"
+  mv -f -- "$temporary_file" "$destination"
+  trap - EXIT HUP INT TERM
+  print "Local Turnstile secret initialized without changing auth or provider credentials."
+  exit 0
+fi
+
+if [[ "$operation" == "rotate-turnstile" ]]; then
+  if [[ -t 0 ]]; then
+    read -r -s "turnstile_secret?Turnstile secret key: "
+    print
+  else
+    IFS= read -r turnstile_secret || true
+  fi
+  if [[ -z "${turnstile_secret//[[:space:]]/}" ]]; then
+    print -u2 "Turnstile secret key is required."
+    exit 1
+  fi
+  if [[ "$target" != "local" ]] && is_dummy_turnstile_secret "$turnstile_secret"; then
+    print -u2 "Refusing to set a Cloudflare dummy Turnstile secret on $target."
+    exit 1
+  fi
+
+  if [[ "$target" == "local" ]]; then
+    if [[ ! -f "$destination" ]]; then
+      print -u2 "Local auth is not initialized; run initialize first."
+      exit 1
+    fi
+    if ! has_nonempty_local_binding VOTE_DIGEST_SECRET; then
+      print -u2 "Local Turnstile rotation requires nonempty VOTE_DIGEST_SECRET binding."
+      exit 1
+    fi
+    temporary_file="$(mktemp "$project_root/.dev.vars.tmp.XXXXXX")"
+    trap 'rm -f -- "$temporary_file"' EXIT HUP INT TERM
+    replaced=0
+    digest_line=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      key="$(binding_key "$line")" || key=""
+      if [[ "$key" == TURNSTILE_SECRET_KEY ]]; then
+        if (( replaced )); then
+          continue
+        fi
+        printf 'TURNSTILE_SECRET_KEY=%s\n' "$turnstile_secret" >> "$temporary_file"
+        replaced=1
+      elif [[ "$key" == VOTE_DIGEST_SECRET ]]; then
+        digest_line="$line"
+      else
+        printf '%s\n' "$line" >> "$temporary_file"
+      fi
+    done < "$destination"
+    if (( ! replaced )); then
+      printf 'TURNSTILE_SECRET_KEY=%s\n' "$turnstile_secret" >> "$temporary_file"
+    fi
+    if [[ -n "$digest_line" ]]; then
+      printf '%s\n' "$digest_line" >> "$temporary_file"
+    fi
+    chmod 600 "$temporary_file"
+    mv -f -- "$temporary_file" "$destination"
+    trap - EXIT HUP INT TERM
+    print "Rotated local TURNSTILE_SECRET_KEY without changing other credentials."
+    exit 0
+  fi
+
+  existing_secret_names="$(remote_secret_names)"
+  if [[ "$existing_secret_names" != *'"BETTER_AUTH_SECRET"'* ||
+        "$existing_secret_names" != *'"VOTE_DIGEST_SECRET"'* ]]; then
+    print -u2 "$target auth and voting privacy are not fully initialized; bootstrap master secrets first."
+    exit 1
+  fi
+  cd "$project_root"
+  printf '%s' "$turnstile_secret" | wrangler secret put TURNSTILE_SECRET_KEY --env "$target"
+  print "Rotated $target TURNSTILE_SECRET_KEY without changing other credentials."
+  exit 0
+fi
+
 if [[ "$operation" == "initialize" ]]; then
   if [[ "$target" != "local" ]]; then
     print -u2 "Remote master-secret initialization is not automated because Cloudflare secret writes are not create-only."
-    print -u2 "Bootstrap BETTER_AUTH_SECRET, BETTER_AUTH_URL, and VOTE_DIGEST_SECRET in the target Worker dashboard, then run rotate-providers."
+    print -u2 "Bootstrap BETTER_AUTH_SECRET, BETTER_AUTH_URL, VOTE_DIGEST_SECRET, and TURNSTILE_SECRET_KEY in the target Worker dashboard, then run rotate-providers / rotate-turnstile."
     print -u2 "Generate each secret with: openssl rand -base64 32"
     exit 1
   fi

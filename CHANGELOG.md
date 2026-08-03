@@ -15,6 +15,12 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Per-Poll CAPTCHA on the vote action via Cloudflare Turnstile: when a Creator
+  enables CAPTCHA, the voting form loads an interaction-only challenge above
+  `VOTE`, the server verifies the token with Siteverify before any Vote is
+  stored, and a failed check returns a safe retry message with the ballot
+  preserved. CAPTCHA-off Polls load no widget and remain fully functional
+  without JavaScript.
 - IP Checks enforcement on the vote path: when a Creator turns on one-vote-per-network,
   a second Vote from the same IPv4 address or IPv6 `/64` is rejected inside the existing
   vote transaction with the connection-specific message, while Session Checks still

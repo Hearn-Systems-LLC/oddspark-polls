@@ -7,9 +7,13 @@ import { GET } from "../../src/pages/api/health";
 // test env and restoring it afterwards.
 const mutableEnv = env as unknown as Record<string, unknown>;
 const originalDigestSecret = env.VOTE_DIGEST_SECRET;
+const originalTurnstileSecret = env.TURNSTILE_SECRET_KEY;
+const originalTurnstileSiteKey = env.TURNSTILE_SITE_KEY;
 
 afterEach(() => {
   mutableEnv.VOTE_DIGEST_SECRET = originalDigestSecret;
+  mutableEnv.TURNSTILE_SECRET_KEY = originalTurnstileSecret;
+  mutableEnv.TURNSTILE_SITE_KEY = originalTurnstileSiteKey;
 });
 
 describe("GET /api/health", () => {
@@ -47,6 +51,33 @@ describe("GET /api/health", () => {
     await expect(response.json()).resolves.toEqual({
       ok: false,
       missing: ["VOTE_DIGEST_SECRET"],
+    });
+  });
+
+  it("names a missing Turnstile secret without returning its value", async () => {
+    mutableEnv.TURNSTILE_SECRET_KEY = undefined;
+
+    const response = await GET(
+      {} as unknown as Parameters<typeof GET>[0],
+    );
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({ ok: false, missing: ["TURNSTILE_SECRET_KEY"] });
+    expect(JSON.stringify(body)).not.toContain(String(originalTurnstileSecret));
+  });
+
+  it("names a blank Turnstile site key", async () => {
+    mutableEnv.TURNSTILE_SITE_KEY = "  ";
+
+    const response = await GET(
+      {} as unknown as Parameters<typeof GET>[0],
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      missing: ["TURNSTILE_SITE_KEY"],
     });
   });
 });

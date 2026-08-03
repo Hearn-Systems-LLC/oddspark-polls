@@ -41,6 +41,7 @@ async function runVoteRoute(
 }
 
 async function seedPoll(options: {
+  captchaEnabled?: boolean;
   ipChecksEnabled?: boolean;
   reference?: string;
   sessionChecksEnabled?: boolean;
@@ -64,15 +65,16 @@ async function seedPoll(options: {
     testEnv.DB.prepare(
       `INSERT INTO poll (
         id, owner_user_id, poll_type, question, result_visibility,
-        session_checks_enabled, ip_checks_enabled, multi_select_enabled,
+        session_checks_enabled, ip_checks_enabled, captcha_enabled, multi_select_enabled,
         min_selections, max_selections, deadline_ms, closed_at_ms,
         representation_version, created_at_ms, updated_at_ms
-      ) VALUES (?1, ?2, 'multiple_choice', 'Route IP?', 'live', ?3, ?4, 0, NULL, NULL, NULL, NULL, 1, ?5, ?5)`,
+      ) VALUES (?1, ?2, 'multiple_choice', 'Route IP?', 'live', ?3, ?4, ?5, 0, NULL, NULL, NULL, NULL, 1, ?6, ?6)`,
     ).bind(
       pollId,
       OWNER,
       options.sessionChecksEnabled === false ? 0 : 1,
       options.ipChecksEnabled === true ? 1 : 0,
+      options.captchaEnabled === true ? 1 : 0,
       nowMs,
     ),
     testEnv.DB.prepare(
@@ -881,5 +883,266 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     expect(html).toContain("data-vote-form");
     expect(html).not.toContain('data-outcome-code="already_voted_ip"');
     expect(html).not.toContain("Someone on this connection already voted.");
+  });
+});
+
+describe("POST /:reference CAPTCHA delivery boundary", () => {
+  // HTML escapes the apostrophe in didn't / it's.
+  const CAPTCHA_HEADING = "The human check didn&#39;t pass.";
+  const CAPTCHA_BODY = "usually just a fluke.";
+  // Always-pass test site key only relaxes metadata on loopback hostnames.
+  const LOOPBACK_ORIGIN = "http://127.0.0.1:8787";
+
+  function voteHeadersLocal(
+    extra: Record<string, string> = {},
+    cookie = "",
+  ): HeadersInit {
+    return {
+      "content-type": "application/x-www-form-urlencoded",
+      origin: LOOPBACK_ORIGIN,
+      "sec-fetch-site": "same-origin",
+      ...(cookie ? { cookie } : {}),
+      ...extra,
+    };
+  }
+
+  function stubSiteverify(
+    body: unknown,
+    init: { status?: number; delayMs?: number } = {},
+  ): void {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, opts) => {
+      const url = String(input);
+      if (!url.includes("challenges.cloudflare.com/turnstile/v0/siteverify")) {
+        throw new Error(`unexpected fetch in CAPTCHA test: ${url}`);
+      }
+      if (init.delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, init.delayMs));
+      }
+      // Consume body so callers cannot claim we ignored it.
+      void opts?.body;
+      return new Response(JSON.stringify(body), {
+        status: init.status ?? 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+  }
+
+  it("loads no Turnstile widget when CAPTCHA is off", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: false,
+    });
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).not.toContain("data-turnstile");
+    expect(html).not.toContain("cf-turnstile");
+  });
+
+  it("renders the Turnstile container when CAPTCHA is on", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: true,
+    });
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("data-turnstile");
+    expect(html).toContain('data-sitekey="1x00000000000000000000AA"');
+    expect(html).toContain('data-action="vote"');
+  });
+
+  it("accepts a CAPTCHA-on vote when Siteverify passes", async () => {
+    // Always-pass dummy success is synthetic; loopback hostname is required.
+    stubSiteverify({ success: true });
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: true,
+    });
+    const body = formBody(poll.optionA);
+    body.set("cf-turnstile-response", "valid-token");
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeadersLocal(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(response.status).toBe(303);
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 1 });
+  });
+
+  it("returns identical 422 captcha_failed for missing token with no mutation", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: true,
+    });
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeadersLocal(),
+          body: formBody(poll.optionA),
+        }),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(html).toContain(CAPTCHA_HEADING);
+    expect(html).toContain(CAPTCHA_BODY);
+    expect(html).toContain('data-outcome-code="captcha_failed"');
+    expect(html).toContain(`value="${poll.optionA}"`);
+    expect(html).toContain("data-turnstile");
+    expect(html).not.toContain("valid-token");
+    expect(html).not.toContain(String(testEnv.TURNSTILE_SECRET_KEY));
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 0,
+      selections: 0,
+      claims: 0,
+      version: 1,
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns the same safe 422 for invalid Siteverify without provider detail", async () => {
+    stubSiteverify({ success: false, "error-codes": ["invalid-input-response"] });
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: true,
+    });
+    const body = formBody(poll.optionA);
+    body.set("cf-turnstile-response", "bad-token");
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeadersLocal(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(html).toContain(CAPTCHA_HEADING);
+    expect(html).toContain(CAPTCHA_BODY);
+    expect(html).not.toContain("invalid-input-response");
+    expect(html).not.toContain("bad-token");
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 0 });
+  });
+
+  it("skips Siteverify for exact committed replay", async () => {
+    stubSiteverify({ success: true });
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: true,
+    });
+    const submissionId = crypto.randomUUID();
+    const firstBody = formBody(poll.optionA, submissionId);
+    firstBody.set("cf-turnstile-response", "first-token");
+    const first = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeadersLocal(),
+          body: firstBody,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(first.status).toBe(303);
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 1 });
+
+    // Replace the Siteverify stub so a replay that incorrectly calls the
+    // provider is observable without inheriting the first request's history.
+    const fetchSpy = vi.fn(async () => {
+      throw new Error("Siteverify must not run for committed replay");
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchSpy as unknown as typeof fetch,
+    );
+
+    const replayBody = formBody(poll.optionA, submissionId);
+    replayBody.set("cf-turnstile-response", "replay-token");
+    const replay = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeadersLocal(),
+          body: replayBody,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(replay.status).toBe(303);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 1 });
+  });
+
+  it("does not call Siteverify when CAPTCHA is off even with a forged field", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: false,
+    });
+    const body = formBody(poll.optionA);
+    body.set("cf-turnstile-response", "forged");
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeadersLocal(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(response.status).toBe(303);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for off→on race and re-renders the active widget", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      captchaEnabled: false,
+    });
+    await testEnv.DB.prepare(
+      "UPDATE poll SET captcha_enabled = 1 WHERE id = ?1",
+    )
+      .bind(poll.pollId)
+      .run();
+
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${LOOPBACK_ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeadersLocal(),
+          body: formBody(poll.optionA),
+        }),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(html).toContain(CAPTCHA_HEADING);
+    expect(html).toContain(CAPTCHA_BODY);
+    expect(html).toContain("data-turnstile");
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 0 });
   });
 });

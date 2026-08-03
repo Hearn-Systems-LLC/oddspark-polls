@@ -5,6 +5,7 @@ import ButtonPrimary from "../components/button-primary.astro";
 import PollOption from "../components/poll-option.astro";
 import ResultsTally from "../components/results-tally.astro";
 import ShareAction from "../components/share-action.astro";
+import Turnstile from "../components/turnstile.astro";
 import BaseLayout from "../layouts/base-layout.astro";
 import { formatUtc } from "../lib/datetime";
 import { selectCloudflareClientAddress } from "../lib/cloudflare-client-address";
@@ -22,6 +23,10 @@ import {
   sha256Hex,
 } from "../adapters/digest/index";
 import { allowVoteSubmission } from "../adapters/rate-limit/index";
+import {
+  verifyTurnstileToken,
+  type HumanChallengeProof,
+} from "../adapters/turnstile/index";
 import { isReservedSlug } from "../modules/polls/reserved-slugs";
 import {
   isCustomSlugCaseVariant,
@@ -282,6 +287,14 @@ const outcomeFromError = (
         titlePrefix: "Poll changed",
         tone: "rejection",
       };
+    case "captcha_failed":
+      return {
+        code: error.code,
+        ...splitCopy(VOTE_COPY.captchaFailed),
+        time: null,
+        titlePrefix: "Human check failed",
+        tone: "rejection",
+      };
     default:
       return {
         code: error.code,
@@ -452,6 +465,25 @@ if (poll && method === "POST") {
         Astro.response.headers.set("retry-after", "60");
         markVoteRejection();
       } else {
+        // Conditional Siteverify: only for genuinely new submissions whose
+        // delivery snapshot has CAPTCHA on. CastVote's fresh snapshot owns
+        // the final policy decision; the route never admits a raw token.
+        let humanChallenge: HumanChallengeProof = "not_attempted";
+        if (existing === null && poll.captchaEnabled) {
+          const turnstile = await verifyTurnstileToken({
+            responseFields: formData.getAll("cf-turnstile-response"),
+            secret: env.TURNSTILE_SECRET_KEY,
+            siteKey: env.TURNSTILE_SITE_KEY,
+            hostname: Astro.url.hostname,
+            submissionId: submittedId,
+          });
+          humanChallenge = turnstile.proof;
+          if (Astro.locals.requestContext) {
+            Astro.locals.requestContext.providerOutcome =
+              turnstile.providerOutcome;
+          }
+        }
+
         // Strategy resolution honors the stored poll type: unknown types
         // fail closed inside castVote (vote_failed), never validated as
         // multiple choice.
@@ -485,6 +517,7 @@ if (poll && method === "POST") {
             selectedOptionIds,
             browserToken: voterToken,
             ipDigest: ipClaimDigest,
+            humanChallenge,
           },
         );
 
@@ -517,31 +550,54 @@ if (poll && method === "POST") {
           Astro.response.status = 404;
         } else {
           outcome = outcomeFromError(result.error);
-          // Definition-edit race: re-read so the form shows current options
-          // and only preserve selections whose IDs still exist.
-          if (result.error.code === "poll_definition_changed" && poll) {
-            poll =
-              (await pollPersistence.findPollByReference(reference)) ?? poll;
-            const reachable = new Set(poll.options.map((option) => option.id));
-            selectedOptionIds = selectedOptionIds.filter((id) =>
-              reachable.has(id as PollOptionId),
-            );
+          // CAPTCHA and definition-edit races: re-read public Poll projection
+          // so the retry UI matches persisted truth (widget appears after
+          // off→on; unreachable option IDs are dropped).
+          if (
+            (result.error.code === "poll_definition_changed" ||
+              result.error.code === "captcha_failed") &&
+            poll
+          ) {
+            try {
+              const refreshed =
+                await pollPersistence.findPollByReference(reference);
+              if (refreshed === null) {
+                poll = null;
+                Astro.response.status = 404;
+                outcome = null;
+              } else {
+                poll = refreshed;
+                const reachable = new Set(
+                  poll.options.map((option) => option.id),
+                );
+                selectedOptionIds = selectedOptionIds.filter((id) =>
+                  reachable.has(id as PollOptionId),
+                );
+              }
+            } catch {
+              // Lookup failure is infrastructure — generic 500, no second log.
+              return new Response("Something went wrong.", {
+                status: 500,
+                headers: { "cache-control": "private, no-store" },
+              });
+            }
           }
-          readOnly =
-            result.error.code === "already_voted" ||
-            result.error.code === "already_voted_ip" ||
-            result.error.code === "poll_closed";
-          Astro.response.status = 422;
-          markVoteRejection();
+          if (poll !== null && outcome !== null) {
+            readOnly =
+              result.error.code === "already_voted" ||
+              result.error.code === "already_voted_ip" ||
+              result.error.code === "poll_closed";
+            Astro.response.status = 422;
+            markVoteRejection();
+          }
         }
       }
     }
-  } catch (error) {
+  } catch {
     // Unexpected exceptions are infrastructure failures — 500, never the
     // voter-correctable 422. 422 is reserved for domain-mapped outcomes.
-    // Log the cause for diagnostics; the response stays generic and never
-    // leaks internals.
-    console.error("Vote submission failed unexpectedly.", error);
+    // No second diagnostic log: the outer telemetry middleware emits the
+    // sole structured completion record with request ID correlation.
     return new Response("Something went wrong.", {
       status: 500,
       headers: { "cache-control": "private, no-store" },
@@ -1022,6 +1078,13 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
                     SELECT AN OPTION TO UNLOCK VOTE
                   </p>
                 )}
+                {
+                  poll.captchaEnabled &&
+                    typeof env.TURNSTILE_SITE_KEY === "string" &&
+                    env.TURNSTILE_SITE_KEY.trim().length > 0 && (
+                      <Turnstile siteKey={env.TURNSTILE_SITE_KEY} />
+                    )
+                }
                 <ButtonPrimary
                   type="submit"
                   class="vote-button"
@@ -1063,6 +1126,15 @@ const offlineCopy = splitCopy(VOTE_COPY.offline);
     }
   </main>
   {poll && <script src="../scripts/vote-form.ts"></script>}
+  {
+    poll &&
+      !readOnly &&
+      poll.captchaEnabled &&
+      typeof env.TURNSTILE_SITE_KEY === "string" &&
+      env.TURNSTILE_SITE_KEY.trim().length > 0 && (
+        <script src="../scripts/turnstile.ts"></script>
+      )
+  }
   {poll && <script src="../scripts/share-action.ts"></script>}
   {
     showTally && postVoteResults?.kind === "visible" && (

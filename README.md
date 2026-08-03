@@ -51,18 +51,32 @@ and `Oddspark Polls — Production` in each provider. Set each application's
 homepage/origin to the matching base URL and its callback to the exact URI
 above. Do not add the future custom domain until it is actually bound.
 
-Every environment requires all seven bindings:
+Every environment requires nine runtime values: eight secret-backed bindings
+plus one public Turnstile site-key var.
+
+Secrets (declared in `secrets.required` in `wrangler.jsonc` — binding/type/deploy
+truth; not inferred from `.dev.vars` key order):
 
 - `BETTER_AUTH_SECRET`
 - `BETTER_AUTH_URL`
-- `VOTE_DIGEST_SECRET`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
+- `TURNSTILE_SECRET_KEY`
+- `VOTE_DIGEST_SECRET`
+
+Public var (per environment in `wrangler.jsonc` `vars`):
+
+- `TURNSTILE_SITE_KEY` — local/CI uses Cloudflare's official always-pass test
+  site key; staging and production use distinct real widgets registered for
+  `oddspark-polls-staging.hearnsystems.workers.dev` and
+  `oddspark-polls.hearnsystems.workers.dev` respectively (add `polls.oddspark.dev`
+  to the production widget before the custom-domain switch).
 
 Initialize local auth and voting privacy once with the masked provisioning
 helper. It generates independent Better Auth and vote-digest master secrets,
+writes the official always-pass Turnstile dummy secret for local/CI,
 accepts provider credentials through hidden prompts, and never places them in
 command arguments or shell history:
 
@@ -75,11 +89,13 @@ digest secret without replacing auth or provider credentials:
 
 ```zsh
 ./scripts/provision-auth-secrets.zsh local initialize-voting
+./scripts/provision-auth-secrets.zsh local initialize-turnstile
 ```
 
 Cloudflare secret writes are upserts, not create-only operations, so the helper
 intentionally refuses remote master-secret initialization. Bootstrap
-`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `VOTE_DIGEST_SECRET` once in each
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `VOTE_DIGEST_SECRET`, and
+`TURNSTILE_SECRET_KEY` once in each
 target Worker's dashboard, verifying the environment before saving. Generate
 each secret with `openssl rand -base64 32` — this is the one secret humans
 type by hand. Then
@@ -89,6 +105,11 @@ provision or rotate only the Google and GitHub credentials with:
 ./scripts/provision-auth-secrets.zsh local rotate-providers
 ./scripts/provision-auth-secrets.zsh staging rotate-providers
 ./scripts/provision-auth-secrets.zsh production rotate-providers
+
+# Provider-issued Turnstile secret only (stdin or hidden prompt). Staging and
+# production refuse Cloudflare's documented dummy secrets.
+./scripts/provision-auth-secrets.zsh staging rotate-turnstile
+./scripts/provision-auth-secrets.zsh production rotate-turnstile
 ```
 
 Local provisioning atomically replaces only the ignored `.dev.vars` file using
@@ -171,8 +192,15 @@ pnpm migrate:production && pnpm deploy:production
 ```
 
 The smoke check ends with `/api/health`, an unauthenticated binding-liveness
-probe: it returns 200 when every required binding is present and names the
-missing bindings (never their values) otherwise.
+probe: it returns 200 when every required binding is present (including
+`TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`) and names the missing bindings
+(never their values) otherwise.
+
+**Turnstile privacy note:** Siteverify deliberately omits optional `remoteip` so
+raw client addresses never leave the request-bound identity preparation already
+constrained by IP Checks. The browser still makes a direct third-party request
+to Cloudflare's Turnstile iframe when CAPTCHA is on for that Poll; CAPTCHA-off
+polls load no widget and make no Turnstile client request.
 
 ### Live URLs (foundation placeholder)
 

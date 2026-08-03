@@ -67,10 +67,9 @@ jobs:
         run: pnpm migrate:local
 
       - name: Write throwaway local auth env
-        # `wrangler types` emits .dev.vars keys in file order. Keep this order
-        # identical to what `initialize-voting` produces (VOTE_DIGEST_SECRET
-        # appended last) so the regenerated worker-configuration.d.ts matches
-        # the committed file and the drift check below stays meaningful.
+        # Binding/type/deploy truth is `secrets.required` in wrangler.jsonc.
+        # Keep VOTE_DIGEST_SECRET last for provisioning-script consistency;
+        # local/CI uses Cloudflare's official always-pass Turnstile dummy.
         run: |
           {
             echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)"
@@ -79,6 +78,7 @@ jobs:
             echo "GOOGLE_CLIENT_SECRET=ci-placeholder"
             echo "GITHUB_CLIENT_ID=ci-placeholder"
             echo "GITHUB_CLIENT_SECRET=ci-placeholder"
+            echo "TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA"
             echo "VOTE_DIGEST_SECRET=$(openssl rand -base64 32)"
           } > .dev.vars
 

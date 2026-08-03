@@ -54,6 +54,7 @@ function poll(
     ],
     sessionChecksEnabled: true,
     ipChecksEnabled: false,
+    captchaEnabled: false,
     multiSelectEnabled: false,
     minSelections: null,
     maxSelections: null,
@@ -117,6 +118,7 @@ const input = {
   selectedOptionIds: [OPTION_A],
   browserToken: "browser-token",
   ipDigest: null as VoterClaimDigest | null,
+  humanChallenge: "not_attempted" as const,
 };
 
 describe("normalizeVotePayload", () => {
@@ -1075,6 +1077,85 @@ describe("castVote", () => {
     });
     expect(commandDeps.persisted).toHaveLength(0);
   });
+
+  it("requires passed proof when authoritative CAPTCHA is on", async () => {
+    const commandDeps = deps({
+      findPoll: async () => poll({ captchaEnabled: true }),
+    });
+    for (const humanChallenge of ["failed", "not_attempted"] as const) {
+      const result = await castVote(commandDeps, {
+        ...input,
+        humanChallenge,
+      });
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: "captcha_failed",
+          message: VOTE_COPY.captchaFailed,
+        },
+      });
+    }
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it("accepts a new CAPTCHA-on ballot only with passed proof", async () => {
+    const commandDeps = deps({
+      findPoll: async () => poll({ captchaEnabled: true }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      humanChallenge: "passed",
+    });
+    expect(result.ok).toBe(true);
+    expect(commandDeps.persisted).toHaveLength(1);
+  });
+
+  it("ignores stale challenge failure when authoritative CAPTCHA is off", async () => {
+    const commandDeps = deps({
+      findPoll: async () => poll({ captchaEnabled: false }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      humanChallenge: "failed",
+    });
+    expect(result.ok).toBe(true);
+    expect(commandDeps.persisted).toHaveLength(1);
+  });
+
+  it("adjudicates exact replay before CAPTCHA proof when CAPTCHA is on", async () => {
+    const normalized = normalizeVotePayload(POLL_ID, [OPTION_A]);
+    const persistVote = vi.fn(async () => {
+      throw new Error("must not persist on replay");
+    });
+    const commandDeps = deps({
+      findPoll: async () => poll({ captchaEnabled: true }),
+      findVoteBySubmission: async () => ({
+        voteId: "stored-vote",
+        payloadHash: `hash:${normalized}`,
+        createdAtMs: NOW - 10,
+      }),
+      persistVote,
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      humanChallenge: "not_attempted",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.existing).toBe(true);
+    }
+    expect(persistVote).not.toHaveBeenCalled();
+  });
+
+  it("never includes challenge state in the normalized payload hash", async () => {
+    expect(normalizeVotePayload(POLL_ID, [OPTION_A])).toBe(
+      '{"pollId":"poll-1","selectedOptionIds":["option-a"]}',
+    );
+    expect(normalizeVotePayload(POLL_ID, [OPTION_A])).not.toContain("captcha");
+    expect(normalizeVotePayload(POLL_ID, [OPTION_A])).not.toContain(
+      "humanChallenge",
+    );
+  });
 });
 
 describe("VOTE_COPY", () => {
@@ -1108,6 +1189,8 @@ describe("VOTE_COPY", () => {
         "This Poll changed while you were deciding. Your Vote wasn't recorded — review the options and try again.",
       idempotencyConflict:
         "Your earlier Vote stands — this change wasn't recorded.",
+      captchaFailed:
+        "The human check didn't pass. Try it again — it's usually just a fluke.",
     });
   });
 });

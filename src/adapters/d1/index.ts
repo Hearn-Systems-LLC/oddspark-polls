@@ -36,6 +36,7 @@ import type {
 
 export type PollPage = {
   pollId: PollId;
+  canonicalReference: string;
   question: string;
   description: string | null;
   pollType: PollType;
@@ -49,7 +50,6 @@ export type PollPage = {
 };
 
 export type OwnedPoll = PollPage & {
-  canonicalReference: string;
   canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
   createdAtMs: number;
 };
@@ -68,6 +68,7 @@ export type OwnerPollListItem = {
 
 type PollRow = {
   id: PollId;
+  canonical_reference: string;
   question: string;
   description: string | null;
   poll_type: PollType;
@@ -95,6 +96,7 @@ async function loadOptions(
 function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
   return {
     pollId: row.id,
+    canonicalReference: row.canonical_reference,
     question: row.question,
     description: row.description,
     pollType: row.poll_type,
@@ -192,10 +194,12 @@ export function createPollPersistence(db: D1Database) {
       }
     },
 
+    // Resolve the exact requested reference (including a retained alias) while
+    // projecting the Poll's unique canonical reference for every outward URL.
     async findPollByReference(reference: string): Promise<PollPage | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.deadline_ms, p.closed_at_ms FROM poll p JOIN poll_reference r ON r.poll_id = p.id WHERE r.reference = ?1",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.deadline_ms, p.closed_at_ms, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
         )
         .bind(reference)
         .first<PollRow>();

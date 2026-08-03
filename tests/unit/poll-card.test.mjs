@@ -133,8 +133,6 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
     expect(detailPageSource).toContain("{formatVoteTotal(voterCount)}");
 
     for (const outOfScope of [
-      "share-action",
-      "ShareAction",
       "security-toggle",
       "chart-form-toggle",
     ]) {
@@ -144,6 +142,9 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
     expect(detailPageSource).toContain("data-overlay");
     expect(detailPageSource).toContain("DELETE POLL");
     expect(detailPageSource).toContain("CLOSE POLL");
+    // Story 1.13 adds the Share action beside the canonical URL.
+    expect(detailPageSource).toContain("ShareAction");
+    expect(detailPageSource).toContain("share-action.ts");
   });
 
   it("reloads current definition state for stale edit conflicts", () => {

@@ -7,6 +7,7 @@ import LiveIndicator from "../../../components/live-indicator.astro";
 import Overlay from "../../../components/overlay.astro";
 import PollCard from "../../../components/poll-card.astro";
 import PollDefinitionFields from "../../../components/poll-definition-fields.astro";
+import ShareAction from "../../../components/share-action.astro";
 import { buildPollCardViewModel } from "../../../components/poll-card";
 import { formatVoteTotal } from "../../../components/live-indicator";
 import { createPollPersistence } from "../../../adapters/d1/index";
@@ -512,7 +513,7 @@ const detailPath = `/creator/polls/${pollId}`;
 
             <section class="link-block" aria-labelledby="poll-link-label">
               <p class="group-label" id="poll-link-label">POLL LINK</p>
-              <p class="canonical-url">{canonicalUrl}</p>
+              {canonicalUrl && <ShareAction canonicalUrl={canonicalUrl} />}
               <p class="helper-note">
                 This is the link you'll share when voting opens. Its reference
                 never changes.
@@ -622,6 +623,7 @@ const detailPath = `/creator/polls/${pollId}`;
       <>
         <script src="../../../scripts/edit-poll-form.ts"></script>
         <script src="../../../scripts/overlay.ts"></script>
+        <script src="../../../scripts/share-action.ts"></script>
       </>
     )
   }
@@ -719,14 +721,6 @@ const detailPath = `/creator/polls/${pollId}`;
     line-height: var(--type-label-caps-lh);
     letter-spacing: var(--type-label-caps-ls);
     text-transform: uppercase;
-  }
-
-  .canonical-url {
-    margin: 0;
-    font-size: var(--type-body-size);
-    line-height: var(--type-body-lh);
-    user-select: all;
-    overflow-wrap: anywhere;
   }
 
   .helper-note {

@@ -1,6 +1,7 @@
 ---
 import { env } from "cloudflare:workers";
 import ResultsTally from "../../components/results-tally.astro";
+import ShareAction from "../../components/share-action.astro";
 import BaseLayout from "../../layouts/base-layout.astro";
 import {
   createPollPersistence,
@@ -147,6 +148,12 @@ const afterCloseParts =
           {view.kind === "creator_only_hidden" && (
             <p class="results-explanation">{RESULTS_COPY.creatorOnlyHidden}</p>
           )}
+          {/* Share the voting URL (never /results). Lawful even when Tally is hidden. */}
+          <section class="share-block" aria-label="Share this Poll">
+            <ShareAction
+              canonicalUrl={`${Astro.url.origin}/${view.canonicalReference}`}
+            />
+          </section>
         </>
       )
     }
@@ -166,6 +173,11 @@ const afterCloseParts =
       <script src="../../scripts/results-live.ts"></script>
     )
   }
+  {
+    view.kind !== "not_found" && (
+      <script src="../../scripts/share-action.ts"></script>
+    )
+  }
 </BaseLayout>
 
 <style>
@@ -173,6 +185,12 @@ const afterCloseParts =
     width: min(100%, var(--space-measure));
     margin-inline: auto;
     padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  .share-block {
+    margin-top: var(--space-10);
+    padding-top: var(--space-6);
+    border-top: var(--space-hairline) solid var(--color-rule);
   }
 
   .results-question {

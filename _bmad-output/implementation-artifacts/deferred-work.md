@@ -122,3 +122,8 @@
 - `classifyNoChange` fallthrough throw: when DISCOVERY_STATES gains a fourth value, a delist against the new state would fall through to the throw guard at `src/adapters/d1/index.ts:1620` instead of returning a meaningful outcome [src/adapters/d1/index.ts].
 - `findTargetByReference` accepts empty `question` string at `src/adapters/d1/index.ts:1661` — an empty poll question renders confusingly in the admin desk. Low probability, low impact [src/adapters/d1/index.ts].
 - `findTargetByReference` accepts empty `canonical_reference` at `src/adapters/d1/index.ts:1662` — an empty canonical reference renders without a clickable link in the admin desk. Low probability, low impact [src/adapters/d1/index.ts].
+
+## Deferred from: code review of 3-4-landing-page (2026-08-04)
+
+- Mode-toggle `aria-pressed="false"` is static when JavaScript is disabled — `mode-override.ts` updates it at runtime, but when JS is off the button always reports `false` regardless of OS preference. Pre-existing from Story 1.1 foundation header [src/pages/index.astro:44].
+- Landing page header markup is duplicated inline in `src/pages/index.astro` rather than extracted to a shared component. The story scope fence deferred extraction to Story 3.5 when the Demo Poll joins the page [src/pages/index.astro:31-48].

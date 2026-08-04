@@ -15,6 +15,9 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Product landing page at `/`: a plain-language statement, technical build
+  account, public repository link, create entry, and Discover link replace the
+  foundation component showcase.
 - Administrator Discovery moderation: the single out-of-band-assigned
   Administrator can find a Poll by link or reference, remove it from Discover
   and the sitemap without changing its link, ownership, Visibility Setting, or

@@ -36,15 +36,15 @@ Every surface below traces to a stated need; the journey column names the journe
 
 | Surface | Route | Reached from | Purpose | Journey | Phase |
 |---|---|---|---|---|---|
-| Landing page | `/` | Portfolio link, direct, search | What the platform is, how it was built, repo link, pinned Demo Poll (FR-25), the create entry, and the link to Discover | UJ-5, UJ-6, UJ-7 | 1 |
+| Landing page | `/` | Portfolio link, direct, search | What the platform is, how it was built, repo link, create entry, and Discover; the pinned Demo Poll joins in Story 3.5 (FR-25) | UJ-5, UJ-6, UJ-7 | 1 |
 | Sign-in | `/sign-in` | Landing create entry, any creator route when signed out, an expired session | Google/GitHub OAuth choice (FR-1); returns the Creator to where they started, including mid-create | UJ-6 | 1 |
 | OAuth callback | `/api/auth/*` | Provider redirect | Completes or abandons sign-in; denial or cancel returns to the sign-in entry with an explanation (FR-1) | UJ-6 | 1 |
-| Discover | `/discover` | Landing page, nav | Public catalog of open, Listed Polls, newest first, paginated, with accepted-Vote attendance but no Tally shape (FR-20, FR-23) | UJ-7 | 1 |
+| Discover | `/discover` | Landing page | Public catalog of open, Listed Polls, newest first, paginated, with accepted-Vote attendance but no Tally shape (FR-20, FR-23) | UJ-7 | 1 |
 | Voting page | `/{link}` | A shared Poll link, Discover | Cast a Vote in this Poll; renders per Poll Type (FR-6, 7, 8, 11, 13) | UJ-2, UJ-3, UJ-4, UJ-7 | 1 |
 | Vote confirmation | `/{link}` (post-submit state) | Submitting a Vote | Confirm the Vote landed; show or withhold the Tally per Visibility Setting (FR-20) | UJ-2 | 1 |
 | Tally view | `/{link}/results` | Voting page, direct link | Live charts, Rounds, availability grid, Comments (FR-20, 21) | UJ-1, UJ-2 | 1 |
 | Ballot Manifest | `/{link}/manifest` | Tally view, on close only | Published Ballots, rankings only, no voter data (FR-10) | UJ-4 | 2 |
-| Creator — Poll list | `/creator` | Landing nav when signed in, post-sign-in and post-create redirects | The signed-in Creator's own Polls, live and closed, with at-a-glance counts (FR-1) | UJ-1, UJ-6 | 1 |
+| Creator — Poll list | `/creator` | Post-sign-in and post-create redirects | The signed-in Creator's own Polls, live and closed, with at-a-glance counts (FR-1) | UJ-1, UJ-6 | 1 |
 | Creator — Poll creation | `/creator/new` | Poll list, landing create entry, return from sign-in | Question, options, Poll Type, Security Toggles, Visibility Setting, Discovery Setting, Deadline, Custom Link (FR-2, FR-23) | UJ-1, UJ-3, UJ-4, UJ-6 | 1 |
 | Creator — Poll detail | `/creator/{link}` | Poll list row | Monitor, edit description, close, delete, export, moderate Comments, reset Demo Poll (FR-4, 5, 22, 24, 26) | UJ-1 | 1 |
 | Administrator — Discovery moderation | `/creator/moderation` | Direct link, or return from the existing sign-in flow | Find exactly one Poll by its link or reference; Delist it from public enumeration or clear the hold without changing the Poll, Votes, owner, link, or Visibility Setting (FR-23) | UJ-1 | 1 |
@@ -58,7 +58,7 @@ Every surface below traces to a stated need; the journey column names the journe
 
 **Route rules.** Custom Links live at the root path — `polls.oddspark.dev/team-lunch` (FR-3). Polls without a Custom Link get a short random ID at the same level. Because Polls occupy the root namespace, the reserved set must be rejected at Custom Link assignment: `/`, `/creator` and everything beneath it, `/discover`, `/sign-in`, `/assets/*`, `/api/*` (including the auth routes under `/api/auth/*`), `/favicon.ico`, `/robots.txt`, `/sitemap.xml`, and the two per-Poll sub-paths `results` and `manifest`. `[ASSUMPTION: `/creator` is the creator surface's path segment; the sources require only that it is reserved, not what it is called.]`
 
-**Discovery is opt-in per Poll** (FR-23). `/discover` is the only public enumeration of Polls that exists: effectively open, Listed Polls, newest first, paginated. Every new Poll starts **Unlisted** — reachable by link, absent from the catalog, sitemaps, and indexes. The Creator can move a Poll between Unlisted and **Listed** at any time, as an explicit opt-in at creation or afterward; Listed Polls appear on Discover and in sitemaps while the Poll is open. The Administrator can **Delist** any Poll, and only the Administrator can clear Delisted. Unlisted and Delisted Polls remain reachable by link. The Poll list at `/creator` enumerates only the signed-in Creator's own Polls. The landing page links four things: the Demo Poll, the repository, the create entry, and Discover.
+**Discovery is opt-in per Poll** (FR-23). `/discover` is the only public enumeration of Polls that exists: effectively open, Listed Polls, newest first, paginated. Every new Poll starts **Unlisted** — reachable by link, absent from the catalog, sitemaps, and indexes. The Creator can move a Poll between Unlisted and **Listed** at any time, as an explicit opt-in at creation or afterward; Listed Polls appear on Discover and in sitemaps while the Poll is open. The Administrator can **Delist** any Poll, and only the Administrator can clear Delisted. Unlisted and Delisted Polls remain reachable by link. The Poll list at `/creator` enumerates only the signed-in Creator's own Polls. The landing header retains the `polls.oddspark.dev` label, product title, tagline, and mode toggle as brand chrome rather than shared navigation. Its target four-entry discipline is the Demo Poll, repository, create entry, and Discover: Story 3.4 ships the latter three with no placeholder, and Story 3.5 inserts the real Demo Poll immediately after the build account.
 
 **Administrator moderation is fixed and non-enumerating.** `/creator/moderation` is the only operator surface; there is no `/admin`, second login, all-Poll browser, moderation history, reason, appeal, or notification flow. The Administrator pastes one bare reference or same-origin, one-segment Poll URL. An alias resolves to the canonical target, and the result exposes only the escaped question, canonical voting link, effective open/closed state, and Discovery state. A successful `DELIST` or `CLEAR DELISTED` follows POST→303→GET with the canonical reference and one bounded outcome token. The redirected GET re-reads D1 before showing success, so the query string never asserts state by itself.
 
@@ -254,7 +254,7 @@ Behavioral only. Visual specs live in `DESIGN.md § Components`, under the same 
 
 | Breakpoint | Behavior |
 |---|---|
-| below `{breakpoints.sm}` (default) | One column. Landing: statement, then build notes, then the Demo Poll. Voting: question, options, Comment, challenge, vote button, then Tally below. Availability grid becomes one row per slot with three targets per row. |
+| below `{breakpoints.sm}` (default) | One column. Landing: statement, then build notes, then the Story 3.5 Demo Poll; until then the actions follow the build notes with no empty slot. Voting: question, options, Comment, challenge, vote button, then Tally below. Availability grid becomes one row per slot with three targets per row. |
 | `{breakpoints.sm}` to below `{breakpoints.lg}` | Same single column, wider margins, longer measure. No structural change. |
 | `{breakpoints.lg}` and up | Two columns on exactly two surfaces: the post-vote Tally (ballot left, live bars right, so the Voter sees their choice and the movement at once) and the creator surface (Poll list left, selected Poll detail right). The availability grid becomes a true Voters × slots matrix. Everything else stays centered and single-column — a wider viewport buys air, not density. |
 
@@ -411,7 +411,7 @@ Meeting Polls only (FR-12, FR-13). Everywhere else in the product, times are ren
 
 1. Dana follows a link from Justin's portfolio to `polls.oddspark.dev`.
 2. The landing page opens with one Newsreader statement of what the platform is, then a short technical account of how it's built — Workers, D1, R2, Turnstile, Better Auth — in the same monospaced instrument voice as the rest of the product. Non-technical readers get the first paragraph; technical readers get the second and the repository link (FR-25).
-3. Below that, the Demo Poll, pinned and live: **"Best day for a long weekend?"** Not a screenshot, not a video — the actual product, votable from the landing page.
+3. In Story 3.5, the Demo Poll joins below that, pinned and live: **"Best day for a long weekend?"** Not a screenshot, not a video — the actual product, votable from the landing page.
 4. She votes. CAPTCHA on, Session Checks on, IP Checks off, so shared and CGNAT addresses don't lock out an entire office (FR-26).
 5. **Climax:** the bars animate. That's it — that's the demo. Inside forty seconds of arriving, she's read what the product is, cast a real Vote, and watched a real live chart move, with the repository link right there for whoever wants to check the work.
 

@@ -1,0 +1,73 @@
+---
+import { DISCOVERY_COPY } from "../modules/discovery/index";
+
+interface Props {
+  newerUrl: string | null;
+  olderUrl: string | null;
+}
+
+const { newerUrl, olderUrl } = Astro.props;
+---
+
+<nav aria-label="Discover pages" class="pagination" data-discover-pagination>
+  {
+    newerUrl ? (
+      <a
+        class="pagination-control"
+        href={newerUrl}
+        data-discover-page-link
+      >
+        {DISCOVERY_COPY.newer}
+      </a>
+    ) : (
+      <span class="pagination-control is-disabled" aria-disabled="true">
+        {DISCOVERY_COPY.newer}
+      </span>
+    )
+  }
+  {
+    olderUrl ? (
+      <a
+        class="pagination-control"
+        href={olderUrl}
+        data-discover-page-link
+      >
+        {DISCOVERY_COPY.older}
+      </a>
+    ) : (
+      <span class="pagination-control is-disabled" aria-disabled="true">
+        {DISCOVERY_COPY.older}
+      </span>
+    )
+  }
+</nav>
+
+<style>
+  .pagination {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--pagination-gap);
+    margin-top: var(--space-6);
+  }
+
+  .pagination-control {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--pagination-min-height);
+    color: var(--pagination-color);
+    font-family: var(--pagination-font);
+    font-size: var(--pagination-size);
+    line-height: var(--pagination-line-height);
+    letter-spacing: var(--pagination-letter-spacing);
+    text-decoration: none;
+  }
+
+  .pagination-control:focus-visible {
+    outline: var(--pagination-focus-outline);
+    outline-offset: var(--pagination-focus-outline-offset);
+  }
+
+  .pagination-control.is-disabled {
+    color: var(--pagination-color-disabled);
+  }
+</style>

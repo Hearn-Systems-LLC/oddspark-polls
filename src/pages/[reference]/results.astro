@@ -40,6 +40,8 @@ if (method !== "GET" && method !== "HEAD") {
   });
 }
 
+Astro.response.headers.set("x-robots-tag", "noindex");
+
 // Routing shares the one reserved-slug registry (AD-13).
 const reserved = isReservedSlug(reference);
 const resultsPersistence = createResultsPersistence(env.DB);
@@ -94,6 +96,10 @@ const title =
   view.kind === "not_found"
     ? "Not found — Oddspark Polls"
     : `Results — ${view.question}`;
+const canonicalUrl =
+  view.kind === "not_found"
+    ? undefined
+    : `${Astro.url.origin}/${encodeURIComponent(view.canonicalReference)}`;
 
 // The hidden After Close explanation splits its copy around {deadline} so
 // the timestamp renders as a localizable <time> element; the no-deadline
@@ -104,7 +110,7 @@ const afterCloseParts =
     : null;
 ---
 
-<BaseLayout title={title}>
+<BaseLayout title={title} canonicalUrl={canonicalUrl} robots="noindex">
   <main class="results-shell">
     {
       view.kind === "not_found" ? (

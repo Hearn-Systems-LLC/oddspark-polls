@@ -11,6 +11,12 @@ import {
   type ValidatedPollDefinition,
 } from "../../modules/polls/index";
 import type {
+  DiscoveryCatalogRecord,
+  DiscoveryCatalogRequest,
+  DiscoveryOrderKey,
+  DiscoverySitemapRecord,
+} from "../../modules/discovery/index";
+import type {
   ResultsAccessEnvelope,
   ResultsTallyProjection,
   VersionedResultsTallyProjection,
@@ -41,11 +47,101 @@ import type {
   ResultVisibility,
   UserId,
 } from "../../shared/domain/index";
-import { makeSecurityToggles } from "../../shared/domain/index";
+import { makeSecurityToggles, POLL_TYPES } from "../../shared/domain/index";
+
+const DISCOVERY_CATALOG_COLUMNS = `p.id,
+       pr.reference AS canonical_reference,
+       p.question,
+       p.poll_type,
+       p.deadline_ms,
+       p.created_at_ms,
+       (
+         SELECT COUNT(*)
+         FROM vote AS v INDEXED BY vote_poll_id_idx
+         WHERE v.poll_id = p.id
+       ) AS vote_count`;
+
+const DISCOVERY_SITEMAP_COLUMNS = `p.id,
+       pr.reference AS canonical_reference,
+       p.deadline_ms,
+       p.created_at_ms`;
+
+function discoveryNoDeadlineQuery(
+  columns: string,
+  direction: "newer" | "older",
+): string {
+  const comparison = direction === "newer" ? ">" : "<";
+  const order = direction === "newer" ? "ASC" : "DESC";
+  return `SELECT ${columns}
+    FROM poll AS p INDEXED BY poll_discovery_no_deadline_idx
+    JOIN poll_reference AS pr INDEXED BY poll_reference_canonical_idx
+      ON pr.poll_id = p.id AND pr.is_canonical = 1
+    WHERE p.discovery_state = 'listed'
+      AND p.closed_at_ms IS NULL
+      AND p.deadline_ms IS NULL
+      AND ?1 >= 0
+      AND (
+        ?2 IS NULL
+        OR p.created_at_ms ${comparison} ?2
+        OR (p.created_at_ms = ?2 AND p.id ${comparison} ?3)
+      )
+    ORDER BY p.created_at_ms ${order}, p.id ${order}
+    LIMIT ?4`;
+}
+
+function discoveryActiveDeadlineQuery(
+  columns: string,
+  direction: "newer" | "older",
+): string {
+  const comparison = direction === "newer" ? ">" : "<";
+  const order = direction === "newer" ? "ASC" : "DESC";
+  return `SELECT ${columns}
+    FROM poll AS p INDEXED BY poll_discovery_active_deadline_idx
+    JOIN poll_reference AS pr INDEXED BY poll_reference_canonical_idx
+      ON pr.poll_id = p.id AND pr.is_canonical = 1
+    WHERE p.discovery_state = 'listed'
+      AND p.closed_at_ms IS NULL
+      AND p.deadline_ms IS NOT NULL
+      AND p.deadline_ms > ?1
+      AND (
+        ?2 IS NULL
+        OR p.created_at_ms ${comparison} ?2
+        OR (p.created_at_ms = ?2 AND p.id ${comparison} ?3)
+      )
+    ORDER BY p.created_at_ms ${order}, p.id ${order}
+    LIMIT ?4`;
+}
+
+export const DISCOVERY_NO_DEADLINE_QUERY = discoveryNoDeadlineQuery(
+  DISCOVERY_CATALOG_COLUMNS,
+  "older",
+);
+export const DISCOVERY_ACTIVE_DEADLINE_QUERY = discoveryActiveDeadlineQuery(
+  DISCOVERY_CATALOG_COLUMNS,
+  "older",
+);
+
+const DISCOVERY_NO_DEADLINE_NEWER_QUERY = discoveryNoDeadlineQuery(
+  DISCOVERY_CATALOG_COLUMNS,
+  "newer",
+);
+const DISCOVERY_ACTIVE_DEADLINE_NEWER_QUERY = discoveryActiveDeadlineQuery(
+  DISCOVERY_CATALOG_COLUMNS,
+  "newer",
+);
+const DISCOVERY_SITEMAP_NO_DEADLINE_QUERY = discoveryNoDeadlineQuery(
+  DISCOVERY_SITEMAP_COLUMNS,
+  "older",
+);
+const DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY = discoveryActiveDeadlineQuery(
+  DISCOVERY_SITEMAP_COLUMNS,
+  "older",
+);
 
 export type PollPage = {
   pollId: PollId;
   canonicalReference: string;
+  discoveryState: DiscoveryState;
   question: string;
   description: string | null;
   pollType: PollType;
@@ -64,7 +160,6 @@ export type PollPage = {
 };
 
 export type OwnedPoll = PollPage & {
-  discoveryState: DiscoveryState;
   canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
   createdAtMs: number;
 };
@@ -85,6 +180,7 @@ export type OwnerPollListItem = {
 type PollRow = {
   id: PollId;
   canonical_reference: string;
+  discovery_state: DiscoveryState;
   question: string;
   description: string | null;
   poll_type: PollType;
@@ -118,6 +214,7 @@ function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
   return {
     pollId: row.id,
     canonicalReference: row.canonical_reference,
+    discoveryState: row.discovery_state,
     question: row.question,
     description: row.description,
     pollType: row.poll_type,
@@ -229,7 +326,7 @@ export function createPollPersistence(db: D1Database) {
     async findPollByReference(reference: string): Promise<PollPage | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.discovery_state, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
         )
         .bind(reference)
         .first<PollRow>();
@@ -282,7 +379,6 @@ export function createPollPersistence(db: D1Database) {
       }
       return {
         ...toPollPage(row, await loadOptions(db, row.id)),
-        discoveryState: row.discovery_state,
         canonicalReference: row.canonical_reference,
         canonicalReferenceKind: row.canonical_reference_kind,
         createdAtMs: row.created_at_ms,
@@ -448,7 +544,9 @@ export function createPollPersistence(db: D1Database) {
         )
         .bind(version.pollId, input.ownerUserId, version.updatedAtMs)
         .run();
-      if ((result.meta.changes ?? 0) === 1) {
+      // Discovery revision triggers may add one same-transaction metadata
+      // change; the guarded Poll UPDATE itself still proves success.
+      if ((result.meta.changes ?? 0) >= 1) {
         return "closed";
       }
       const existing = await this.loadLifecycleForOwner(
@@ -481,7 +579,8 @@ export function createPollPersistence(db: D1Database) {
         )
         .bind(input.pollId, input.ownerUserId, input.state, input.updatedAtMs)
         .run();
-      if ((result.meta.changes ?? 0) === 1) {
+      // A listing transition also bumps the Discovery cache generation.
+      if ((result.meta.changes ?? 0) >= 1) {
         return "updated";
       }
       const existing = await this.loadLifecycleForOwner(
@@ -634,7 +733,8 @@ export function createPollPersistence(db: D1Database) {
 
       const batch = await db.batch(statements);
       const parentChanges = batch.at(-1)?.meta.changes ?? 0;
-      if (parentChanges === 1) {
+      // Question changes also bump the Discovery cache generation.
+      if (parentChanges >= 1) {
         return "updated";
       }
       const existing = await this.loadLifecycleForOwner(
@@ -1284,6 +1384,232 @@ export function createResultsPersistence(db: D1Database) {
       const { representationVersion: _representationVersion, ...tally } =
         projection;
       return tally;
+    },
+  };
+}
+
+type DiscoveryCatalogRow = {
+  id: PollId;
+  canonical_reference: string;
+  question: string;
+  poll_type: PollType;
+  vote_count: number;
+  deadline_ms: number | null;
+  created_at_ms: number;
+};
+
+type DiscoverySitemapRow = {
+  id: PollId;
+  canonical_reference: string;
+  deadline_ms: number | null;
+  created_at_ms: number;
+};
+
+function isSafeTimestamp(value: number | null): boolean {
+  return value === null || (Number.isSafeInteger(value) && value >= 0);
+}
+
+function mapDiscoveryCatalogRow(
+  row: DiscoveryCatalogRow,
+): DiscoveryCatalogRecord {
+  if (
+    typeof row.id !== "string" ||
+    typeof row.canonical_reference !== "string" ||
+    row.canonical_reference.length === 0 ||
+    row.canonical_reference.length > 128 ||
+    typeof row.question !== "string" ||
+    row.question.length > 500 ||
+    !POLL_TYPES.includes(row.poll_type) ||
+    !Number.isSafeInteger(row.vote_count) ||
+    row.vote_count < 0 ||
+    !isSafeTimestamp(row.deadline_ms) ||
+    !Number.isSafeInteger(row.created_at_ms) ||
+    row.created_at_ms < 0
+  ) {
+    throw new Error("Malformed discovery catalog projection");
+  }
+  return {
+    id: row.id,
+    canonicalReference: row.canonical_reference,
+    question: row.question,
+    pollType: row.poll_type,
+    voteCount: row.vote_count,
+    deadlineMs: row.deadline_ms,
+    createdAtMs: row.created_at_ms,
+  };
+}
+
+function mapDiscoverySitemapRow(
+  row: DiscoverySitemapRow,
+): DiscoverySitemapRecord {
+  if (
+    typeof row.id !== "string" ||
+    typeof row.canonical_reference !== "string" ||
+    row.canonical_reference.length === 0 ||
+    !isSafeTimestamp(row.deadline_ms) ||
+    !Number.isSafeInteger(row.created_at_ms) ||
+    row.created_at_ms < 0
+  ) {
+    throw new Error("Malformed discovery sitemap projection");
+  }
+  return {
+    id: row.id,
+    canonicalReference: row.canonical_reference,
+    deadlineMs: row.deadline_ms,
+    createdAtMs: row.created_at_ms,
+  };
+}
+
+function compareDiscoveryOrder(
+  left: DiscoveryOrderKey,
+  right: DiscoveryOrderKey,
+  direction: "newer" | "older",
+): number {
+  const timestamp = left.createdAtMs - right.createdAtMs;
+  const id = left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  const ascending = timestamp === 0 ? id : timestamp;
+  return direction === "newer" ? ascending : -ascending;
+}
+
+function mergeDiscoveryStreams<T extends DiscoveryOrderKey>(
+  left: T[],
+  right: T[],
+  direction: "newer" | "older",
+  limit: number,
+): T[] {
+  const merged: T[] = [];
+  const seen = new Set<string>();
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (
+    merged.length < limit &&
+    (leftIndex < left.length || rightIndex < right.length)
+  ) {
+    const leftValue = left[leftIndex];
+    const rightValue = right[rightIndex];
+    let next: T;
+    if (
+      rightValue === undefined ||
+      (leftValue !== undefined &&
+        compareDiscoveryOrder(leftValue, rightValue, direction) <= 0)
+    ) {
+      next = leftValue as T;
+      leftIndex += 1;
+    } else {
+      next = rightValue;
+      rightIndex += 1;
+    }
+    if (!seen.has(next.id)) {
+      seen.add(next.id);
+      merged.push(next);
+    }
+  }
+  return merged;
+}
+
+/** Separate Discovery read adapter: no creator or Results repository widening. */
+export function createDiscoveryPersistence(db: D1Database) {
+  async function queryCatalogStream(
+    query: string,
+    nowMs: number,
+    boundary: DiscoveryOrderKey | null,
+    limit: number,
+  ): Promise<DiscoveryCatalogRecord[]> {
+    const result = await db
+      .prepare(query)
+      .bind(nowMs, boundary?.createdAtMs ?? null, boundary?.id ?? null, limit)
+      .all<DiscoveryCatalogRow>();
+    return result.results.map(mapDiscoveryCatalogRow);
+  }
+
+  async function querySitemapStream(
+    query: string,
+    nowMs: number,
+    boundary: DiscoveryOrderKey | null,
+    limit: number,
+  ): Promise<DiscoverySitemapRecord[]> {
+    const result = await db
+      .prepare(query)
+      .bind(nowMs, boundary?.createdAtMs ?? null, boundary?.id ?? null, limit)
+      .all<DiscoverySitemapRow>();
+    return result.results.map(mapDiscoverySitemapRow);
+  }
+
+  return {
+    async readRevision(): Promise<number | null> {
+      const row = await db
+        .prepare(
+          "SELECT revision FROM discovery_catalog_revision WHERE singleton = 1",
+        )
+        .first<{ revision: number }>();
+      if (!row || !Number.isSafeInteger(row.revision) || row.revision < 1) {
+        return null;
+      }
+      return row.revision;
+    },
+
+    async queryCatalogPage(input: {
+      direction: DiscoveryCatalogRequest["direction"];
+      boundary: DiscoveryOrderKey | null;
+      limit: number;
+      nowMs: number;
+    }): Promise<DiscoveryCatalogRecord[]> {
+      const direction = input.direction === "newer" ? "newer" : "older";
+      const noDeadlineQuery =
+        direction === "newer"
+          ? DISCOVERY_NO_DEADLINE_NEWER_QUERY
+          : DISCOVERY_NO_DEADLINE_QUERY;
+      const activeDeadlineQuery =
+        direction === "newer"
+          ? DISCOVERY_ACTIVE_DEADLINE_NEWER_QUERY
+          : DISCOVERY_ACTIVE_DEADLINE_QUERY;
+      const [noDeadline, activeDeadline] = await Promise.all([
+        queryCatalogStream(
+          noDeadlineQuery,
+          input.nowMs,
+          input.boundary,
+          input.limit,
+        ),
+        queryCatalogStream(
+          activeDeadlineQuery,
+          input.nowMs,
+          input.boundary,
+          input.limit,
+        ),
+      ]);
+      return mergeDiscoveryStreams(
+        noDeadline,
+        activeDeadline,
+        direction,
+        input.limit,
+      );
+    },
+
+    async querySitemapPage(input: {
+      boundary: DiscoveryOrderKey | null;
+      limit: number;
+      nowMs: number;
+    }): Promise<DiscoverySitemapRecord[]> {
+      const [noDeadline, activeDeadline] = await Promise.all([
+        querySitemapStream(
+          DISCOVERY_SITEMAP_NO_DEADLINE_QUERY,
+          input.nowMs,
+          input.boundary,
+          input.limit,
+        ),
+        querySitemapStream(
+          DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY,
+          input.nowMs,
+          input.boundary,
+          input.limit,
+        ),
+      ]);
+      return mergeDiscoveryStreams(
+        noDeadline,
+        activeDeadline,
+        "older",
+        input.limit,
+      );
     },
   };
 }

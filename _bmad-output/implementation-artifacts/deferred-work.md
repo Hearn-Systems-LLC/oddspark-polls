@@ -1,5 +1,15 @@
 # Deferred Work
 
+## Deferred from: implementation of 3-2-discover-catalog-sitemap (2026-08-03)
+
+- **Introduce a sitemap index before the catalog approaches 49,998 eligible Polls.** The v1 `/sitemap.xml` contract deliberately fails closed with `sitemap_capacity_exceeded` rather than emitting partial or protocol-invalid XML beyond 50,000 total URLs / 50 MB. Split eligible canonical Poll URLs across indexed sitemap files before production nears that ceiling [src/modules/discovery/index.ts, src/pages/sitemap.xml.ts].
+
+- **No D1 timeout guard in sitemap build loop** — `buildDiscoverySitemap` runs up to 50 sequential D1 queries; slow D1 could exhaust the 30-second Worker CPU wall clock and cause a platform kill instead of the graceful 500. Add an AbortSignal timeout checked between loop iterations [src/pages/sitemap.xml.ts:10 → src/modules/discovery/index.ts:523-562].
+
+## Deferred from: code review of 3-2-discover-catalog-sitemap (2026-08-03)
+
+- **Cache `Expires` header silently corrupts for extreme `expiresAtMs` timestamps** — `new Date(expiresAtMs).toUTCString()` produces `"Invalid Date"` when `expiresAtMs` exceeds ~8.64e15 (Year 275,760). The entry is still stored and `validCacheEntry` rejects it on read via the `safeInteger`/`expiresAtMs > nowMs` checks, but the malformed header is written. Guard `expiresAtMs` before constructing the header [src/adapters/cache/discovery.ts:210].
+
 ## Deferred from: code review of 3-1-listing-control-opt-into-discovery (2026-08-03)
 
 - If `loadLifecycleForOwner` fails after `findPollForOwner` in the delisted error branch of `[pollId].astro`, the "Delisted by the Administrator" message is swallowed and replaced with 404 — extremely narrow window (D1 must fail between two reads of the same row), pre-existing gap also in the security toggles path [src/pages/creator/polls/[pollId].astro:431-441, 479-485]

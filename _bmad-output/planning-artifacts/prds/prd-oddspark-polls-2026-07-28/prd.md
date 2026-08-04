@@ -239,6 +239,7 @@ Creator can set the Tally visibility per Poll: **Live** (visible to anyone with 
 **Consequences (testable):**
 - On After Close, a Voter who has voted sees a confirmation, not the Tally, until close.
 - On Creator-Only, the Tally is served only to the authenticated Creator.
+- Visibility governs Tally shape, not catalog attendance: when a Creator separately opts an open Poll into Listed discovery, Discover may show its aggregate accepted-Vote count, but never option/round counts, percentages, selections, Comments, or any other result shape.
 
 #### FR-21: Live-updating charts
 The Tally view shows bar/pie charts that update without manual refresh while a Poll is open. `[ASSUMPTION: transport (polling vs. WebSockets/Durable Objects) is deferred to architecture; the requirement is only "no manual refresh."]`
@@ -256,6 +257,7 @@ Every new Poll starts Unlisted. The Creator can move a Poll between Unlisted and
 **Consequences (testable):**
 - A new Poll never appears in discovery, sitemaps, or any index without an explicit creator opt-in.
 - The Discover page shows only effectively open, Listed Polls.
+- A Discover row may expose question, Poll Type, canonical voting link, Deadline, open state, and aggregate accepted-Vote attendance only. Listing never authorizes Tally shape, regardless of Visibility Setting.
 - Unlisted and Delisted Polls remain reachable by link but are absent from the directory and sitemaps.
 - Delisting changes neither Poll ownership, Visibility Setting, nor Vote data.
 

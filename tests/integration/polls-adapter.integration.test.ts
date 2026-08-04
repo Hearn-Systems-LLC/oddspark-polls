@@ -297,6 +297,7 @@ describe("createPollPersistence reads", () => {
     expect(page).toEqual({
       pollId: "poll-1",
       canonicalReference: "team-lunch",
+      discoveryState: "unlisted",
       question: "Where should we eat?",
       description: null,
       pollType: "multiple_choice",

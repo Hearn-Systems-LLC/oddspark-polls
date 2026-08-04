@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Public Discover catalog and crawl metadata: open Listed Polls now appear in
+  a newest-first, keyset-paginated directory with accepted-Vote attendance,
+  real no-JavaScript links, bounded progressive enhancement, canonical/noindex
+  policy, and fresh `sitemap.xml` / `robots.txt` endpoints. Tally shape remains
+  governed independently by each Poll's Visibility Setting.
 - Creator-controlled Poll discovery: new Polls default to Unlisted, Creators can
   opt into Listed during creation or switch between Listed and Unlisted from
   Poll detail, and creator detail/dashboard surfaces show a word-first listing

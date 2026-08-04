@@ -5,11 +5,15 @@ import "../styles/tokens.css";
 interface Props {
   title?: string;
   description?: string;
+  canonicalUrl?: string;
+  robots?: string;
 }
 
 const {
   title = "oddspark polls",
   description = "Trustworthy casual polls — free, full-featured, no subscription.",
+  canonicalUrl,
+  robots,
 } = Astro.props;
 ---
 
@@ -19,6 +23,8 @@ const {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
+    {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+    {robots && <meta name="robots" content={robots} />}
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" href="/favicon.ico" />
     <meta name="generator" content={Astro.generator} />

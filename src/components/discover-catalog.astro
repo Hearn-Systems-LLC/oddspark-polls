@@ -1,0 +1,167 @@
+---
+import {
+  DISCOVERY_COPY,
+  DISCOVERY_PAGE_SIZE,
+  type DiscoveryCatalogPage,
+} from "../modules/discovery/index";
+import PollCard from "./poll-card.astro";
+import { buildPollCardViewModel } from "./poll-card";
+import Pagination from "./pagination.astro";
+
+interface Props {
+  page: DiscoveryCatalogPage;
+  nowMs: number;
+  loading?: boolean;
+  error?: boolean;
+  retryUrl?: string;
+}
+
+const {
+  page,
+  nowMs,
+  loading = false,
+  error = false,
+  retryUrl = "/discover",
+} = Astro.props;
+const empty = !loading && !error && page.items.length === 0;
+---
+
+<section class="discover-catalog" data-discover-catalog-region>
+  <h1>Discover</h1>
+
+  <div data-discover-loaded aria-busy={loading ? "true" : "false"}>
+    {
+      page.items.length > 0 && (
+        <ul class="discover-list" data-discover-list>
+          {page.items.map((item) => (
+            <li>
+              <PollCard
+                viewModel={buildPollCardViewModel({
+                  title: item.question,
+                  pollType: item.pollType,
+                  voterCount: item.voteCount,
+                  status: "open",
+                  deadlineMs: item.deadlineMs,
+                  nowMs,
+                  href: `/${encodeURIComponent(item.canonicalReference)}`,
+                })}
+              />
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </div>
+
+  {
+    loading && (
+      <ul
+        class="discover-skeletons"
+        data-discover-skeletons
+        aria-hidden="true"
+      >
+        {Array.from({ length: DISCOVERY_PAGE_SIZE }).map(() => (
+          <li class="discover-skeleton-row">
+            <span class="discover-skeleton-title" />
+            <span class="discover-skeleton-meta" />
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
+  {
+    error && (
+      <p class="discover-message" data-discover-error>
+        {DISCOVERY_COPY.error}{" "}
+        <a href={retryUrl} data-discover-retry>{DISCOVERY_COPY.retry}</a>
+      </p>
+    )
+  }
+
+  {
+    empty && (
+      <p class="discover-message" data-discover-empty>
+        {DISCOVERY_COPY.empty}{" "}
+        <a href="/creator/new">{DISCOVERY_COPY.createPrompt}</a>
+      </p>
+    )
+  }
+
+  <Pagination newerUrl={page.newerUrl} olderUrl={page.olderUrl} />
+  <p class="visually-hidden" aria-live="polite" data-discover-status>
+    {error ? DISCOVERY_COPY.error : ""}
+  </p>
+  <template data-discover-skeleton-template>
+    <li class="discover-skeleton-row">
+      <span class="discover-skeleton-title"></span>
+      <span class="discover-skeleton-meta"></span>
+    </li>
+  </template>
+</section>
+
+<style>
+  .discover-catalog {
+    width: 100%;
+    max-width: var(--space-measure);
+    margin-inline: auto;
+  }
+
+  .discover-catalog h1 {
+    margin: 0 0 var(--space-6);
+    font-family: var(--font-human);
+    font-size: var(--type-display-size);
+    font-weight: 400;
+    line-height: var(--type-display-lh);
+  }
+
+  .discover-list,
+  .discover-skeletons {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+  }
+
+  .discover-skeleton-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-height: 44px;
+    padding-block: var(--poll-card-padding-y);
+    border-top: var(--poll-card-border-top);
+  }
+
+  .discover-skeleton-title,
+  .discover-skeleton-meta {
+    display: block;
+    background: var(--color-rule);
+  }
+
+  .discover-skeleton-title {
+    width: 72%;
+    height: var(--type-poll-question-size);
+  }
+
+  .discover-skeleton-meta {
+    width: 44%;
+    height: var(--type-caption-size);
+  }
+
+  .discover-message {
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  .discover-message a {
+    color: var(--color-entropy);
+  }
+
+  @media (max-width: 639px) {
+    .discover-catalog h1 {
+      font-size: var(--type-display-mobile-size);
+      line-height: var(--type-display-mobile-lh);
+    }
+  }
+</style>

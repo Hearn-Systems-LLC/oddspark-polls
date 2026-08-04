@@ -9,6 +9,7 @@ import type {
 import type {
   DiscoveryState,
   PollId,
+  PollType,
   UserId,
 } from "../../shared/domain/index";
 
@@ -21,7 +22,25 @@ export const DISCOVERY_COPY = {
   delisted: "Delisted by the Administrator.",
   notFound: "This Poll doesn't exist.",
   editFailed: "That didn't save. Nothing changed — try again.",
+  empty:
+    "Nothing here yet. Polls appear when their Creators opt them in. Yours could be the first.",
+  error:
+    "The directory didn't load. Try again — everything that was on screen is still there.",
+  newer: "NEWER",
+  older: "OLDER",
+  retry: "TRY AGAIN",
+  createPrompt: "CREATE A POLL",
 } as const;
+
+export const DISCOVERY_PAGE_SIZE = 20;
+export const SITEMAP_BATCH_SIZE = 1_000;
+export const SITEMAP_MAX_POLL_URLS = 49_998;
+export const SITEMAP_MAX_PAGES = 50;
+export const SITEMAP_MAX_BYTES = 50 * 1024 * 1024;
+const DISCOVERY_CURSOR_VERSION = 1;
+const MAX_DISCOVERY_CURSOR_LENGTH = 512;
+const UUID_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const LISTING_CHOICES = [
   {
@@ -138,4 +157,409 @@ export async function setPollListing(
     ok: true,
     value: { kind: result, state: requested },
   };
+}
+
+export type DiscoveryCursorDirection = "newer" | "older";
+
+export type DiscoveryOrderKey = {
+  createdAtMs: number;
+  id: PollId;
+};
+
+export type DiscoveryCatalogRequest =
+  | { direction: "initial" }
+  | {
+      direction: DiscoveryCursorDirection;
+      cursor: string;
+      boundary: DiscoveryOrderKey;
+    };
+
+/**
+ * Purpose-shaped persistence record. The internal Poll ID exists only on the
+ * query/cursor boundary and is stripped before the public projection leaves
+ * this application service.
+ */
+export type DiscoveryCatalogRecord = DiscoveryOrderKey & {
+  canonicalReference: string;
+  question: string;
+  pollType: PollType;
+  voteCount: number;
+  deadlineMs: number | null;
+};
+
+export type DiscoveryCatalogItem = Omit<DiscoveryCatalogRecord, "id"> & {
+  status: "open";
+};
+
+export type DiscoveryCatalogPage = {
+  items: DiscoveryCatalogItem[];
+  newerUrl: string | null;
+  olderUrl: string | null;
+};
+
+export type DiscoverySitemapRecord = DiscoveryOrderKey & {
+  canonicalReference: string;
+  deadlineMs: number | null;
+};
+
+export type DiscoverySitemapPersistencePort = {
+  querySitemapPage: (input: {
+    boundary: DiscoveryOrderKey | null;
+    limit: number;
+    nowMs: number;
+  }) => Promise<DiscoverySitemapRecord[]>;
+};
+
+export type DiscoverySitemapBuild = {
+  xml: string;
+  pollUrlCount: number;
+  pageCount: number;
+};
+
+export type DiscoverySitemapBuildResult =
+  | { ok: true; value: DiscoverySitemapBuild }
+  | { ok: false; error: { code: "sitemap_capacity_exceeded" } };
+
+export type DiscoveryCatalogPersistencePort = {
+  readRevision: () => Promise<number | null>;
+  queryCatalogPage: (input: {
+    direction: DiscoveryCatalogRequest["direction"];
+    boundary: DiscoveryOrderKey | null;
+    limit: number;
+    nowMs: number;
+  }) => Promise<DiscoveryCatalogRecord[]>;
+};
+
+export type DiscoveryCatalogCachePort = {
+  get: (input: {
+    revision: number;
+    request: DiscoveryCatalogRequest;
+    nowMs: number;
+  }) => Promise<DiscoveryCatalogPage | null>;
+  put: (input: {
+    revision: number;
+    request: DiscoveryCatalogRequest;
+    page: DiscoveryCatalogPage;
+    nowMs: number;
+  }) => Promise<void>;
+};
+
+export type QueryDiscoveryCatalogDeps = {
+  persistence: DiscoveryCatalogPersistencePort;
+  cache: DiscoveryCatalogCachePort;
+};
+
+type EncodedCursor = {
+  v: typeof DISCOVERY_CURSOR_VERSION;
+  d: DiscoveryCursorDirection;
+  t: number;
+  i: string;
+};
+
+function invalidCursorError(): ApplicationError {
+  return {
+    code: "invalid_discovery_cursor",
+    message: DISCOVERY_COPY.error,
+  };
+}
+
+function catalogUnavailableError(): ApplicationError {
+  return {
+    code: "discovery_catalog_unavailable",
+    message: DISCOVERY_COPY.error,
+  };
+}
+
+function toBase64Url(value: string): string {
+  return btoa(value)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+function fromBase64Url(value: string): string {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) {
+    throw new Error("invalid base64url");
+  }
+  const base64 = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+  return atob(base64 + padding);
+}
+
+export function encodeDiscoveryCursor(
+  direction: DiscoveryCursorDirection,
+  boundary: DiscoveryOrderKey,
+): string {
+  const payload: EncodedCursor = {
+    v: DISCOVERY_CURSOR_VERSION,
+    d: direction,
+    t: boundary.createdAtMs,
+    i: boundary.id,
+  };
+  return toBase64Url(JSON.stringify(payload));
+}
+
+function decodeDiscoveryCursor(
+  value: string,
+  expectedDirection: DiscoveryCursorDirection,
+): DiscoveryOrderKey | null {
+  if (value.length === 0 || value.length > MAX_DISCOVERY_CURSOR_LENGTH) {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(fromBase64Url(value));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const payload = parsed as Record<string, unknown>;
+    const keys = Object.keys(payload).sort();
+    if (keys.join(",") !== "d,i,t,v") {
+      return null;
+    }
+    if (
+      payload.v !== DISCOVERY_CURSOR_VERSION ||
+      payload.d !== expectedDirection ||
+      !Number.isSafeInteger(payload.t) ||
+      (payload.t as number) < 0 ||
+      typeof payload.i !== "string" ||
+      !UUID_SHAPE.test(payload.i)
+    ) {
+      return null;
+    }
+    return {
+      createdAtMs: payload.t as number,
+      id: payload.i as PollId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseDiscoveryRequest(
+  searchParams: URLSearchParams,
+): Result<DiscoveryCatalogRequest> {
+  const newer = searchParams.getAll("newer");
+  const older = searchParams.getAll("older");
+  if (newer.length === 0 && older.length === 0) {
+    return { ok: true, value: { direction: "initial" } };
+  }
+  if (
+    newer.length > 1 ||
+    older.length > 1 ||
+    (newer.length === 1 && older.length === 1)
+  ) {
+    return { ok: false, error: invalidCursorError() };
+  }
+
+  const direction: DiscoveryCursorDirection =
+    newer.length === 1 ? "newer" : "older";
+  const cursor = (newer[0] ?? older[0]) as string;
+  const boundary = decodeDiscoveryCursor(cursor, direction);
+  if (!boundary) {
+    return { ok: false, error: invalidCursorError() };
+  }
+  return {
+    ok: true,
+    value: { direction, cursor, boundary },
+  };
+}
+
+function pageUrl(
+  direction: DiscoveryCursorDirection,
+  record: DiscoveryCatalogRecord,
+): string {
+  const cursor = encodeDiscoveryCursor(direction, record);
+  return `/discover?${direction}=${encodeURIComponent(cursor)}`;
+}
+
+function publicItem(record: DiscoveryCatalogRecord): DiscoveryCatalogItem {
+  return {
+    canonicalReference: record.canonicalReference,
+    question: record.question,
+    pollType: record.pollType,
+    voteCount: record.voteCount,
+    deadlineMs: record.deadlineMs,
+    createdAtMs: record.createdAtMs,
+    status: "open",
+  };
+}
+
+function buildCatalogPage(
+  request: DiscoveryCatalogRequest,
+  fetched: DiscoveryCatalogRecord[],
+): DiscoveryCatalogPage {
+  const hasSentinel = fetched.length > DISCOVERY_PAGE_SIZE;
+  const bounded = fetched.slice(0, DISCOVERY_PAGE_SIZE);
+  const displayed =
+    request.direction === "newer" ? bounded.toReversed() : bounded;
+  const first = displayed[0];
+  const last = displayed.at(-1);
+
+  return {
+    items: displayed.map(publicItem),
+    newerUrl:
+      first &&
+      (request.direction === "older" ||
+        (request.direction === "newer" && hasSentinel))
+        ? pageUrl("newer", first)
+        : null,
+    olderUrl:
+      last &&
+      (request.direction === "newer" ||
+        ((request.direction === "initial" || request.direction === "older") &&
+          hasSentinel))
+        ? pageUrl("older", last)
+        : null,
+  };
+}
+
+export async function queryDiscoveryCatalog(
+  deps: QueryDiscoveryCatalogDeps,
+  request: DiscoveryCatalogRequest,
+  nowMs: number,
+): Promise<Result<DiscoveryCatalogPage>> {
+  let revision: number | null;
+  try {
+    revision = await deps.persistence.readRevision();
+  } catch {
+    return { ok: false, error: catalogUnavailableError() };
+  }
+  if (!Number.isSafeInteger(revision) || (revision as number) < 1) {
+    return { ok: false, error: catalogUnavailableError() };
+  }
+
+  try {
+    const cached = await deps.cache.get({
+      revision: revision as number,
+      request,
+      nowMs,
+    });
+    if (cached) {
+      return { ok: true, value: cached };
+    }
+  } catch {
+    // Cache is a fail-open optimization; D1 remains the catalog truth.
+  }
+
+  let fetched: DiscoveryCatalogRecord[];
+  try {
+    fetched = await deps.persistence.queryCatalogPage({
+      direction: request.direction,
+      boundary: request.direction === "initial" ? null : request.boundary,
+      limit: DISCOVERY_PAGE_SIZE + 1,
+      nowMs,
+    });
+  } catch {
+    return { ok: false, error: catalogUnavailableError() };
+  }
+
+  const page = buildCatalogPage(request, fetched);
+  try {
+    await deps.cache.put({
+      revision: revision as number,
+      request,
+      page,
+      nowMs,
+    });
+  } catch {
+    // Population failure must not make a successful D1 read unavailable.
+  }
+  return { ok: true, value: page };
+}
+
+function sitemapCapacityExceeded(): DiscoverySitemapBuildResult {
+  return { ok: false, error: { code: "sitemap_capacity_exceeded" } };
+}
+
+function escapeXmlText(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&apos;";
+    }
+  });
+}
+
+export function renderDiscoverySitemapXml(
+  urls: readonly string[],
+  maxBytes = SITEMAP_MAX_BYTES,
+): DiscoverySitemapBuildResult {
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...urls.map((url) => `  <url><loc>${escapeXmlText(url)}</loc></url>`),
+    "</urlset>",
+    "",
+  ].join("\n");
+
+  if (new TextEncoder().encode(xml).byteLength > maxBytes) {
+    return sitemapCapacityExceeded();
+  }
+  return {
+    ok: true,
+    value: { xml, pollUrlCount: 0, pageCount: 0 },
+  };
+}
+
+export async function buildDiscoverySitemap(
+  persistence: DiscoverySitemapPersistencePort,
+  requestUrl: URL,
+  nowMs: number,
+): Promise<DiscoverySitemapBuildResult> {
+  const origin = requestUrl.origin;
+  const pollUrls: string[] = [];
+  let boundary: DiscoveryOrderKey | null = null;
+  let pageCount = 0;
+
+  while (pageCount < SITEMAP_MAX_PAGES) {
+    const rows = await persistence.querySitemapPage({
+      boundary,
+      limit: SITEMAP_BATCH_SIZE + 1,
+      nowMs,
+    });
+    pageCount += 1;
+    if (rows.length > SITEMAP_BATCH_SIZE + 1) {
+      return sitemapCapacityExceeded();
+    }
+
+    const page = rows.slice(0, SITEMAP_BATCH_SIZE);
+    if (pollUrls.length + page.length > SITEMAP_MAX_POLL_URLS) {
+      return sitemapCapacityExceeded();
+    }
+    for (const record of page) {
+      pollUrls.push(
+        `${origin}/${encodeURIComponent(record.canonicalReference)}`,
+      );
+    }
+
+    if (rows.length <= SITEMAP_BATCH_SIZE) {
+      const rendered = renderDiscoverySitemapXml([
+        `${origin}/`,
+        `${origin}/discover`,
+        ...pollUrls,
+      ]);
+      return rendered.ok
+        ? {
+            ok: true,
+            value: {
+              ...rendered.value,
+              pollUrlCount: pollUrls.length,
+              pageCount,
+            },
+          }
+        : rendered;
+    }
+    boundary = page.at(-1) ?? null;
+  }
+
+  return sitemapCapacityExceeded();
 }

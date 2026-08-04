@@ -1567,6 +1567,7 @@ SET discovery_state = (
       SELECT ma.next_state
       FROM moderation_action AS ma
       WHERE ma.poll_id = poll.id
+        AND ma.action = 'clear_delisted'
       ORDER BY ma.sequence DESC
       LIMIT 1
     ),
@@ -1707,6 +1708,15 @@ export function createModerationPersistence(db: D1Database) {
         return "updated";
       }
       if (actionChanges === 0 && stateChanges === 0) {
+        return classifyNoChange(input.actorUserId, input.pollId, input.intent);
+      }
+      // INSERT succeeded but UPDATE failed — the moderation_action row is
+      // orphaned. Classify current state to surface a coherent outcome
+      // instead of a 500. The orphaned row carries correct prior/next state
+      // data (fill-in was a no-row sub-expression when the poll already
+      // satisfied the target guard); a future clear cycle reads it
+      // correctly through the action-type filter in the COALESCE.
+      if (actionChanges === 1 && stateChanges === 0) {
         return classifyNoChange(input.actorUserId, input.pollId, input.intent);
       }
       throw new Error("Moderation action/state transaction mismatch");

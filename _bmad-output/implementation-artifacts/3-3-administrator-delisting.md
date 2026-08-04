@@ -7,7 +7,7 @@ epic: 3 — Public Face: Discovery, Landing & Demo
 
 # Story 3.3: Administrator Delisting
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -269,3 +269,23 @@ OpenAI Codex (GPT-5)
 - 2026-08-04: Implemented and fully regressed Task 4's exact, inert Creator Delisted treatment and race-safe forged-listing refusal.
 - 2026-08-04: Added real-command public enumeration, indexability, privacy, and direct-Vote proof for Task 5 without changing the Story 3.2 runtime substrate.
 - 2026-08-04: Ratified Story 3.3 architecture/UX, corrected the D1 console runbook, added the full Administrator browser journey and visual proof, closed all adversarial privacy/cache/telemetry findings, passed the exact repository gate, and moved the story to `review` without remote mutations.
+
+### Review Findings
+
+> Group 1 (core logic) review, 2026-08-04
+
+- [x] [Review][Patch] D1 batch() non-transactional: orphaned moderation_action on race [src/adapters/d1/index.ts:1693] — handled: `actionChanges === 1 && stateChanges === 0` now routes to `classifyNoChange` instead of throwing.
+- [x] [Review][Patch] CLEAR_DELISTED_STATE_QUERY subquery unfiltered by action type [src/adapters/d1/index.ts:1567] — fixed: added `AND ma.action = 'clear_delisted'` to the subquery.
+- [x] [Review][Defer] classifyNoChange fallthrough throw for future DISCOVERY_STATES values [src/adapters/d1/index.ts:1620] — deferred, pre-existing
+- [x] [Review][Defer] findTargetByReference accepts empty question string [src/adapters/d1/index.ts:1661] — deferred, pre-existing
+- [x] [Review][Defer] findTargetByReference accepts empty canonical_reference [src/adapters/d1/index.ts:1662] — deferred, pre-existing
+
+> Group 2 (UI pages) review, 2026-08-04
+
+- [x] [Review][Defer] requestContext.pollId not cleared after moderation poll_not_found [src/pages/creator/moderation.astro:170] — stale pollId attribution in telemetry when target lookup succeeds but subsequent moderation fails with not_found. Deferred, pre-existing.
+- [x] [Review][Defer] lookupValue shows stale previous value after invalid form submission [src/pages/creator/moderation.astro:82] — visual inconsistency between pre-filled input and error message. Deferred, pre-existing.
+
+> Group 3 (tests) review, 2026-08-04
+
+- [x] [Review][Defer] Route test `fail_moderation_route` trigger cleanup is only in beforeEach, not afterEach [tests/integration/moderation-route.integration.test.ts:279] — suite passes because applyD1Migrations resets schema, but cross-file fragility remains. Deferred, pre-existing.
+- [x] [Review][Defer] E2E `cleanupCreator` call in afterAll may not await async operations [tests/e2e/administrator-moderation.spec.mjs:47-64] — unawaited promise rejections could be lost. Deferred, pre-existing.

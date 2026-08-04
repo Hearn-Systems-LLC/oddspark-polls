@@ -1,0 +1,99 @@
+---
+import { env } from "cloudflare:workers";
+import { createDiscoveryCache } from "../adapters/cache/discovery";
+import { createDiscoveryPersistence } from "../adapters/d1/index";
+import DiscoverCatalog from "../components/discover-catalog.astro";
+import BaseLayout from "../layouts/base-layout.astro";
+import {
+  parseDiscoveryRequest,
+  queryDiscoveryCatalog,
+  type DiscoveryCatalogPage,
+} from "../modules/discovery/index";
+
+Astro.response.headers.set("cache-control", "private, no-store");
+
+const method = Astro.request.method;
+if (method !== "GET" && method !== "HEAD") {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: {
+      allow: "GET, HEAD",
+      "cache-control": "private, no-store",
+    },
+  });
+}
+
+const emptyPage: DiscoveryCatalogPage = {
+  items: [],
+  newerUrl: null,
+  olderUrl: null,
+};
+const nowMs = Date.now();
+const parsed = parseDiscoveryRequest(Astro.url.searchParams);
+let page = emptyPage;
+let error = false;
+let status = 200;
+let requestForCanonical: string | null = null;
+
+if (!parsed.ok) {
+  status = 400;
+  error = true;
+} else {
+  if (parsed.value.direction !== "initial") {
+    requestForCanonical = `${parsed.value.direction}=${encodeURIComponent(parsed.value.cursor)}`;
+  }
+  const persistence = createDiscoveryPersistence(env.DB);
+  const cache = createDiscoveryCache({
+    waitUntil: (promise) => {
+      if (Astro.locals.cfContext?.waitUntil) {
+        Astro.locals.cfContext.waitUntil(promise);
+      }
+    },
+  });
+  const result = await queryDiscoveryCatalog(
+    { persistence, cache },
+    parsed.value,
+    nowMs,
+  );
+  if (result.ok) {
+    page = result.value;
+  } else {
+    status = 500;
+    error = true;
+  }
+}
+
+Astro.response.status = status;
+const noindex = error || requestForCanonical !== null;
+if (noindex) {
+  Astro.response.headers.set("x-robots-tag", "noindex");
+}
+const validatedPath = requestForCanonical
+  ? `/discover?${requestForCanonical}`
+  : "/discover";
+const canonicalUrl = new URL(validatedPath, Astro.url.origin).href;
+const retryUrl = error && status === 400 ? "/discover" : validatedPath;
+---
+
+<BaseLayout
+  title="Discover — Oddspark Polls"
+  description="Browse open public Polls on Oddspark."
+  canonicalUrl={canonicalUrl}
+  robots={noindex ? "noindex" : undefined}
+>
+  <main class="site-shell discover-page">
+    <DiscoverCatalog
+      page={page}
+      nowMs={nowMs}
+      error={error}
+      retryUrl={retryUrl}
+    />
+  </main>
+  <script src="../scripts/discover-catalog.ts"></script>
+</BaseLayout>
+
+<style>
+  .discover-page {
+    min-height: 100dvh;
+  }
+</style>

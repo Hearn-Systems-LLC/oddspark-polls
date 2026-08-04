@@ -205,6 +205,17 @@
   --poll-card-status-lh: var(--type-label-caps-lh);
   --poll-card-status-ls: var(--type-label-caps-ls);
   --poll-card-status-color: var(--color-dim);
+  /* pagination — directional labels are the state; color only annotates. */
+  --pagination-font: var(--font-machine);
+  --pagination-size: var(--type-label-caps-size);
+  --pagination-line-height: var(--type-label-caps-lh);
+  --pagination-letter-spacing: var(--type-label-caps-ls);
+  --pagination-color: var(--color-entropy);
+  --pagination-color-disabled: var(--color-dim);
+  --pagination-gap: var(--space-6);
+  --pagination-min-height: 48px;
+  --pagination-focus-outline: var(--focus-outline);
+  --pagination-focus-outline-offset: var(--focus-outline-offset);
   --overlay-scrim: var(--color-overlay-scrim);
   --focus-outline: 2px solid var(--color-focus-ring);
   --focus-outline-offset: 2px;

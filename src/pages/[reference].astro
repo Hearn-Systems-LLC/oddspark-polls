@@ -703,8 +703,12 @@ if (poll && method === "POST") {
   }
 
   // Priority: Counted flash → closed → Session claim → IP claim.
-  if (outcome === null && effectivePollStatus(poll, Date.now()) === "closed") {
-    const closedAtMs = poll.closedAtMs ?? poll.deadlineMs ?? Date.now();
+  const closedCheckMs = Date.now();
+  if (
+    outcome === null &&
+    effectivePollStatus(poll, closedCheckMs) === "closed"
+  ) {
+    const closedAtMs = poll.closedAtMs ?? poll.deadlineMs ?? closedCheckMs;
     outcome = {
       code: "poll_closed_get",
       heading: VOTE_COPY.closedOnGet,
@@ -873,6 +877,19 @@ const title = !poll
   : outcome
     ? `${outcome.titlePrefix} — ${poll.question}`
     : `${poll.question} — Oddspark Polls`;
+const indexabilityNowMs = Date.now();
+const canonicalUrl = poll
+  ? `${Astro.url.origin}/${encodeURIComponent(poll.canonicalReference)}`
+  : undefined;
+const robots =
+  !poll ||
+  poll.discoveryState !== "listed" ||
+  effectivePollStatus(poll, indexabilityNowMs) !== "open"
+    ? "noindex"
+    : undefined;
+if (robots) {
+  Astro.response.headers.set("x-robots-tag", robots);
+}
 
 const splitTimedText = (
   text: string,
@@ -909,7 +926,7 @@ const resultsExplanationTime = resultsExplanation
 const offlineCopy = splitCopy(VOTE_COPY.offline);
 ---
 
-<BaseLayout title={title}>
+<BaseLayout title={title} canonicalUrl={canonicalUrl} robots={robots}>
   <main
     class="poll-shell"
     data-post-vote={postVoteComposition ? "true" : undefined}

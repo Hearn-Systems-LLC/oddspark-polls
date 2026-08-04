@@ -324,8 +324,12 @@ sequenceDiagram
   `ViewerContext`, authorizes visibility before reading private facts, and then
   builds the permitted projection. Result and Manifest responses are never
   stored in shared caches; creator-only and not-yet-visible responses use
-  `private, no-store`. Discovery cards contain only explicitly public fields
-  and use a separate cache namespace.
+  `private, no-store`. Discovery cards use a separate cache namespace and an
+  explicit public allowlist: question, Poll Type, canonical voting reference,
+  Deadline, effectively-open status, and aggregate accepted-Vote attendance.
+  That attendance count is not Tally authorization; option/round counts,
+  percentages, selections, result visibility, Comments, owner identity, and
+  internal Poll IDs never enter the public projection or cache.
 
 ### AD-22 — Every browser mutation crosses one CSRF boundary
 

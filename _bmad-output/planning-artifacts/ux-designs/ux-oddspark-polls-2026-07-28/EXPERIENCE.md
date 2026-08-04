@@ -39,7 +39,7 @@ Every surface below traces to a stated need; the journey column names the journe
 | Landing page | `/` | Portfolio link, direct, search | What the platform is, how it was built, repo link, pinned Demo Poll (FR-25), the create entry, and the link to Discover | UJ-5, UJ-6, UJ-7 | 1 |
 | Sign-in | `/sign-in` | Landing create entry, any creator route when signed out, an expired session | Google/GitHub OAuth choice (FR-1); returns the Creator to where they started, including mid-create | UJ-6 | 1 |
 | OAuth callback | `/api/auth/*` | Provider redirect | Completes or abandons sign-in; denial or cancel returns to the sign-in entry with an explanation (FR-1) | UJ-6 | 1 |
-| Discover | `/discover` | Landing page, nav | Public catalog of open, Listed Polls, newest first, paginated (FR-23) | UJ-7 | 1 |
+| Discover | `/discover` | Landing page, nav | Public catalog of open, Listed Polls, newest first, paginated, with accepted-Vote attendance but no Tally shape (FR-20, FR-23) | UJ-7 | 1 |
 | Voting page | `/{link}` | A shared Poll link, Discover | Cast a Vote in this Poll; renders per Poll Type (FR-6, 7, 8, 11, 13) | UJ-2, UJ-3, UJ-4, UJ-7 | 1 |
 | Vote confirmation | `/{link}` (post-submit state) | Submitting a Vote | Confirm the Vote landed; show or withhold the Tally per Visibility Setting (FR-20) | UJ-2 | 1 |
 | Tally view | `/{link}/results` | Voting page, direct link | Live charts, Rounds, availability grid, Comments (FR-20, 21) | UJ-1, UJ-2 | 1 |
@@ -178,7 +178,7 @@ Behavioral only. Visual specs live in `DESIGN.md § Components`, under the same 
 | Poll closed | Voting page | Options render read-only with no markers. No vote button. Closed message per § Voice and Tone. Tally below if the Visibility Setting allows (FR-4). |
 | Poll deleted | Any Poll route | The link stops resolving — a plain 404 (FR-5). No tombstone, no "this poll was deleted" page; a deleted Poll leaves no trace, which is the point. |
 | Visibility: Live | Tally view | Results visible to anyone with the link, before and after voting, updating without refresh (FR-20). |
-| Visibility: After Close, Poll open, has voted | Vote confirmation | Confirmation only, **never the Tally** (FR-20). Shows the Deadline and nothing about the counts — not a total, not a Voter number, nothing that leaks the shape of the result. |
+| Visibility: After Close, Poll open, has voted | Vote confirmation | Confirmation only, **never the Tally** (FR-20). This surface shows the Deadline and no counts. If the Creator separately opted the Poll into Listed discovery, its Discover row may still show aggregate accepted-Vote attendance; that public total reveals no option, percentage, selection, round, or Comment shape. |
 | Visibility: After Close, Poll closed | Tally view | Full Tally, Comments, and (Phase 2, Ranked-Choice) the Ballot Manifest, all published together at close. |
 | Visibility: Creator-Only | Vote confirmation | Voter sees only that their Vote counted. The Tally is served to the authenticated Creator alone (FR-20). |
 | Direct nav to `/{link}/results`, After Close, Poll open | Tally view | A page reusing the voter-confirmation copy — **"Results open when the Poll closes — {deadline, local}"** — with the Poll question and no vote affordances and no counts. `[ASSUMPTION: chosen over a 404 and over a redirect. It leaks nothing the Poll page at `/{link}` doesn't already leak — that the Poll exists, its question, and its Deadline — and it answers the reader's actual question instead of implying the link is broken.]` |
@@ -407,7 +407,7 @@ The Demo Poll question is **"Best day for a long weekend?"** — a Multiple-Choi
 ### UJ-7. A visitor discovers a poll to vote in.
 
 1. A stranger browsing the site opens **Discover** from the landing page.
-2. The catalog lists open, Listed Polls newest first — question, type, Vote count, closing time — each row one tap target. One looks fun; they open it. The catalog is the only enumeration that exists: everything Unlisted or Delisted stays reachable by link and invisible here.
+2. The catalog lists open, Listed Polls newest first — question, type, accepted-Vote attendance, closing time — each row one tap target. Attendance is public because the Creator opted into Listed discovery; no option/round counts, percentages, selections, or Comments cross that boundary. One looks fun; they open it. The catalog is the only enumeration that exists: everything Unlisted or Delisted stays reachable by link and invisible here.
 3. The Poll renders exactly as a linked Poll would — question, options, trust badge, vote button. They vote in seconds. **Counted.**
 4. On the results view they tap `SHARE`. The native share sheet opens — or, on a browser without it, the link copies with a confirmation — and the canonical link goes into a group chat, without leaving the page. The results were never gated behind the share; the share is just easy.
 5. **Climax:** a friend from the group chat opens the link, votes, and the bar moves while both of them are watching. A Poll neither of them made is now their entertainment, and it took no account, no app, and no setup on either side.

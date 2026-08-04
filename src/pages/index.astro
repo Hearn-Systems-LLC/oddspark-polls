@@ -1,152 +1,142 @@
 ---
+import { env } from "cloudflare:workers";
 import BaseLayout from "../layouts/base-layout.astro";
-import ButtonPrimary from "../components/button-primary.astro";
-// ?raw inlines the file at build time — the served HTML carries a value
-// provably derived from the canonical token source.
+import LandingIntro from "../components/landing-intro.astro";
+import PollVotingSurface from "../components/poll-voting-surface.astro";
+import SiteHeader from "../components/site-header.astro";
+import {
+  deliverPollVotingSurface,
+  serializeDeliveryCookieEffect,
+  VOTE_FLASH_COOKIE_NAME,
+} from "../lib/poll-delivery";
+import { VOTER_COOKIE_NAME } from "../adapters/digest/index";
+import {
+  DEMO_POLL_COPY,
+  isDemoPollCompatible,
+  validateDemoPollReference,
+} from "../modules/polls/demo-poll";
 import tokensCss from "../styles/tokens.css?raw";
 
 Astro.response.headers.set("cache-control", "private, no-store");
+const configured = validateDemoPollReference(env.DEMO_POLL_REFERENCE);
+const reference = configured.ok ? configured.value : "";
+const delivery = await deliverPollVotingSurface({
+  reference,
+  request: Astro.request,
+  env,
+  principalUserId: Astro.locals.principal?.userId ?? null,
+  requestContext: Astro.locals.requestContext ?? null,
+  voterCookie: Astro.cookies.get(VOTER_COOKIE_NAME)?.value ?? null,
+  flashCookie: Astro.cookies.get(VOTE_FLASH_COOKIE_NAME)?.value ?? null,
+  formAction: "/",
+  successRedirect: "/",
+  includeEditableTally: true,
+  allowCanonicalCaseRedirect: false,
+  operationalUnavailable: true,
+  isCompatible: (poll) => configured.ok && isDemoPollCompatible(poll),
+  remapReplacementRace: true,
+});
 
-const method = Astro.request.method;
-if (method !== "GET" && method !== "HEAD") {
-  return new Response("Method not allowed.", {
-    status: 405,
-    headers: { allow: "GET, HEAD", "cache-control": "private, no-store" },
+for (const [name, value] of Object.entries(delivery.headers)) {
+  Astro.response.headers.set(name, value);
+}
+if (delivery.response) {
+  const responseHeaders = new Headers(delivery.response.headers);
+  delivery.cookies.forEach((effect) =>
+    responseHeaders.append("set-cookie", serializeDeliveryCookieEffect(effect)),
+  );
+  return new Response(delivery.response.body, {
+    status: delivery.response.status,
+    headers: responseHeaders,
   });
 }
+if (Astro.request.method === "HEAD") {
+  const responseHeaders = new Headers(delivery.headers);
+  delivery.cookies.forEach((effect) =>
+    responseHeaders.append("set-cookie", serializeDeliveryCookieEffect(effect)),
+  );
+  return new Response(null, {
+    status: delivery.status,
+    headers: responseHeaders,
+  });
+}
+delivery.cookies.forEach((effect) =>
+  Astro.response.headers.append("set-cookie", serializeDeliveryCookieEffect(effect)),
+);
+Astro.response.status = delivery.status;
 
-const solarHex = tokensCss.match(
-  /--color-solar-dark:\s*(#[0-9a-fA-F]{3,8})\s*;/,
-)?.[1];
+const solarHex = tokensCss.match(/--color-solar-dark:\s*(#[0-9a-fA-F]{3,8})\s*;/)?.[1];
 if (!solarHex) throw new Error("tokens.css: --color-solar-dark not found");
 
-const validatedPath = "/";
-const canonicalUrl = new URL(validatedPath, Astro.url.origin).href;
+const canonicalUrl = new URL("/", Astro.url.origin).href;
+const state = delivery.state;
+const unavailable = delivery.unavailable || state === null;
+const outcomeBearing = unavailable || state?.outcome !== null;
+const regionOrder = outcomeBearing ? ["demo", "intro"] : ["intro", "demo"];
+const title = unavailable
+  ? DEMO_POLL_COPY.unavailableTitle
+  : state?.outcome
+    ? `${state.outcome.titlePrefix} — ${state.poll.question}`
+    : "Oddspark Polls — trustworthy casual polls";
 ---
 
 <BaseLayout
-  title="Oddspark Polls — trustworthy casual polls"
+  title={title}
   description="Create, discover, and vote in trustworthy casual polls with transparent security and no subscription wall."
   canonicalUrl={canonicalUrl}
 >
   <div class="site-shell">
-    <header class="site-header">
-      <div>
-        <p class="label-caps">polls.oddspark.dev</p>
-        <h1 class="site-title">oddspark polls</h1>
-        <p class="site-tagline">
-          Trustworthy casual polls — multiple-choice, ranked, image, meeting.
-          Free. No subscription.
-        </p>
-      </div>
-      <button
-        type="button"
-        class="mode-toggle"
-        data-mode-toggle
-        aria-pressed="false"
-      >
-        Toggle mode
-      </button>
-    </header>
-
+    <SiteHeader />
     <main class="landing-page">
-      <section class="landing-block">
-        <p class="landing-statement" data-landing-statement>Oddspark Polls is where a casual question gets an honest answer — multiple-choice, ranked, image, and meeting polls, with vote security and no subscription wall.</p>
-      </section>
-
-      <hr class="rule" />
-
-      <section class="landing-block" data-landing-build-account aria-labelledby="landing-build-label">
-        <h2 class="label-caps landing-label" id="landing-build-label">How it's built</h2>
-        <p class="landing-build-copy" data-landing-build-copy>Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public — see the repository.</p>
-        <a
-          class="label-caps landing-text-link"
-          href="https://github.com/Hearn-Systems-LLC/oddspark-polls"
-        >
-          View repository
-        </a>
-        <!-- Token-derived smoke marker asserted by the staging smoke check -->
-        <p
-          class="label-caps"
-          data-smoke-marker="oddspark-token-solar"
-          data-token-solar={solarHex}
-          aria-hidden="true"
-        >
-          smoke · solar · {solarHex}
-        </p>
-      </section>
-
-      <hr class="rule" />
+      {
+        regionOrder.map((region) =>
+          region === "intro" ? (
+            <LandingIntro solarHex={solarHex} />
+          ) : unavailable ? (
+            <section class="demo-unavailable" data-demo-region aria-labelledby="demo-unavailable-heading">
+              <h1 id="demo-unavailable-heading" tabindex="-1" autofocus>{DEMO_POLL_COPY.unavailableHeading}</h1>
+              <p>{DEMO_POLL_COPY.unavailableBody}</p>
+              <a class="label-caps landing-text-link" href="/">{DEMO_POLL_COPY.retry}</a>
+            </section>
+          ) : state ? (
+            <section class="landing-demo" data-demo-region aria-label="Live Demo Poll">
+              <PollVotingSurface
+                delivery={state}
+                formAction="/"
+                canonicalUrl={`${Astro.url.origin}/${state.poll.canonicalReference}`}
+                liveEndpoint={`/${encodeURIComponent(reference)}/results/live`}
+                turnstileSiteKey={env.TURNSTILE_SITE_KEY}
+                embedded
+              />
+            </section>
+          ) : null,
+        )
+      }
 
       <section class="landing-block" aria-labelledby="landing-create-label">
         <h2 class="label-caps landing-label" id="landing-create-label">Create</h2>
-        <ButtonPrimary href="/creator/new">Create a Poll</ButtonPrimary>
+        <a class="label-caps landing-text-link" href="/creator/new">Create a Poll</a>
       </section>
 
       <hr class="rule" />
 
       <section class="landing-block" aria-labelledby="landing-discover-label">
         <h2 class="label-caps landing-label" id="landing-discover-label">Browse</h2>
-        <a class="label-caps landing-text-link" href="/discover">
-          Discover Polls
-        </a>
+        <a class="label-caps landing-text-link" href="/discover">Discover Polls</a>
       </section>
     </main>
   </div>
 </BaseLayout>
 
 <style>
-  .landing-page {
-    padding-bottom: var(--space-section-gap);
-  }
-
-  .landing-block {
-    margin: 0;
-  }
-
-  .landing-statement {
-    margin: 0;
-    color: var(--color-text);
-    font-family: var(--font-human);
-    font-size: var(--type-display-mobile-size);
-    font-weight: 400;
-    line-height: var(--type-display-mobile-lh);
-    letter-spacing: var(--type-display-ls);
-  }
-
-  .landing-label {
-    margin: 0 0 var(--space-4);
-  }
-
-  .landing-build-copy {
-    margin: 0;
-    color: var(--color-text);
-    font-family: var(--font-machine);
-    font-size: var(--type-body-lg-size);
-    line-height: var(--type-body-lg-lh);
-  }
-
-  .landing-text-link {
-    display: inline-flex;
-    align-items: center;
-    margin-top: var(--space-4);
-    padding-block: var(--space-4);
-    color: var(--color-entropy);
-    text-decoration: none;
-  }
-
-  .landing-text-link:hover {
-    color: var(--color-text);
-  }
-
-  [data-smoke-marker="oddspark-token-solar"] {
-    margin: var(--space-4) 0 0;
-  }
-
-  @media (min-width: 640px) {
-    .landing-statement {
-      font-size: var(--type-display-size);
-      line-height: var(--type-display-lh);
-    }
-  }
+  .landing-page { padding-bottom: var(--space-section-gap); }
+  .landing-block { margin: 0; }
+  .landing-demo, .demo-unavailable { margin: 0; }
+  .landing-demo::after, .demo-unavailable::after { content: ""; display: block; margin-block: var(--space-10); border-bottom: var(--space-hairline) solid var(--color-rule); }
+  .demo-unavailable h1 { margin: 0 0 var(--space-4); color: var(--color-alarm); font-family: var(--font-machine); font-size: var(--type-label-caps-lg-size); line-height: var(--type-label-caps-lh); letter-spacing: var(--type-label-caps-ls); }
+  .demo-unavailable h1:focus { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
+  .demo-unavailable p { margin: 0; font-size: var(--type-body-lg-size); line-height: var(--type-body-lg-lh); }
+  .landing-label { margin: 0 0 var(--space-4); }
+  .landing-text-link { display: inline-flex; align-items: center; min-height: 48px; margin-top: var(--space-4); color: var(--color-entropy); text-decoration: none; }
+  .landing-text-link:hover { color: var(--color-text); }
 </style>

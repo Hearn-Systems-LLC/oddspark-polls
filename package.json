@@ -29,6 +29,7 @@
     "build:production": "CLOUDFLARE_ENV=production astro build",
     "deploy:staging": "node scripts/deploy.mjs staging",
     "deploy:production": "node scripts/deploy.mjs production",
+    "preflight:demo": "node scripts/demo-preflight.mjs",
     "smoke:staging": "node scripts/smoke.mjs"
   },
   "dependencies": {

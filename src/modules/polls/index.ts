@@ -39,6 +39,8 @@ export {
   type ValidatedPollDefinition,
 } from "./definition";
 
+export * from "./demo-poll";
+
 // Re-exported for the module's existing consumers; the caps live in
 // ./caps.ts so browser code can import them without the domain command.
 export { POLL_CAPS, RENDER_OPTION_CEILING } from "./caps";

@@ -120,6 +120,22 @@ const accessibleName = loading
     border-right-color: var(--results-bar-edge-leader);
   }
 
+  /* The editable landing Demo already spends gold on its primary VOTE
+     action. Leadership remains explicit (◆ + accessible name) but uses the
+     ordinary entropy wash and edge until the ballot becomes read-only. */
+  :global(.results-tally[data-leadership="entropy"])
+    .results-bar.is-leader
+    .results-bar-fill {
+    background: var(--results-bar-fill);
+    border-right-color: var(--results-bar-edge);
+  }
+
+  :global(.results-tally[data-leadership="entropy"])
+    .results-bar.is-leader
+    .results-bar-leader-mark {
+    color: var(--color-entropy);
+  }
+
   /* Motion stays inert until script arms the tally root after first paint,
      and never touches the cold-load skeleton — only the final bar group. */
   :global(.results-tally.is-motion-armed [data-tally-final]) .results-bar-fill {

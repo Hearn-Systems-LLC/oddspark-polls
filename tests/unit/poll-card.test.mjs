@@ -106,7 +106,7 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
 
   it("keeps the created outcome first and places the desktop grid deterministically", () => {
     expect(detailPageSource).toMatch(
-      /<main[\s\S]*?data-creator-surface[\s\S]*?>\s*\{\s*outcome && \(/,
+      /<main[\s\S]*?data-creator-surface[\s\S]*?>\s*\{\s*outcome === "demo-reset" \? \(/,
     );
     expect(detailPageSource).toContain('data-outcome={outcome === "created" ? "created" : outcome}');
     expect(detailPageSource).toContain(

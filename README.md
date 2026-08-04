@@ -51,8 +51,8 @@ and `Oddspark Polls — Production` in each provider. Set each application's
 homepage/origin to the matching base URL and its callback to the exact URI
 above. Do not add the future custom domain until it is actually bound.
 
-Every environment requires nine runtime values: eight secret-backed bindings
-plus one public Turnstile site-key var.
+Every environment requires ten runtime values: eight secret-backed bindings
+plus two public vars.
 
 Secrets (declared in `secrets.required` in `wrangler.jsonc` — binding/type/deploy
 truth; not inferred from `.dev.vars` key order):
@@ -73,6 +73,9 @@ Public var (per environment in `wrangler.jsonc` `vars`):
   `oddspark-polls-staging.hearnsystems.workers.dev` and
   `oddspark-polls.hearnsystems.workers.dev` respectively (add `polls.oddspark.dev`
   to the production widget before the custom-domain switch).
+- `DEMO_POLL_REFERENCE` — the lower-case Custom Link for the exact live Demo
+  Poll rendered on `/`. It is public designation, not a credential, and named
+  environment vars do not inherit it from the root Wrangler config.
 
 Initialize local auth and voting privacy once with the masked provisioning
 helper. It generates independent Better Auth and vote-digest master secrets,
@@ -174,11 +177,15 @@ pnpm build
 Order is fixed:
 
 1. Tests + build
-2. Staging migration
-3. Staging deploy
-4. Staging smoke (HTTP 200 + token marker in HTML + auth and `/api/health` binding-liveness probes)
-5. Production migration
-6. Production deploy
+2. Privacy-safe, read-only staging Demo Poll preflight
+3. Staging migration
+4. Staging deploy
+5. Staging smoke (HTTP 200 + token marker, exact configured Demo, auth, and
+   `/api/health` binding-liveness probes)
+6. Privacy-safe, read-only production Demo Poll preflight
+7. Production migration
+8. Production deploy
+9. Production smoke with the same exact Demo and liveness assertions
 
 GitHub Actions: `.github/workflows/deploy.yml`.
 
@@ -186,21 +193,29 @@ Manual:
 
 ```bash
 pnpm test && pnpm build
+pnpm preflight:demo staging
 pnpm migrate:staging && pnpm deploy:staging
 SMOKE_URL=https://oddspark-polls-staging.hearnsystems.workers.dev pnpm smoke:staging
+pnpm preflight:demo production
 pnpm migrate:production && pnpm deploy:production
+SMOKE_URL=https://oddspark-polls.hearnsystems.workers.dev pnpm smoke:staging
 ```
 
 The smoke check ends with `/api/health`, an unauthenticated binding-liveness
 probe: it returns 200 when every required binding is present (including
-`TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`) and names the missing bindings
-(never their values) otherwise.
+`TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, and `DEMO_POLL_REFERENCE`) and
+names the missing bindings (never their values) otherwise. The Demo preflight
+returns only `ready`/`not_ready`; it never prints Poll, option, owner, or
+credential identifiers and never mutates D1.
 
 **Turnstile privacy note:** Siteverify deliberately omits optional `remoteip` so
 raw client addresses never leave the request-bound identity preparation already
 constrained by IP Checks. The browser still makes a direct third-party request
 to Cloudflare's Turnstile iframe when CAPTCHA is on for that Poll; CAPTCHA-off
 polls load no widget and make no Turnstile client request.
+The landing Demo is CAPTCHA-on, so its Poll, options, and live Tally remain
+readable without JavaScript but a Vote cannot be accepted without a
+Turnstile-capable client and successful Siteverify proof.
 
 ### Live URLs (product landing page)
 
@@ -232,6 +247,16 @@ Tokens come from DESIGN.md and live in `src/styles/tokens.css`. Mode is OS prefe
 ## Recovery
 
 D1 Time Travel is the database recovery floor. After any restore, reconcile R2 from D1 ownership records. See [docs/recovery.md](docs/recovery.md).
+
+The configured Demo is provisioned through the authenticated product, never
+from a public request or deploy script. If it is deleted, permanently closed,
+has unrepairable security drift, or has moderation history that forbids reset,
+create another exact Poll at a new Custom Link, review and change
+`DEMO_POLL_REFERENCE` separately for staging and production, then require the
+environment's read-only preflight and post-deploy smoke to pass. Manage the
+former Poll through the ordinary Creator/Administrator lifecycle. Do not put
+credentials, cookies, OAuth identity, internal IDs, or capability URLs in the
+runbook, configuration, CI output, or commit history.
 
 ## Project layout
 

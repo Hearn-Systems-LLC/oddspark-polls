@@ -2,13 +2,18 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync("src/pages/index.astro", "utf8");
+const introSource = readFileSync("src/components/landing-intro.astro", "utf8");
+const votingSurfaceSource = readFileSync(
+  "src/components/poll-voting-surface.astro",
+  "utf8",
+);
 const openingCopy =
   "Oddspark Polls is where a casual question gets an honest answer — multiple-choice, ranked, image, and meeting polls, with vote security and no subscription wall.";
 const buildAccountCopy =
   "Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public — see the repository.";
 
 function dataElement(attribute) {
-  const match = source.match(
+  const match = introSource.match(
     new RegExp(
       `<([a-z][\\w-]*)[^>]*\\b${attribute}\\b[^>]*>([\\s\\S]*?)<\\/\\1>`,
     ),
@@ -56,30 +61,30 @@ describe("landing page source contract", () => {
     expect(source).toContain(
       'throw new Error("tokens.css: --color-solar-dark not found")',
     );
-    expect(source).toContain(
+    expect(introSource).toContain(
       'data-smoke-marker="oddspark-token-solar"',
     );
-    expect(source).toMatch(
+    expect(introSource).toMatch(
       /<p\s+class="label-caps"\s+data-smoke-marker="oddspark-token-solar"/,
     );
-    expect(source).toContain("data-token-solar={solarHex}");
-    expect(source).toContain("smoke · solar · {solarHex}");
+    expect(introSource).toContain("data-token-solar={solarHex}");
+    expect(introSource).toContain("smoke · solar · {solarHex}");
   });
 
-  it("links only the repository, create entry, and Discover in canonical order", () => {
-    const hrefs = [...source.matchAll(/\bhref="([^"]+)"/g)].map(
-      (match) => match[1],
-    );
-    expect(hrefs).toEqual([
+  it("keeps repository, unavailable retry, create, and Discover destinations explicit", () => {
+    expect(introSource).toContain(
       "https://github.com/Hearn-Systems-LLC/oddspark-polls",
-      "/creator/new",
-      "/discover",
-    ]);
+    );
+    expect(source).toContain('href="/">{DEMO_POLL_COPY.retry}</a>');
+    expect(source).toContain('href="/creator/new"');
+    expect(source).toContain('href="/discover"');
   });
 
-  it("uses the anchor form of ButtonPrimary as the only primary action", () => {
-    expect(source.match(/<ButtonPrimary\b/g) ?? []).toHaveLength(1);
-    expect(source).toMatch(/<ButtonPrimary\s+href="\/creator\/new">/);
+  it("reserves the sole primary action for VOTE and demotes Create", () => {
+    expect(votingSurfaceSource.match(/<ButtonPrimary\b/g) ?? []).toHaveLength(1);
+    expect(votingSurfaceSource).toContain(">VOTE</ButtonPrimary>");
+    expect(source).not.toContain("ButtonPrimary");
+    expect(source).toContain('class="label-caps landing-text-link" href="/creator/new"');
     expect(source).not.toMatch(/<button[^>]*class="[^"]*btn-primary/);
   });
 

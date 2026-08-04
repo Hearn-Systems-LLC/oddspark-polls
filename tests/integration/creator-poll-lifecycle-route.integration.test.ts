@@ -77,6 +77,40 @@ async function seedPoll(ownerUserId: string, pollId = crypto.randomUUID()) {
   return pollId;
 }
 
+async function seedDemoPoll(ownerUserId: string): Promise<string> {
+  const pollId = await seedPoll(ownerUserId);
+  const nowMs = Date.now();
+  await testEnv.DB.batch([
+    testEnv.DB.prepare(
+      `UPDATE poll
+       SET question = 'Best day for a long weekend?',
+           result_visibility = 'live', discovery_state = 'unlisted',
+           session_checks_enabled = 1, ip_checks_enabled = 0,
+           voter_codes_enabled = 0, captcha_enabled = 1,
+           vpn_blocking_enabled = 0, multi_select_enabled = 0,
+           min_selections = NULL, max_selections = NULL,
+           deadline_ms = NULL, closed_at_ms = NULL,
+           representation_version = 7
+       WHERE id = ?1`,
+    ).bind(pollId),
+    testEnv.DB.prepare("DELETE FROM poll_option WHERE poll_id = ?1").bind(pollId),
+    testEnv.DB.prepare(
+      "INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (?1, ?2, 'Friday', 0, ?3)",
+    ).bind(crypto.randomUUID(), pollId, nowMs),
+    testEnv.DB.prepare(
+      "INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (?1, ?2, 'Monday', 1, ?3)",
+    ).bind(crypto.randomUUID(), pollId, nowMs),
+    testEnv.DB.prepare(
+      "INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (?1, ?2, 'Either works', 2, ?3)",
+    ).bind(crypto.randomUUID(), pollId, nowMs),
+    testEnv.DB.prepare(
+      "UPDATE poll_reference SET reference = 'demo', kind = 'custom' WHERE poll_id = ?1",
+    ).bind(pollId),
+  ]);
+  await insertVote(pollId);
+  return pollId;
+}
+
 async function runRealRoute(
   context: MiddlewareContext,
   pollId: string,
@@ -204,6 +238,8 @@ async function securityRow(pollId: string): Promise<{
 
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+  await testEnv.DB.prepare("DROP TRIGGER IF EXISTS fail_listing_update").run();
+  await testEnv.DB.prepare("DROP TRIGGER IF EXISTS fail_security_update").run();
 });
 
 const DETAIL = "https://polls.example.test/creator/polls/11111111-1111-4111-8111-111111111111";
@@ -934,5 +970,152 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
       expect.objectContaining({ pollId }),
     );
     errorSpy.mockRestore();
+  });
+
+  it("shows, confirms, and causally reports an owner Demo reset", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedDemoPoll(userId);
+
+    const confirmation = await runRealRoute(
+      makeContext(new Request(
+        `https://polls.example.test/creator/polls/${pollId}?confirm=reset-demo`,
+        { headers: { cookie } },
+      )),
+      pollId,
+    );
+    const confirmationHtml = await confirmation.text();
+    expect(confirmation.status).toBe(200);
+    expect(confirmationHtml).toContain("RESET DEMO POLL");
+    expect(confirmationHtml).toContain("RESET DEMO POLL?");
+    expect(confirmationHtml).toContain("KEEP VOTES");
+    expect(confirmationHtml).toContain("RESET VOTES");
+    expect(confirmationHtml).toContain('data-overlay-open="true"');
+
+    const csrfToken = await csrfFor(cookie);
+    const response = await runRealRoute(
+      makeContext(new Request(
+        `https://polls.example.test/creator/polls/${pollId}`,
+        {
+          method: "POST",
+          headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded",
+            origin: "https://polls.example.test",
+            "sec-fetch-site": "same-origin",
+          },
+          body: new URLSearchParams({
+            csrf_token: csrfToken,
+            intent: "reset-demo",
+          }),
+        },
+      )),
+      pollId,
+    );
+    expect(response.status).toBe(303);
+    const location = response.headers.get("location");
+    expect(location).toMatch(/^\/creator\/polls\/[0-9a-f-]+$/);
+    expect(location).not.toContain("outcome");
+    const successorId = location?.split("/").at(-1) ?? "";
+    expect(successorId).not.toBe(pollId);
+    const flashCookie = response.headers.get("set-cookie")
+      ?.split(",")
+      .find((value) => value.includes("oddspark.demo_reset_flash="))
+      ?.trim()
+      .split(";")[0];
+    expect(flashCookie).toBeTruthy();
+
+    const success = await runRealRoute(
+      makeContext(new Request(
+        `https://polls.example.test/creator/polls/${successorId}`,
+        { headers: { cookie: `${cookie}; ${flashCookie}` } },
+      )),
+      successorId,
+    );
+    const successHtml = await success.text();
+    expect(success.status).toBe(200);
+    expect(successHtml).toContain("DEMO POLL RESET");
+    expect(successHtml).toContain(
+      "The landing-page Demo Poll is empty and ready for new Votes.",
+    );
+    expect(success.headers.getSetCookie().join("\n")).toContain(
+      "oddspark.demo_reset_flash=",
+    );
+
+    const unproven = await runRealRoute(
+      makeContext(new Request(
+        `https://polls.example.test/creator/polls/${successorId}`,
+        { headers: { cookie } },
+      )),
+      successorId,
+    );
+    expect(await unproven.text()).not.toContain("DEMO POLL RESET");
+    expect(
+      await testEnv.DB.prepare("SELECT id FROM poll WHERE id = ?1")
+        .bind(pollId)
+        .first(),
+    ).toBeNull();
+
+    const firstPostResetVote = crypto.randomUUID();
+    await testEnv.DB.prepare(
+      "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+    ).bind(
+      firstPostResetVote,
+      successorId,
+      `submission-${firstPostResetVote}`,
+      `payload-${firstPostResetVote}`,
+      Date.now(),
+    ).run();
+    const racedReset = await runRealRoute(
+      makeContext(new Request(
+        `https://polls.example.test/creator/polls/${successorId}`,
+        {
+          method: "POST",
+          headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded",
+            origin: "https://polls.example.test",
+            "sec-fetch-site": "same-origin",
+          },
+          body: new URLSearchParams({
+            csrf_token: await csrfFor(cookie),
+            intent: "reset-demo",
+          }),
+        },
+      )),
+      successorId,
+    );
+    expect(racedReset.status).toBe(303);
+    const racedLocation = racedReset.headers.get("location");
+    const racedSuccessorId = racedLocation?.split("/").at(-1) ?? "";
+    const racedFlash = racedReset.headers.get("set-cookie")
+      ?.split(",")
+      .find((value) => value.includes("oddspark.demo_reset_flash="))
+      ?.trim()
+      .split(";")[0];
+    expect(racedSuccessorId).not.toBe(successorId);
+    expect(racedFlash).toBeTruthy();
+
+    const racingVote = crypto.randomUUID();
+    await testEnv.DB.prepare(
+      "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+    ).bind(
+      racingVote,
+      racedSuccessorId,
+      `submission-${racingVote}`,
+      `payload-${racingVote}`,
+      Date.now(),
+    ).run();
+    const racedSuccess = await runRealRoute(
+      makeContext(new Request(
+        `https://polls.example.test/creator/polls/${racedSuccessorId}`,
+        { headers: { cookie: `${cookie}; ${racedFlash}` } },
+      )),
+      racedSuccessorId,
+    );
+    const racedHtml = await racedSuccess.text();
+    expect(racedHtml).toContain("DEMO POLL RESET");
+    expect(racedHtml).toContain(
+      "The Demo Poll was reset. A new Vote has already arrived.",
+    );
   });
 });

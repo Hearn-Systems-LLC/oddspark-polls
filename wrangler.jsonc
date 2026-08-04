@@ -48,7 +48,8 @@
   ],
   // Public Turnstile site key (always-pass visible test key — local/CI only).
   "vars": {
-    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+    "DEMO_POLL_REFERENCE": "demo"
   },
   // Non-inheritable: must be repeated in each named environment. Drives
   // wrangler types + deploy validation; replaces .dev.vars inference.
@@ -68,7 +69,8 @@
     "staging": {
       "name": "oddspark-polls-staging",
       "vars": {
-        "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT53x0EwB5qscd"
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT53x0EwB5qscd",
+        "DEMO_POLL_REFERENCE": "demo"
       },
       "secrets": {
         "required": [
@@ -117,7 +119,8 @@
     "production": {
       "name": "oddspark-polls",
       "vars": {
-        "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT6LCSXHS59uSr"
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT6LCSXHS59uSr",
+        "DEMO_POLL_REFERENCE": "demo"
       },
       "secrets": {
         "required": [

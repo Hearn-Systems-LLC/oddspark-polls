@@ -22,7 +22,7 @@ import {
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { buildRemoteDeployConfig } from "./deploy-config.mjs";
+import { buildRemoteDeployConfig, parseJsonc } from "./deploy-config.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const envName = process.argv[2];
@@ -120,61 +120,6 @@ async function assertNoLocalSecretValues(directory) {
       `Local secret material reached build artifacts: ${leakedNames.join(", ")}`,
     );
   }
-}
-
-/**
- * Strip JSONC // line comments and trailing commas with a real scanner —
- * regexes corrupt string contents containing "//" or ", }".
- */
-function parseJsonc(text) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      out += ch;
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-      out += "\n";
-      continue;
-    }
-    out += ch;
-  }
-  // Remove trailing commas (`,` followed only by whitespace before } or ]),
-  // again string-aware.
-  const chars = [...out];
-  inString = false;
-  escaped = false;
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === ",") {
-      let j = i + 1;
-      while (j < chars.length && /\s/.test(chars[j])) j++;
-      if (chars[j] === "}" || chars[j] === "]") chars[i] = " ";
-    }
-  }
-  return JSON.parse(chars.join(""));
 }
 
 // 1. Build for target env. An empty environment-specific dev-vars file keeps

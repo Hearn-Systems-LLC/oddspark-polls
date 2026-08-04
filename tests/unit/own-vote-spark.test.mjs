@@ -6,7 +6,11 @@ const barComponentSource = readFileSync(
   "utf8",
 );
 const tallySource = readFileSync("src/components/results-tally.astro", "utf8");
-const pollPageSource = readFileSync("src/pages/[reference].astro", "utf8");
+const deliverySource = readFileSync("src/lib/poll-delivery.ts", "utf8");
+const pollSurfaceSource = readFileSync(
+  "src/components/poll-voting-surface.astro",
+  "utf8",
+);
 const resultsPageSource = readFileSync(
   "src/pages/[reference]/results.astro",
   "utf8",
@@ -19,13 +23,13 @@ const sparkSource = readFileSync("src/scripts/results-spark.ts", "utf8");
 
 describe("own-vote spark wiring contract (Story 1.10, AC #6)", () => {
   it("threads yourBallotOptionIds from the counted confirmation into ResultsTally", () => {
-    expect(pollPageSource).toContain("yourBallotOptionIds");
-    expect(pollPageSource).toMatch(
+    expect(deliverySource).toContain("yourBallotOptionIds");
+    expect(deliverySource).toMatch(
       /yourBallotOptionIds = selections\.map\(\(option\) => option\.id\)/,
     );
     // Only the fresh confirmation render marks bars — an already-voted or
     // replayed visit keeps the paint still.
-    expect(pollPageSource).toMatch(
+    expect(pollSurfaceSource).toMatch(
       /yourBallotOptionIds=\{\s*outcome\?\.code === "counted" \? yourBallotOptionIds : undefined\s*\}/,
     );
   });

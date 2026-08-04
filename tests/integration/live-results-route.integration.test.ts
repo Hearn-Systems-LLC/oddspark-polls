@@ -108,6 +108,7 @@ function requestContext(): RequestContext {
     csrfRejected: false,
     authorizationDenied: false,
     resultsLookupFailed: false,
+    demoUnavailable: false,
     voteRejection: false,
     providerOutcome: "none",
   };

@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- The landing page now embeds the configured live Demo Poll with its ordinary
+  ballot, CAPTCHA-backed Vote path, live Tally, trust claims, canonical Share
+  link, and accessible no-JavaScript/read-only states. The owner can reset a
+  non-empty eligible Demo through a confirmed atomic aggregate replacement
+  that preserves the public link while clearing prior Vote-owned facts.
 - Product landing page at `/`: a plain-language statement, technical build
   account, public repository link, create entry, and Discover link replace the
   foundation component showcase.
@@ -76,8 +81,9 @@ production on every merge, but no version has been cut or tagged.
   every response so a user can quote it in a report.
 - Design-token stylesheet derived from DESIGN.md, with OS-preference light/dark mode and a
   progressive-enhancement toggle that persists the override.
-- Six-step deploy gate (tests → build → staging migrate → staging deploy → staging smoke →
-  production migrate → production deploy) in GitHub Actions.
+- Evidence-gated deploy workflow (tests/build → staging Demo preflight,
+  migrate, deploy, smoke → production Demo preflight, migrate, deploy, smoke)
+  in GitHub Actions.
 - Forward-only D1 migrations with a checksum manifest and a CI guard that rejects edits to
   committed migrations or out-of-order numbering.
 - Masked secret-provisioning helper for Better Auth and OAuth credentials that keeps values

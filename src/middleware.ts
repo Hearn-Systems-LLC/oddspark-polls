@@ -112,6 +112,7 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     csrfRejected: false,
     authorizationDenied: false,
     resultsLookupFailed: false,
+    demoUnavailable: false,
     voteRejection: false,
     providerOutcome: "none",
   };
@@ -313,6 +314,7 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
           sessionLookupFailed: rc.sessionLookupFailed,
           voteRejection: rc.voteRejection,
           resultsLookupFailed: rc.resultsLookupFailed,
+          demoUnavailable: rc.demoUnavailable,
           csrfRejected: rc.csrfRejected,
           authorizationDenied: rc.authorizationDenied,
         },

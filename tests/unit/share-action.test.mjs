@@ -18,7 +18,10 @@ const creatorDetail = readFileSync(
   "src/pages/creator/polls/[pollId].astro",
   "utf8",
 );
-const votingPage = readFileSync("src/pages/[reference].astro", "utf8");
+const votingSurface = readFileSync(
+  "src/components/poll-voting-surface.astro",
+  "utf8",
+);
 const resultsPage = readFileSync("src/pages/[reference]/results.astro", "utf8");
 const canonicalUrl = "https://polls.example/share-me";
 
@@ -263,15 +266,15 @@ describe("share-action page wiring (Story 1.13)", () => {
   });
 
   it("wires the voting page outside the tally root", () => {
-    expect(votingPage).toContain("share-action.ts");
-    const tallyIndex = votingPage.indexOf("<ResultsTally");
-    const renderedShareIndex = votingPage.indexOf("<ShareAction");
-    const mainCloseIndex = votingPage.indexOf("</main>");
+    expect(votingSurface).toContain("share-action.ts");
+    const tallyIndex = votingSurface.indexOf("<ResultsTally");
+    const renderedShareIndex = votingSurface.indexOf("<ShareAction");
+    const surfaceCloseIndex = votingSurface.indexOf("</section>", renderedShareIndex);
     expect(tallyIndex).toBeGreaterThan(-1);
     expect(renderedShareIndex).toBeGreaterThan(tallyIndex);
-    expect(mainCloseIndex).toBeGreaterThan(renderedShareIndex);
-    expect(votingPage.slice(renderedShareIndex, mainCloseIndex)).toContain(
-      'canonicalUrl={`${Astro.url.origin}/${poll.canonicalReference}`}',
+    expect(surfaceCloseIndex).toBeGreaterThan(renderedShareIndex);
+    expect(votingSurface.slice(renderedShareIndex, surfaceCloseIndex)).toContain(
+      "canonicalUrl={canonicalUrl}",
     );
   });
 

@@ -64,6 +64,11 @@ if (res.status !== 200) {
 
 const html = await res.text();
 
+const fail = (message) => {
+  console.error(`smoke: ${message}`);
+  process.exit(1);
+};
+
 if (!html.includes(MARKER)) {
   console.error(
     `smoke: missing token marker ${MARKER} in response body from ${url}`,
@@ -78,7 +83,31 @@ if (!html.includes(tokenHex)) {
   process.exit(1);
 }
 
-console.log(`smoke: ok ${url} (200 + token marker + token hex ${tokenHex})`);
+const demoQuestion = "Best day for a long weekend?";
+const optionLabels = ["Friday", "Monday", "Either works"];
+const optionPositions = optionLabels.map((label) => html.indexOf(`>${label}<`));
+if (!html.includes(demoQuestion)) fail("missing the configured Demo question");
+if (optionPositions.some((position) => position < 0)) {
+  fail("missing one or more configured Demo option labels");
+}
+if (!(optionPositions[0] < optionPositions[1] && optionPositions[1] < optionPositions[2])) {
+  fail("configured Demo option labels are not in the required order");
+}
+if (!/<form\b[^>]*\baction="\/"[^>]*\bdata-vote-form\b|<form\b[^>]*\bdata-vote-form\b[^>]*\baction="\/"/u.test(html)) {
+  fail("missing the real root Demo vote form");
+}
+const canonicalDemoUrl = new URL("demo", url.endsWith("/") ? url : `${url}/`).toString();
+if (!html.includes(canonicalDemoUrl)) fail("missing the canonical Demo Share URL");
+if (!html.includes("ONE VOTE PER BROWSER")) fail("missing the Session trust claim");
+if (!html.includes("HUMAN CHECK ON SUBMIT")) fail("missing the CAPTCHA trust claim");
+if (html.includes("ONE VOTE PER NETWORK")) fail("unexpected IP trust claim");
+if (!html.includes('aria-label="Current Demo Poll results"')) {
+  fail("missing the configured Demo Results group");
+}
+
+console.log(
+  `smoke: ok ${url} (200 + token marker + exact configured Demo + token hex ${tokenHex})`,
+);
 
 // Auth liveness: createAuth throws at request time when any of the six auth
 // bindings is missing, so a deploy with a forgotten secret would pass the

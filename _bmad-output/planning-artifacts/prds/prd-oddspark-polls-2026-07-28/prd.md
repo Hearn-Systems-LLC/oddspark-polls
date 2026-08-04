@@ -2,7 +2,7 @@
 title: oddspark-polls PRD
 status: final
 created: 2026-07-28
-updated: 2026-07-29
+updated: 2026-08-04
 ---
 
 # PRD: oddspark-polls
@@ -298,7 +298,7 @@ One designated Demo Poll is pinned to the landing page and votable by any visito
 The source repository is public and presentable: a README covering what/why/how, and architecture notes sufficient for a technical reader to evaluate the work.
 **Consequences (testable):**
 - README explains the product, the stack, and how to run it.
-- No secrets or personal data in the repository history.
+- Repository history contains no credentials, tokens, runtime or user data, or unrelated or accidental personal data. Intentional public GitHub commit attribution is permitted.
 
 ## 5. Cross-Cutting NFRs
 

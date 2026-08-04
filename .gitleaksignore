@@ -1,0 +1,4 @@
+# Exact historical false positive: a generated SHA-256 content hash in the
+# BMad files manifest. The path contains "key", which activates the generic
+# API-key rule; this fingerprint suppresses only that one immutable finding.
+c5197a46636ccb091f44a95edb8fbddb3a5b20b1:_bmad/_config/files-manifest.csv:generic-api-key:60

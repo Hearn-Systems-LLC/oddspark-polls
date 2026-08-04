@@ -42,9 +42,9 @@ Verbatim from `_bmad-output/planning-artifacts/epics.md` § Story 3.4 (lines 772
   - [x] ADD integration coverage in the workerd project, split across the two established harnesses — do not mix them: (a) `experimental_AstroContainer` page-render harness (model on `tests/integration/discover-route.integration.test.ts:38-53`, which bypasses middleware) owns `GET /` 200 HTML, the `405` + `Allow: GET, HEAD` gate, no `noindex` in head, self-referencing canonical on the request origin, and the served marker carrying the current `--color-solar-dark` hex; (b) the full middleware-chain harness via `tests/integration/astro-middleware-shim.ts` (model on `tests/integration/csrf.integration.test.ts:94-116`) owns `x-request-id` presence and exactly one telemetry record. Note for the 405 probe: through the real chain, a non-GET/HEAD request without same-origin headers is 403'd by `checkCsrf` (`src/lib/csrf.ts:129-132`) before the page's gate runs — assert the 405 in the container harness, and if a full-chain non-GET probe is added, send same-origin headers.
   - [x] Prove both type families are actually bound — Newsreader on the opening statement, Courier Prime on the build account — via computed-style assertions written fresh in the e2e layer. The retired placeholder spec's name ("both type families in use") overpromised: it never asserted fonts (it checked only the marker, heading, "Vote" button, and "47% · 122"), so there is no existing pattern to mirror.
 
-- [ ] Task 3: Replace the placeholder e2e spec and capture browser proof (AC: #1, #2)
-  - [ ] DELETE `tests/e2e/placeholder.spec.ts` and ADD `tests/e2e/landing.spec.mjs`. `playwright.config.ts` has no explicit `testMatch`; the default glob already covers `.spec.mjs` (proven by `discover.spec.mjs`). PORT, do not lose, the coverage the placeholder spec uniquely carries: the mode toggle persists `oddspark-mode` and applies `data-mode`, and focus-visible rings resolve to exactly 2px solid with 2px offset. The new spec additionally proves: opening statement, build account, and smoke marker visible; all three entries navigate (Discover → `/discover`; create entry → `/creator/new` redirecting to `/sign-in?return=%2Fcreator%2Fnew` when signed out — assert the encoded spelling; repository link carries the exact URL); the fresh computed-style font bindings from Task 2; keyboard focus order follows reading order; clean console and network log.
-  - [ ] Capture and inspect committed proof under `test-results/story-3-4-landing-proof/` at 375px dark and 1280px light (matching the `story-3-2-discover-proof` convention): single column holds, 68ch measure respected, no horizontal overflow, 44px+ targets on the create entry, visible focus rings, no card/box/shadow styling. Inspect the screenshots yourself; never ask the user for visual proof.
+- [x] Task 3: Replace the placeholder e2e spec and capture browser proof (AC: #1, #2)
+  - [x] DELETE `tests/e2e/placeholder.spec.ts` and ADD `tests/e2e/landing.spec.mjs`. `playwright.config.ts` has no explicit `testMatch`; the default glob already covers `.spec.mjs` (proven by `discover.spec.mjs`). PORT, do not lose, the coverage the placeholder spec uniquely carries: the mode toggle persists `oddspark-mode` and applies `data-mode`, and focus-visible rings resolve to exactly 2px solid with 2px offset. The new spec additionally proves: opening statement, build account, and smoke marker visible; all three entries navigate (Discover → `/discover`; create entry → `/creator/new` redirecting to `/sign-in?return=%2Fcreator%2Fnew` when signed out — assert the encoded spelling; repository link carries the exact URL); the fresh computed-style font bindings from Task 2; keyboard focus order follows reading order; clean console and network log.
+  - [x] Capture and inspect committed proof under `test-results/story-3-4-landing-proof/` at 375px dark and 1280px light (matching the `story-3-2-discover-proof` convention): single column holds, 68ch measure respected, no horizontal overflow, 44px+ targets on the create entry, visible focus rings, no card/box/shadow styling. Inspect the screenshots yourself; never ask the user for visual proof.
 
 - [ ] Task 4: Documentation sync and repository gate (AC: all)
   - [ ] UPDATE `CHANGELOG.md` under `## [Unreleased]` for the user-observable change: the root URL now serves the product landing page (statement, build account, repository link, create entry, Discover link) replacing the foundation showcase.
@@ -168,11 +168,13 @@ OpenAI Codex (GPT-5)
 - 2026-08-04 GREEN/REFACTOR: the focused landing suite passed 6/6; full `pnpm test` passed 75 files / 1,196 tests and `pnpm check` passed under Node 24.18.0.
 - 2026-08-04 RED: the exact smoke-marker source assertion caught an extra class, and the new AstroContainer tests exposed that the workerd transform reduced `tokens.css?raw` to an empty CSS side-effect module.
 - 2026-08-04 GREEN/REFACTOR: restored the exact marker shape and added a narrowly scoped virtual raw-token module in the integration config; the focused route/middleware suite passed 3/3, computed font proof passed 1/1, full `pnpm test` passed 77 files / 1,199 tests, and `pnpm check` passed.
+- 2026-08-04 BROWSER: the replacement landing spec passed 4/4 and generated inspected 375px-dark and 1280px-light proof. A later full-suite run was interrupted by a host removable-volume `EPERM`; the Results case active at interruption passed 1/1 when rerun in isolation after access recovery, confirming the stop was environmental rather than a landing regression.
 
 ### Completion Notes List
 
 - Task 1: Replaced the foundation showcase with the indexable, self-canonical product landing page in statement → technical account/repository/smoke marker → create → Discover order. The page remains one SSR column, retains the mode toggle and smoke coupling, uses one anchor-form primary action, and adds no data/session read, cache policy, route log, or client script.
 - Task 2: Added exact source contracts, direct-container route/indexability/smoke coverage, isolated full-chain request-ID/telemetry coverage, and real-browser computed Newsreader/Courier Prime assertions. The integration-only Vite hook preserves the production `?raw` semantics that the workerd CSS transform otherwise discarded.
+- Task 3: Replaced the foundation placeholder browser spec with exact content/navigation, mode persistence, focus order/ring, computed-font, clean-log, and responsive geometry coverage. Inspected proof confirms the single-column 68ch silhouette, flat token-only blocks, 44px+ create target, and visible keyboard focus in mobile dark and desktop light.
 
 ### File List
 
@@ -180,8 +182,11 @@ OpenAI Codex (GPT-5)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
 - `src/pages/index.astro`
 - `tests/e2e/landing.spec.mjs`
+- `tests/e2e/placeholder.spec.ts` (deleted)
 - `tests/integration/landing-middleware.integration.test.ts`
 - `tests/integration/landing-route.integration.test.ts`
+- `test-results/story-3-4-landing-proof/landing-1280-light.png`
+- `test-results/story-3-4-landing-proof/landing-375-dark.png`
 - `tests/unit/landing-page.test.mjs`
 - `vitest.integration.config.ts`
 
@@ -189,3 +194,4 @@ OpenAI Codex (GPT-5)
 
 - 2026-08-04: Replaced the foundation showcase with the Story 3.4 product landing page and exact source-contract coverage.
 - 2026-08-04: Added isolated route, middleware, smoke-marker, and computed-font proof for the landing contract.
+- 2026-08-04: Replaced the placeholder browser spec and captured inspected mobile-dark and desktop-light landing proof.

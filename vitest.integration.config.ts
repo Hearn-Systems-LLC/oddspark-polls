@@ -3,8 +3,31 @@ import {
   readD1Migrations,
 } from "@cloudflare/vitest-pool-workers";
 import { getViteConfig } from "astro/config";
+import { readFileSync } from "node:fs";
 
 const migrations = await readD1Migrations("./db/migrations");
+const tokensCssUrl = new URL("./src/styles/tokens.css", import.meta.url);
+const rawTokensCssId = "\0oddspark:tokens-css-raw";
+
+// Astro's workerd test transform otherwise reduces CSS imports to side effects,
+// including Vite's `?raw` form. Preserve the production raw-string contract so
+// AstroContainer exercises the same smoke-marker guard as the built Worker.
+const rawTokensCssForWorkers = {
+  name: "oddspark-raw-tokens-css-for-workers-tests",
+  enforce: "pre" as const,
+  resolveId(source: string): string | undefined {
+    if (source.endsWith("/styles/tokens.css?raw")) {
+      return rawTokensCssId;
+    }
+    return undefined;
+  },
+  load(id: string): string | undefined {
+    if (id === rawTokensCssId) {
+      return `export default ${JSON.stringify(readFileSync(tokensCssUrl, "utf8"))};`;
+    }
+    return undefined;
+  },
+};
 
 /**
  * Integration project: Vitest 4 + @cloudflare/vitest-pool-workers 0.19
@@ -12,6 +35,7 @@ const migrations = await readD1Migrations("./db/migrations");
  */
 export default getViteConfig({
   plugins: [
+    rawTokensCssForWorkers,
     cloudflareTest({
       main: "./tests/integration/worker-entry.ts",
       wrangler: {

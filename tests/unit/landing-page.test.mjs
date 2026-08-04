@@ -35,8 +35,8 @@ describe("landing page source contract", () => {
   });
 
   it("keeps the exact technical account separate and names the complete stack", () => {
-    const buildAccount = visibleText(dataElement("data-landing-build-account"));
-    expect(buildAccount).toContain(buildAccountCopy);
+    const buildAccount = visibleText(dataElement("data-landing-build-copy"));
+    expect(buildAccount).toBe(buildAccountCopy);
     for (const technology of [
       "Workers",
       "D1",
@@ -58,6 +58,9 @@ describe("landing page source contract", () => {
     );
     expect(source).toContain(
       'data-smoke-marker="oddspark-token-solar"',
+    );
+    expect(source).toMatch(
+      /<p\s+class="label-caps"\s+data-smoke-marker="oddspark-token-solar"/,
     );
     expect(source).toContain("data-token-solar={solarHex}");
     expect(source).toContain("smoke · solar · {solarHex}");

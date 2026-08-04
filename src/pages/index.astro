@@ -65,7 +65,7 @@ const canonicalUrl = new URL(validatedPath, Astro.url.origin).href;
         </a>
         <!-- Token-derived smoke marker asserted by the staging smoke check -->
         <p
-          class="label-caps landing-smoke-marker"
+          class="label-caps"
           data-smoke-marker="oddspark-token-solar"
           data-token-solar={solarHex}
         >
@@ -136,7 +136,7 @@ const canonicalUrl = new URL(validatedPath, Astro.url.origin).href;
     color: var(--color-text);
   }
 
-  .landing-smoke-marker {
+  [data-smoke-marker="oddspark-token-solar"] {
     margin: var(--space-4) 0 0;
   }
 

@@ -105,6 +105,8 @@ function requestContext(): RequestContext {
     pollId: null,
     sessionExpired: false,
     sessionLookupFailed: false,
+    csrfRejected: false,
+    authorizationDenied: false,
     resultsLookupFailed: false,
     voteRejection: false,
     providerOutcome: "none",

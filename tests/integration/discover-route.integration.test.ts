@@ -2,12 +2,16 @@ import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { experimental_AstroContainer as AstroContainer } from "astro/container";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createModerationPersistence } from "../../src/adapters/d1/index";
+import { moderatePollDiscovery } from "../../src/modules/discovery/index";
 import Discover from "../../src/pages/discover.astro";
+import type { PollId, UserId } from "../../src/shared/domain/index";
 
 type MigrationTestEnv = Cloudflare.Env & { TEST_MIGRATIONS: D1Migration[] };
 const testEnv = env as MigrationTestEnv;
 const ORIGIN = "https://polls.example.test";
 const OWNER = "discover-route-owner";
+const ADMINISTRATOR = "discover-route-administrator" as UserId;
 
 function idFor(index: number): string {
   return `30000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
@@ -48,8 +52,28 @@ async function render(request: Request): Promise<Response> {
   return response;
 }
 
+async function moderate(
+  pollId: string,
+  intent: "delist" | "clear_delisted",
+): Promise<void> {
+  const result = await moderatePollDiscovery(
+    {
+      applyModeration: createModerationPersistence(testEnv.DB).applyModeration,
+      nowMs: () => Date.now(),
+    },
+    { userId: ADMINISTRATOR, role: "administrator" },
+    pollId as PollId,
+    intent,
+  );
+  expect(result).toEqual({
+    ok: true,
+    value: { kind: "updated", intent },
+  });
+}
+
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+  await testEnv.DB.prepare("DELETE FROM moderation_action").run();
   await testEnv.DB.prepare("DELETE FROM vote_selection").run();
   await testEnv.DB.prepare("DELETE FROM voter_claim").run();
   await testEnv.DB.prepare("DELETE FROM vote").run();
@@ -63,6 +87,11 @@ beforeEach(async () => {
     "INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?1, 'Discover Route', 'discover-route@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z')",
   )
     .bind(OWNER)
+    .run();
+  await testEnv.DB.prepare(
+    "INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at, role) VALUES (?1, 'Discover Administrator', 'discover-route-administrator@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z', 'administrator')",
+  )
+    .bind(ADMINISTRATOR)
     .run();
 });
 
@@ -108,6 +137,36 @@ describe("SSR /discover", () => {
     expect(html).not.toContain(idFor(21));
     expect(html).not.toContain("LISTED");
     expect(html).not.toContain("creator_only");
+  });
+
+  it("reflects real delist and clear commands immediately while prior Unlisted stays absent", async () => {
+    await seed(41, "Listed directory choice?");
+    await seed(42, "Unlisted private choice?");
+    await testEnv.DB.prepare(
+      "UPDATE poll SET discovery_state = 'unlisted' WHERE id = ?1",
+    )
+      .bind(idFor(42))
+      .run();
+
+    const initial = await (await render(new Request(`${ORIGIN}/discover`))).text();
+    expect(initial).toContain('href="/route-ref-41"');
+    expect(initial).not.toContain('href="/route-ref-42"');
+
+    await moderate(idFor(41), "delist");
+    await moderate(idFor(42), "delist");
+    const delisted = await (
+      await render(new Request(`${ORIGIN}/discover`))
+    ).text();
+    expect(delisted).not.toContain('href="/route-ref-41"');
+    expect(delisted).not.toContain('href="/route-ref-42"');
+
+    await moderate(idFor(41), "clear_delisted");
+    await moderate(idFor(42), "clear_delisted");
+    const cleared = await (
+      await render(new Request(`${ORIGIN}/discover`))
+    ).text();
+    expect(cleared).toContain('href="/route-ref-41"');
+    expect(cleared).not.toContain('href="/route-ref-42"');
   });
 
   it("escapes a domain question exactly once", async () => {

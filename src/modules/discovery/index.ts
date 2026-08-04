@@ -6,12 +6,18 @@ import type {
   ApplicationError,
   Result,
 } from "../../shared/application/index";
-import type {
-  DiscoveryState,
-  PollId,
-  PollType,
-  UserId,
+import {
+  effectivePollStatus,
+  type DiscoveryState,
+  type PollId,
+  type PollStatus,
+  type PollType,
+  type UserId,
 } from "../../shared/domain/index";
+import {
+  hasAdministratorCapability,
+  type CreatorPrincipal,
+} from "../identity/index";
 
 export const DISCOVERY_COPY = {
   unlistedDescription:
@@ -156,6 +162,169 @@ export async function setPollListing(
   return {
     ok: true,
     value: { kind: result, state: requested },
+  };
+}
+
+export const MODERATION_COPY = {
+  accessRequired: "Administrator access required.",
+  lookupLabel: "POLL LINK OR REFERENCE",
+  findPoll: "FIND POLL",
+  invalidTarget: "Enter a valid Poll link or reference from this site.",
+  invalidTransition: "This Poll isn't Delisted.",
+  loadFailed: "The Poll couldn't be loaded. Try again.",
+  delist: "DELIST",
+  clearDelisted: "CLEAR DELISTED",
+  delisted: "Poll delisted.",
+  cleared: "Delisting cleared.",
+  failed:
+    "The moderation change couldn't be confirmed. Reload before trying again.",
+} as const;
+
+export type AdministratorModerationIntent = "delist" | "clear_delisted";
+
+export type AdministratorModerationActor = Pick<
+  CreatorPrincipal,
+  "userId" | "role"
+>;
+
+export type ModerationPersistenceOutcome =
+  | "updated"
+  | "unchanged"
+  | "not_found"
+  | "authorization_denied"
+  | "invalid_transition";
+
+export type ApplyModerationPort = (input: {
+  actorUserId: string;
+  pollId: PollId;
+  intent: AdministratorModerationIntent;
+  updatedAtMs: number;
+}) => Promise<ModerationPersistenceOutcome>;
+
+export type ModeratePollDiscoveryDeps = {
+  applyModeration: ApplyModerationPort;
+  nowMs: () => number;
+};
+
+export type ModeratePollDiscoveryOutcome = {
+  kind: "updated" | "unchanged";
+  intent: AdministratorModerationIntent;
+};
+
+function moderationAuthorizationError(): ApplicationError {
+  return {
+    code: "authorization_denied",
+    message: MODERATION_COPY.accessRequired,
+  };
+}
+
+function moderationPersistenceFailed(): ApplicationError {
+  return {
+    code: "poll_moderation_failed",
+    message: MODERATION_COPY.failed,
+  };
+}
+
+/**
+ * Discovery-owned Administrator command. The principal role is an early
+ * capability check only; the persistence port must repeat it against live D1
+ * truth inside the same transaction as the state transition.
+ */
+export async function moderatePollDiscovery(
+  deps: ModeratePollDiscoveryDeps,
+  actor: AdministratorModerationActor,
+  pollId: PollId,
+  intent: AdministratorModerationIntent,
+): Promise<Result<ModeratePollDiscoveryOutcome>> {
+  if (!hasAdministratorCapability(actor)) {
+    return { ok: false, error: moderationAuthorizationError() };
+  }
+
+  let outcome: ModerationPersistenceOutcome;
+  try {
+    outcome = await deps.applyModeration({
+      actorUserId: actor.userId,
+      pollId,
+      intent,
+      updatedAtMs: deps.nowMs(),
+    });
+  } catch {
+    return {
+      ok: false,
+      error: moderationPersistenceFailed(),
+    };
+  }
+
+  if (outcome === "updated" || outcome === "unchanged") {
+    return { ok: true, value: { kind: outcome, intent } };
+  }
+  if (outcome === "authorization_denied") {
+    return { ok: false, error: moderationAuthorizationError() };
+  }
+  if (outcome === "not_found") {
+    return { ok: false, error: notFoundError() };
+  }
+  return {
+    ok: false,
+    error: {
+      code: "invalid_moderation_transition",
+      message: MODERATION_COPY.invalidTransition,
+    },
+  };
+}
+
+export type ModerationTargetRecord = {
+  pollId: PollId;
+  question: string;
+  canonicalReference: string;
+  discoveryState: DiscoveryState;
+  deadlineMs: number | null;
+  closedAtMs: number | null;
+};
+
+export type ModerationTarget = ModerationTargetRecord & {
+  status: PollStatus;
+};
+
+export type LoadModerationTargetPort = (
+  reference: string,
+) => Promise<ModerationTargetRecord | null>;
+
+export type QueryModerationTargetDeps = {
+  loadTarget: LoadModerationTargetPort;
+  nowMs: () => number;
+};
+
+export async function queryModerationTarget(
+  deps: QueryModerationTargetDeps,
+  actor: AdministratorModerationActor,
+  reference: string,
+): Promise<Result<ModerationTarget>> {
+  if (!hasAdministratorCapability(actor)) {
+    return { ok: false, error: moderationAuthorizationError() };
+  }
+
+  let target: ModerationTargetRecord | null;
+  try {
+    target = await deps.loadTarget(reference);
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "poll_moderation_lookup_failed",
+        message: MODERATION_COPY.loadFailed,
+      },
+    };
+  }
+  if (!target) {
+    return { ok: false, error: notFoundError() };
+  }
+  return {
+    ok: true,
+    value: {
+      ...target,
+      status: effectivePollStatus(target, deps.nowMs()),
+    },
   };
 }
 

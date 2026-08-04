@@ -99,12 +99,49 @@ describe("identity delivery middleware", () => {
     expect(response.status).toBe(200);
     expect(observedUserId).toBe(userId);
     expect(context.locals.requestContext?.principal?.userId).toBe(userId);
+    expect(context.locals.principal?.role).toBe("creator");
     expect(context.locals.requestContext?.csrfToken?.value).toBeTruthy();
     expect(response.headers.getSetCookie()).toEqual(
       expect.arrayContaining([
         expect.stringContaining("oddspark.creator_session_seen=1"),
       ]),
     );
+  });
+
+  it("projects the live internal-user role independently of linked providers", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const now = new Date().toISOString();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare("UPDATE user SET role = 'administrator' WHERE id = ?").bind(
+        userId,
+      ),
+      testEnv.DB.prepare(
+        `INSERT INTO account
+          (id, account_id, provider_id, user_id, created_at, updated_at)
+         VALUES (?, ?, 'google', ?, ?, ?)`,
+      ).bind(crypto.randomUUID(), `google-${crypto.randomUUID()}`, userId, now, now),
+      testEnv.DB.prepare(
+        `INSERT INTO account
+          (id, account_id, provider_id, user_id, created_at, updated_at)
+         VALUES (?, ?, 'github', ?, ?, ?)`,
+      ).bind(crypto.randomUUID(), `github-${crypto.randomUUID()}`, userId, now, now),
+    ]);
+    const context = makeContext(
+      new Request("https://polls.example.test/creator", {
+        headers: { cookie },
+      }),
+    );
+
+    const response = (await onRequest(
+      context,
+      (() => new Response("administrator")) as never,
+    )) as Response;
+
+    expect(response.status).toBe(200);
+    expect(context.locals.principal).toMatchObject({
+      userId,
+      role: "administrator",
+    });
   });
 
   it("recognizes an expired session cookie and carries expiry context", async () => {

@@ -28,7 +28,7 @@ function resolveBaseURL(value: string): string {
   return url.origin;
 }
 
-export function createAuthOptions(env: AuthEnv): BetterAuthOptions {
+export function createAuthOptions(env: AuthEnv) {
   const baseURL = resolveBaseURL(env.BETTER_AUTH_URL);
   const defaultAuthErrorURL = new URL(SIGN_IN_DENIED_PATH, baseURL).toString();
 
@@ -100,6 +100,15 @@ export function createAuthOptions(env: AuthEnv): BetterAuthOptions {
         createdAt: "created_at",
         updatedAt: "updated_at",
       },
+      additionalFields: {
+        role: {
+          type: ["creator", "administrator"],
+          required: true,
+          defaultValue: "creator",
+          input: false,
+          returned: true,
+        },
+      },
     },
     session: {
       modelName: "session",
@@ -148,7 +157,7 @@ export function createAuthOptions(env: AuthEnv): BetterAuthOptions {
         updatedAt: "updated_at",
       },
     },
-  };
+  } satisfies BetterAuthOptions;
 }
 
 export function createAuth(env: AuthEnv) {

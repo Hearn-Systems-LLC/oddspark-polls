@@ -2,13 +2,21 @@ import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { experimental_AstroContainer as AstroContainer } from "astro/container";
 import { beforeEach, describe, expect, it } from "vitest";
+import { createModerationPersistence } from "../../src/adapters/d1/index";
+import { moderatePollDiscovery } from "../../src/modules/discovery/index";
 import PollPage from "../../src/pages/[reference].astro";
 import ResultsPage from "../../src/pages/[reference]/results.astro";
+import type { PollId, UserId } from "../../src/shared/domain/index";
 
 type MigrationTestEnv = Cloudflare.Env & { TEST_MIGRATIONS: D1Migration[] };
 const testEnv = env as MigrationTestEnv;
 const OWNER = "indexability-owner";
+const ADMINISTRATOR = "indexability-administrator" as UserId;
 const ORIGIN = "https://polls.example.test";
+
+function idFor(index: number): PollId {
+  return `80000000-0000-4000-8000-${String(index).padStart(12, "0")}` as PollId;
+}
 
 async function seed(input: {
   index: number;
@@ -17,7 +25,7 @@ async function seed(input: {
   deadlineMs?: number | null;
   alias?: string;
 }): Promise<string> {
-  const id = `80000000-0000-4000-8000-${String(input.index).padStart(12, "0")}`;
+  const id = idFor(input.index);
   const reference = `canonical-${input.index}`;
   const now = Date.now();
   await testEnv.DB.batch([
@@ -53,6 +61,36 @@ async function seed(input: {
   return reference;
 }
 
+async function moderate(
+  pollId: PollId,
+  intent: "delist" | "clear_delisted",
+): Promise<void> {
+  const result = await moderatePollDiscovery(
+    {
+      applyModeration: createModerationPersistence(testEnv.DB).applyModeration,
+      nowMs: () => Date.now(),
+    },
+    { userId: ADMINISTRATOR, role: "administrator" },
+    pollId,
+    intent,
+  );
+  expect(result).toEqual({
+    ok: true,
+    value: { kind: "updated", intent },
+  });
+}
+
+function stableMain(html: string): string {
+  const main = html.match(/<main\b[\s\S]*<\/main>/)?.[0];
+  if (!main) throw new Error("missing public main landmark");
+  return main
+    .replace(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
+      "[generated-id]",
+    )
+    .replace(/data-live-initial-render-at="\d+"/g, 'data-live-initial-render-at="[now]"');
+}
+
 async function render(
   component: typeof PollPage | typeof ResultsPage,
   path: string,
@@ -74,6 +112,7 @@ async function render(
 
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+  await testEnv.DB.prepare("DELETE FROM moderation_action").run();
   await testEnv.DB.prepare("DELETE FROM vote_selection").run();
   await testEnv.DB.prepare("DELETE FROM voter_claim").run();
   await testEnv.DB.prepare("DELETE FROM vote").run();
@@ -84,6 +123,11 @@ beforeEach(async () => {
     "INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?1, 'Indexability', 'indexability@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z')",
   )
     .bind(OWNER)
+    .run();
+  await testEnv.DB.prepare(
+    "INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at, role) VALUES (?1, 'Indexability Administrator', 'indexability-administrator@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z', 'administrator')",
+  )
+    .bind(ADMINISTRATOR)
     .run();
 });
 
@@ -140,5 +184,65 @@ describe("Results-page indexing", () => {
     expect(response.headers.get("x-robots-tag")).toBe("noindex");
     expect(html).toContain('name="robots" content="noindex"');
     expect(html).not.toContain('rel="canonical"');
+  });
+
+  it("keeps direct Poll and Results content unchanged and private through a real delist cycle", async () => {
+    const index = 5;
+    const alias = "direct-delisted-link";
+    const reference = await seed({
+      index,
+      state: "listed",
+      alias,
+    });
+    const initialPoll = await render(PollPage, `/${reference}`, reference);
+    const initialResults = await render(
+      ResultsPage,
+      `/${alias}/results`,
+      alias,
+    );
+    const initialPollMain = stableMain(await initialPoll.text());
+    const initialResultsMain = stableMain(await initialResults.text());
+
+    await moderate(idFor(index), "delist");
+
+    const delistedPoll = await render(PollPage, `/${reference}`, reference);
+    const delistedResults = await render(
+      ResultsPage,
+      `/${alias}/results`,
+      alias,
+    );
+    const delistedPollHtml = await delistedPoll.text();
+    const delistedResultsHtml = await delistedResults.text();
+    expect(delistedPoll.status).toBe(200);
+    expect(delistedResults.status).toBe(200);
+    expect(delistedPoll.headers.get("x-robots-tag")).toBe("noindex");
+    expect(delistedResults.headers.get("x-robots-tag")).toBe("noindex");
+    expect(stableMain(delistedPollHtml)).toBe(initialPollMain);
+    expect(stableMain(delistedResultsHtml)).toBe(initialResultsMain);
+    expect(delistedPollHtml).toContain(
+      `rel="canonical" href="${ORIGIN}/${reference}"`,
+    );
+    expect(delistedResultsHtml).toContain(
+      `rel="canonical" href="${ORIGIN}/${reference}"`,
+    );
+
+    const publicMarkup = `${stableMain(delistedPollHtml)}\n${stableMain(delistedResultsHtml)}`;
+    expect(publicMarkup).toContain("Indexability 5?");
+    expect(publicMarkup).toContain("Yes");
+    expect(publicMarkup).not.toContain(OWNER);
+    expect(publicMarkup).not.toContain("indexability@example.test");
+    expect(publicMarkup).not.toMatch(
+      /administrator|delisted|moderation|reason|appeal/iu,
+    );
+
+    await moderate(idFor(index), "clear_delisted");
+    const clearedPoll = await render(PollPage, `/${reference}`, reference);
+    const clearedResults = await render(
+      ResultsPage,
+      `/${alias}/results`,
+      alias,
+    );
+    expect(stableMain(await clearedPoll.text())).toBe(initialPollMain);
+    expect(stableMain(await clearedResults.text())).toBe(initialResultsMain);
   });
 });

@@ -7,7 +7,10 @@ import { betterAuth } from "better-auth";
 import { experimental_AstroContainer as AstroContainer } from "astro/container";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthOptions } from "../../src/adapters/auth/index";
+import * as d1Adapter from "../../src/adapters/d1/index";
 import { onRequest } from "../../src/middleware";
+import { moderatePollDiscovery } from "../../src/modules/discovery/index";
+import type { PollId } from "../../src/shared/domain/index";
 import CreatorPollDetail from "../../src/pages/creator/polls/[pollId].astro";
 
 type AuthTestEnv = Cloudflare.Env & {
@@ -204,6 +207,22 @@ beforeEach(async () => {
 });
 
 const DETAIL = "https://polls.example.test/creator/polls/11111111-1111-4111-8111-111111111111";
+const DELISTED_CREATOR_COPY =
+  "Delisted by the Administrator. The link still works and Votes still count; the Poll no longer appears on Discover. Only the Administrator can reverse this.";
+
+function renderedDetail(html: string): string {
+  const start = html.indexOf("data-creator-detail");
+  if (start < 0) throw new Error("Missing creator detail region");
+  return html.slice(start);
+}
+
+function readOnlyListing(html: string): string {
+  const section = /<section[^>]*data-listing-readonly[^>]*>[\s\S]*?<\/section>/.exec(
+    html,
+  )?.[0];
+  if (!section) throw new Error("Missing read-only listing region");
+  return section;
+}
 
 describe("creator poll lifecycle route middleware (Story 1.12)", () => {
   it("redirects a signed-out POST to sign-in with return path", async () => {
@@ -515,7 +534,49 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
     });
   });
 
-  it("refuses a delisted Poll and re-renders persisted truth", async () => {
+  it("renders one semantic inert listing row for a Delisted Poll", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    await testEnv.DB.prepare(
+      "UPDATE poll SET discovery_state = 'delisted' WHERE id = ?1",
+    )
+      .bind(pollId)
+      .run();
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        headers: { cookie },
+      }),
+    );
+
+    const response = await runRealRoute(context, pollId);
+    const html = await response.text();
+    const detail = renderedDetail(html);
+    const listing = readOnlyListing(detail);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(detail.match(/data-listing-badge/g)).toHaveLength(1);
+    expect(detail).toMatch(/data-listing-badge[^>]*data-state="delisted"/);
+    expect(html.split(DELISTED_CREATOR_COPY)).toHaveLength(2);
+    expect(listing).toContain("DELISTED");
+    expect(listing).toContain('role="group"');
+    expect(listing).toContain('aria-labelledby="detail-listing-state"');
+    expect(listing).toContain('aria-describedby="detail-listing-description"');
+    expect(listing).not.toContain("<form");
+    expect(listing).not.toContain("<input");
+    expect(listing).not.toContain("<button");
+    expect(listing).not.toContain("SAVE LISTING");
+    expect(detail).not.toContain("data-listing-control");
+    expect(detail).not.toContain('name="listing"');
+    expect(detail).not.toContain("detail-listing-listed");
+    expect(detail).not.toContain("detail-listing-unlisted");
+    // The Delisted treatment replaces only listing mutation; all other
+    // creator lifecycle/security controls remain present.
+    expect(detail).toContain("data-poll-definition-form");
+    expect(detail).toContain("data-security-toggles");
+  });
+
+  it("refuses a forged Delisted listing update and re-renders persisted truth", async () => {
     const { cookie, userId } = await createAuthenticatedCookie();
     const pollId = await seedPoll(userId);
     await testEnv.DB.prepare(
@@ -539,16 +600,127 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
 
     const response = await runRealRoute(context, pollId);
     const html = await response.text();
+    const detail = renderedDetail(html);
     expect(response.status).toBe(422);
-    expect(html).toContain("Delisted by the Administrator.");
-    expect(listingInput(html, "detail-listing-listed")).not.toMatch(
-      /\schecked(?:[=\s/>])/,
-    );
-    expect(listingInput(html, "detail-listing-unlisted")).not.toMatch(
-      /\schecked(?:[=\s/>])/,
-    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(html.split(DELISTED_CREATOR_COPY)).toHaveLength(2);
+    expect(detail).not.toContain("detail-listing-listed");
+    expect(detail).not.toContain("detail-listing-unlisted");
+    expect(detail).not.toContain("SAVE LISTING");
     expect(await listingRow(pollId)).toEqual({
       discovery_state: "delisted",
+      representation_version: 1,
+    });
+  });
+
+  it("preserves the known Delisted detail when its policy re-read returns null", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const realCreatePollPersistence = d1Adapter.createPollPersistence;
+    let detailReads = 0;
+    const persistenceSpy = vi
+      .spyOn(d1Adapter, "createPollPersistence")
+      .mockImplementation((db) => {
+        const persistence = realCreatePollPersistence(db);
+        return {
+          ...persistence,
+          async findPollForOwner(...args) {
+            detailReads += 1;
+            if (detailReads === 2) return null;
+            return persistence.findPollForOwner(...args);
+          },
+          async updateListingForOwner(input) {
+            // Simulate the Administrator winning after the Creator's initial
+            // snapshot but before the owner-qualified listing write.
+            await testEnv.DB.prepare(
+              "UPDATE poll SET discovery_state = 'delisted' WHERE id = ?1",
+            )
+              .bind(input.pollId)
+              .run();
+            return "delisted";
+          },
+        };
+      });
+    const csrfToken = await csrfFor(cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: listingBody(csrfToken, "listed"),
+      }),
+    );
+
+    try {
+      const response = await runRealRoute(context, pollId);
+      const html = await response.text();
+
+      expect(response.status).toBe(422);
+      expect(html).toContain("Route truth?");
+      expect(html).not.toContain("This Poll doesn&#39;t exist.");
+      expect(html.split(DELISTED_CREATOR_COPY)).toHaveLength(2);
+      expect(readOnlyListing(renderedDetail(html))).not.toContain("<form");
+      expect(await listingRow(pollId)).toEqual({
+        discovery_state: "delisted",
+        representation_version: 1,
+      });
+    } finally {
+      persistenceSpy.mockRestore();
+    }
+  });
+
+  it("restores the ordinary creator listing form after an Administrator clear", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        "UPDATE poll SET discovery_state = 'listed' WHERE id = ?1",
+      ).bind(pollId),
+      testEnv.DB.prepare(
+        "UPDATE user SET role = 'administrator' WHERE id = ?1",
+      ).bind(userId),
+    ]);
+    const moderation = d1Adapter.createModerationPersistence(testEnv.DB);
+    const actor = { userId, role: "administrator" } as const;
+    const delisted = await moderatePollDiscovery(
+      { applyModeration: moderation.applyModeration, nowMs: () => Date.now() },
+      actor,
+      pollId as PollId,
+      "delist",
+    );
+    const cleared = await moderatePollDiscovery(
+      { applyModeration: moderation.applyModeration, nowMs: () => Date.now() },
+      actor,
+      pollId as PollId,
+      "clear_delisted",
+    );
+    expect(delisted.ok).toBe(true);
+    expect(cleared.ok).toBe(true);
+
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        headers: { cookie },
+      }),
+    );
+    const response = await runRealRoute(context, pollId);
+    const detail = renderedDetail(await response.text());
+
+    expect(response.status).toBe(200);
+    expect(detail).toContain("data-listing-control");
+    expect(detail).not.toContain("data-listing-readonly");
+    expect(listingInput(detail, "detail-listing-listed")).toMatch(
+      /\schecked(?:[=\s/>])/,
+    );
+    expect(listingInput(detail, "detail-listing-unlisted")).not.toMatch(
+      /\schecked(?:[=\s/>])/,
+    );
+    expect(detail).toContain("SAVE LISTING");
+    expect(await listingRow(pollId)).toEqual({
+      discovery_state: "listed",
       representation_version: 1,
     });
   });

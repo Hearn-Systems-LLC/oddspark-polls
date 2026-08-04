@@ -34,8 +34,30 @@ export type CreatorSession = {
 
 export type CreatorPrincipal = {
   userId: string;
+  role: UserRole;
   session: CreatorSession;
 };
+
+export const USER_ROLES = ["creator", "administrator"] as const;
+
+export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * Better Auth data crosses a runtime boundary here. Unknown or absent values
+ * deliberately collapse to the least-privileged role.
+ */
+export function parseUserRole(value: unknown): UserRole {
+  if (value === "administrator") {
+    return "administrator";
+  }
+  return "creator";
+}
+
+export function hasAdministratorCapability(
+  principal: Pick<CreatorPrincipal, "role"> | null | undefined,
+): boolean {
+  return principal?.role === "administrator";
+}
 
 export function validateReturnAddress(
   value: string | null | undefined,

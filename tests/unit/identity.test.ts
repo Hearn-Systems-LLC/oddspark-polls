@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   createSignInDestinations,
+  hasAdministratorCapability,
   isCreatorSurfacePath,
+  parseUserRole,
   resolveSignInPageOutcome,
   validateReturnAddress,
+  type CreatorPrincipal,
+  type CreatorSession,
 } from "../../src/modules/identity/index";
+
+const session: CreatorSession = {
+  id: "session-id",
+  userId: "internal-user-id",
+  token: "session-token",
+  expiresAt: new Date("2030-01-01T00:00:00.000Z"),
+  createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+};
 
 describe("return-address policy", () => {
   it.each([
@@ -105,5 +118,44 @@ describe("sign-in outcome policy", () => {
 
   it("ignores unknown outcome parameters", () => {
     expect(resolveSignInPageOutcome("forged", "forged")).toBeNull();
+  });
+});
+
+describe("administrator capability policy", () => {
+  it.each([
+    ["creator", "creator"],
+    ["administrator", "administrator"],
+    [undefined, "creator"],
+    [null, "creator"],
+    ["admin", "creator"],
+    ["ADMINISTRATOR", "creator"],
+    [1, "creator"],
+    [{ role: "administrator" }, "creator"],
+  ] as const)("parses role value %j through the explicit allowlist", (value, expected) => {
+    expect(parseUserRole(value)).toBe(expected);
+  });
+
+  it("grants capability only from the provider-neutral principal role", () => {
+    const principal: CreatorPrincipal = {
+      userId: "internal-user-id",
+      role: "administrator",
+      session,
+    };
+
+    expect(hasAdministratorCapability(principal)).toBe(true);
+    expect(
+      hasAdministratorCapability({
+        ...principal,
+        role: "creator",
+        email: "administrator@example.test",
+        providerId: "github",
+        providerAccountId: "administrator",
+      } as CreatorPrincipal & {
+        email: string;
+        providerId: string;
+        providerAccountId: string;
+      }),
+    ).toBe(false);
+    expect(hasAdministratorCapability(null)).toBe(false);
   });
 });

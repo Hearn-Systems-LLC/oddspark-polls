@@ -11,10 +11,13 @@ import {
   type ValidatedPollDefinition,
 } from "../../modules/polls/index";
 import type {
+  AdministratorModerationIntent,
   DiscoveryCatalogRecord,
   DiscoveryCatalogRequest,
   DiscoveryOrderKey,
   DiscoverySitemapRecord,
+  ModerationTargetRecord,
+  ModerationPersistenceOutcome,
 } from "../../modules/discovery/index";
 import type {
   ResultsAccessEnvelope,
@@ -47,7 +50,11 @@ import type {
   ResultVisibility,
   UserId,
 } from "../../shared/domain/index";
-import { makeSecurityToggles, POLL_TYPES } from "../../shared/domain/index";
+import {
+  DISCOVERY_STATES,
+  makeSecurityToggles,
+  POLL_TYPES,
+} from "../../shared/domain/index";
 
 const DISCOVERY_CATALOG_COLUMNS = `p.id,
        pr.reference AS canonical_reference,
@@ -1505,6 +1512,216 @@ function mergeDiscoveryStreams<T extends DiscoveryOrderKey>(
     }
   }
   return merged;
+}
+
+const DELIST_ACTION_QUERY = `INSERT INTO moderation_action
+  (poll_id, actor_user_id, action, prior_state, next_state, created_at_ms)
+SELECT p.id, ?2, 'delist', p.discovery_state, 'delisted', ?3
+FROM poll AS p
+WHERE p.id = ?1
+  AND p.discovery_state IN ('unlisted', 'listed')
+  AND EXISTS (
+    SELECT 1 FROM user AS u
+    WHERE u.id = ?2 AND u.role = 'administrator'
+  )`;
+
+const DELIST_STATE_QUERY = `UPDATE poll
+SET discovery_state = 'delisted',
+    updated_at_ms = ?3
+WHERE id = ?1
+  AND discovery_state IN ('unlisted', 'listed')
+  AND EXISTS (
+    SELECT 1 FROM user AS u
+    WHERE u.id = ?2 AND u.role = 'administrator'
+  )`;
+
+const CLEAR_DELISTED_ACTION_QUERY = `INSERT INTO moderation_action
+  (poll_id, actor_user_id, action, prior_state, next_state, created_at_ms)
+SELECT p.id,
+       ?2,
+       'clear_delisted',
+       'delisted',
+       COALESCE((
+         SELECT CASE
+           WHEN ma.action = 'delist'
+             AND ma.next_state = 'delisted'
+             AND ma.prior_state IN ('unlisted', 'listed')
+           THEN ma.prior_state
+         END
+         FROM moderation_action AS ma
+         WHERE ma.poll_id = p.id
+         ORDER BY ma.sequence DESC
+         LIMIT 1
+       ), 'unlisted'),
+       ?3
+FROM poll AS p
+WHERE p.id = ?1
+  AND p.discovery_state = 'delisted'
+  AND EXISTS (
+    SELECT 1 FROM user AS u
+    WHERE u.id = ?2 AND u.role = 'administrator'
+  )`;
+
+const CLEAR_DELISTED_STATE_QUERY = `UPDATE poll
+SET discovery_state = (
+      SELECT ma.next_state
+      FROM moderation_action AS ma
+      WHERE ma.poll_id = poll.id
+        AND ma.action = 'clear_delisted'
+      ORDER BY ma.sequence DESC
+      LIMIT 1
+    ),
+    updated_at_ms = ?3
+WHERE id = ?1
+  AND discovery_state = 'delisted'
+  AND EXISTS (
+    SELECT 1 FROM user AS u
+    WHERE u.id = ?2 AND u.role = 'administrator'
+  )`;
+
+function isDiscoveryState(value: unknown): value is DiscoveryState {
+  return (
+    typeof value === "string" &&
+    (DISCOVERY_STATES as readonly string[]).includes(value)
+  );
+}
+
+/** Dedicated arbitrary-owner moderation adapter; creator listing stays scoped. */
+export function createModerationPersistence(db: D1Database) {
+  async function classifyNoChange(
+    actorUserId: string,
+    pollId: PollId,
+    intent: AdministratorModerationIntent,
+  ): Promise<ModerationPersistenceOutcome> {
+    // Role first: a revoked principal must not learn whether the target exists.
+    const actor = await db
+      .prepare("SELECT role FROM user WHERE id = ?1")
+      .bind(actorUserId)
+      .first<{ role: unknown }>();
+    if (actor?.role !== "administrator") {
+      return "authorization_denied";
+    }
+
+    const poll = await db
+      .prepare("SELECT discovery_state FROM poll WHERE id = ?1")
+      .bind(pollId)
+      .first<{ discovery_state: unknown }>();
+    if (!poll) {
+      return "not_found";
+    }
+    if (!isDiscoveryState(poll.discovery_state)) {
+      throw new Error("Malformed Poll discovery state");
+    }
+    if (intent === "delist" && poll.discovery_state === "delisted") {
+      return "unchanged";
+    }
+    if (intent === "clear_delisted" && poll.discovery_state !== "delisted") {
+      return "invalid_transition";
+    }
+    throw new Error("Moderation transaction guard changed no row");
+  }
+
+  return {
+    async findTargetByReference(
+      reference: string,
+    ): Promise<ModerationTargetRecord | null> {
+      const row = await db
+        .prepare(
+          `SELECT p.id,
+                  p.question,
+                  canonical.reference AS canonical_reference,
+                  p.discovery_state,
+                  p.deadline_ms,
+                  p.closed_at_ms
+           FROM poll_reference AS requested
+           JOIN poll AS p ON p.id = requested.poll_id
+           JOIN poll_reference AS canonical
+             ON canonical.poll_id = p.id AND canonical.is_canonical = 1
+           WHERE requested.reference = ?1
+           LIMIT 1`,
+        )
+        .bind(reference)
+        .first<{
+          id: PollId;
+          question: unknown;
+          canonical_reference: unknown;
+          discovery_state: unknown;
+          deadline_ms: unknown;
+          closed_at_ms: unknown;
+        }>();
+      if (!row) {
+        return null;
+      }
+      const validTimestamp = (value: unknown): value is number | null =>
+        value === null ||
+        (typeof value === "number" &&
+          Number.isSafeInteger(value) &&
+          value >= 0);
+      if (
+        typeof row.id !== "string" ||
+        typeof row.question !== "string" ||
+        typeof row.canonical_reference !== "string" ||
+        !isDiscoveryState(row.discovery_state) ||
+        !validTimestamp(row.deadline_ms) ||
+        !validTimestamp(row.closed_at_ms)
+      ) {
+        throw new Error("Malformed moderation target projection");
+      }
+      return {
+        pollId: row.id,
+        question: row.question,
+        canonicalReference: row.canonical_reference,
+        discoveryState: row.discovery_state,
+        deadlineMs: row.deadline_ms,
+        closedAtMs: row.closed_at_ms,
+      };
+    },
+
+    async applyModeration(input: {
+      actorUserId: string;
+      pollId: PollId;
+      intent: AdministratorModerationIntent;
+      updatedAtMs: number;
+    }): Promise<ModerationPersistenceOutcome> {
+      const actionQuery =
+        input.intent === "delist"
+          ? DELIST_ACTION_QUERY
+          : CLEAR_DELISTED_ACTION_QUERY;
+      const stateQuery =
+        input.intent === "delist"
+          ? DELIST_STATE_QUERY
+          : CLEAR_DELISTED_STATE_QUERY;
+      const [actionResult, stateResult] = await db.batch([
+        db
+          .prepare(actionQuery)
+          .bind(input.pollId, input.actorUserId, input.updatedAtMs),
+        db
+          .prepare(stateQuery)
+          .bind(input.pollId, input.actorUserId, input.updatedAtMs),
+      ]);
+      const actionChanges = actionResult.meta.changes ?? 0;
+      const stateChanges = stateResult.meta.changes ?? 0;
+      // D1 reports the poll UPDATE together with its catalog-revision trigger
+      // in the second statement's change count. The action INSERT has no
+      // trigger and therefore remains the exact one-row side of the invariant.
+      if (actionChanges === 1 && stateChanges >= 1) {
+        return "updated";
+      }
+      if (actionChanges === 0 && stateChanges === 0) {
+        return classifyNoChange(input.actorUserId, input.pollId, input.intent);
+      }
+      // INSERT succeeded but UPDATE failed — the moderation_action row is
+      // orphaned. Classify current state to surface a coherent outcome
+      // instead of a 500. The orphaned row carries correct prior/next state
+      // data (fill-in was a no-row sub-expression when the poll already
+      // satisfied the target guard); a future clear cycle reads it
+      // correctly through the action-type filter in the COALESCE.
+      if (actionChanges === 1 && stateChanges === 0) {
+        return classifyNoChange(input.actorUserId, input.pollId, input.intent);
+      }
+      throw new Error("Moderation action/state transaction mismatch");
+    },
+  };
 }
 
 /** Separate Discovery read adapter: no creator or Results repository widening. */

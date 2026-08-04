@@ -6,7 +6,9 @@ import { env } from "cloudflare:workers";
 import { experimental_AstroContainer as AstroContainer } from "astro/container";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createVoteDigest } from "../../src/adapters/digest/index";
+import { createModerationPersistence } from "../../src/adapters/d1/index";
 import { onRequest } from "../../src/middleware";
+import { moderatePollDiscovery } from "../../src/modules/discovery/index";
 import PollReferencePage from "../../src/pages/[reference].astro";
 import type { PollId, PollOptionId, UserId } from "../../src/shared/domain/index";
 
@@ -17,6 +19,7 @@ type MigrationTestEnv = Cloudflare.Env & {
 
 const testEnv = env as MigrationTestEnv;
 const OWNER = "vote-route-owner" as UserId;
+const ADMINISTRATOR = "vote-route-administrator" as UserId;
 
 type MiddlewareContext = Parameters<typeof onRequest>[0];
 
@@ -147,6 +150,34 @@ async function counts(pollId: string): Promise<{
   };
 }
 
+async function moderate(
+  pollId: PollId,
+  intent: "delist" | "clear_delisted",
+): Promise<void> {
+  const result = await moderatePollDiscovery(
+    {
+      applyModeration: createModerationPersistence(testEnv.DB).applyModeration,
+      nowMs: () => Date.now(),
+    },
+    { userId: ADMINISTRATOR, role: "administrator" },
+    pollId,
+    intent,
+  );
+  expect(result).toEqual({
+    ok: true,
+    value: { kind: "updated", intent },
+  });
+}
+
+function stableMain(html: string): string {
+  const main = html.match(/<main\b[\s\S]*<\/main>/)?.[0];
+  if (!main) throw new Error("missing public main landmark");
+  return main.replace(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
+    "[generated-id]",
+  );
+}
+
 function voteDigestPurpose(data: BufferSource): string | null {
   const bytes =
     data instanceof ArrayBuffer
@@ -208,6 +239,11 @@ beforeEach(async () => {
     // Integration pool usually provisions this; fail closed if not.
     throw new Error("VOTE_DIGEST_SECRET missing in integration env");
   }
+  await testEnv.DB.prepare(
+    "INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at, role) VALUES (?1, 'Vote Route Administrator', 'vote-route-administrator@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z', 'administrator')",
+  )
+    .bind(ADMINISTRATOR)
+    .run();
 });
 
 afterEach(() => {
@@ -224,6 +260,85 @@ const invalidIdentityCases: Array<{
     headers: { "cf-connecting-ip": "203.0.113.4:443" },
   },
 ];
+
+describe("administrator delisting public Vote contract", () => {
+  it("keeps direct viewing and voting unchanged and privacy-safe while delisted", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      ipChecksEnabled: false,
+    });
+    await testEnv.DB.prepare(
+      "UPDATE poll SET discovery_state = 'listed' WHERE id = ?1",
+    )
+      .bind(poll.pollId)
+      .run();
+
+    const initial = await runVoteRoute(
+      makeContext(new Request(`https://polls.example.test/${poll.reference}`)),
+      poll.reference,
+    );
+    const initialMain = stableMain(await initial.text());
+
+    await moderate(poll.pollId, "delist");
+
+    const delisted = await runVoteRoute(
+      makeContext(new Request(`https://polls.example.test/${poll.reference}`)),
+      poll.reference,
+    );
+    const delistedHtml = await delisted.text();
+    const delistedMain = stableMain(delistedHtml);
+    expect(delisted.status).toBe(200);
+    expect(delisted.headers.get("x-robots-tag")).toBe("noindex");
+    expect(delistedMain).toBe(initialMain);
+    expect(delistedMain).toContain("Route IP?");
+    expect(delistedMain).toContain("Alpha");
+    expect(delistedMain).not.toContain(OWNER);
+    expect(delistedMain).not.toContain(ADMINISTRATOR);
+    expect(delistedMain).not.toMatch(
+      /administrator|delisted|moderation|reason|appeal/iu,
+    );
+
+    const vote = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: formBody(poll.optionA),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(vote.status).toBe(303);
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 0,
+      version: 2,
+    });
+    expect(
+      await testEnv.DB.prepare(
+        "SELECT discovery_state FROM poll WHERE id = ?1",
+      )
+        .bind(poll.pollId)
+        .first<{ discovery_state: string }>(),
+    ).toEqual({ discovery_state: "delisted" });
+
+    await moderate(poll.pollId, "clear_delisted");
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 0,
+      version: 2,
+    });
+    expect(
+      await testEnv.DB.prepare(
+        "SELECT discovery_state FROM poll WHERE id = ?1",
+      )
+        .bind(poll.pollId)
+        .first<{ discovery_state: string }>(),
+    ).toEqual({ discovery_state: "listed" });
+  });
+});
 
 describe("POST /:reference IP Checks delivery boundary", () => {
   it.each(invalidIdentityCases)(

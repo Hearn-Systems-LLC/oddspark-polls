@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-04T00:54:58.903Z",
+  "generatedAt": "2026-08-04T08:59:36.338Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -41,6 +41,10 @@
     {
       "file": "0010_discovery_catalog_projection.sql",
       "sha256": "8f09fb8b16c9a1c4ea9ffd046dca4de35caca343ae769f21f42d1cd017014963"
+    },
+    {
+      "file": "0011_administrator_moderation.sql",
+      "sha256": "54a5f4bc55e30a9da21238e71cc94ca8af0f7d3848778d775a8439ec30895ad1"
     }
   ]
 }

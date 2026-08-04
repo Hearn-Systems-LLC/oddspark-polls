@@ -7,7 +7,7 @@ paradigm: 'Hexagonal modular monolith'
 scope: 'Whole-product architecture governing independently implemented Oddspark Polls epics'
 status: final
 created: '2026-07-29'
-updated: '2026-07-29'
+updated: '2026-08-04'
 binds:
   - 'FR-1..FR-28'
   - 'UJ-1..UJ-7'
@@ -16,6 +16,7 @@ binds:
   - 'CAP-SHARE'
 sources:
   - 'User direction on public creation, voting, discovery, and sharing, 2026-07-29'
+  - 'Story 3.3 Administrator delisting decisions, ratified 2026-08-04'
   - '../../prds/prd-oddspark-polls-2026-07-28/prd.md'
   - '../../prds/prd-oddspark-polls-2026-07-28/addendum.md'
   - '../../ux-designs/ux-oddspark-polls-2026-07-28/DESIGN.md'
@@ -88,8 +89,14 @@ flowchart LR
   with Google and GitHub OAuth. Every creator command addresses a Poll by both
   Poll ID and an internal, provider-independent creator user ID. OAuth
   `(provider, provider_account_id)` pairs map to that user and are never stored
-  as Poll ownership keys. Administrative moderation is a separate role
-  capability. Voters remain anonymous.
+  as Poll ownership or authorization keys. The same internal user row carries
+  a server-owned `creator | administrator` role that defaults to `creator`; D1
+  permits at most one Administrator. Assignment, transfer, and revocation are
+  environment-specific, out-of-band operations against the internal user ID,
+  with no in-product grant surface or general role system. The session role is
+  an early application check, while every moderation transaction rechecks the
+  live D1 role. Ownership never implies moderation authority. Voters remain
+  anonymous.
 
 ### AD-5 — Discovery is independent of result visibility [ADOPTED]
 
@@ -103,8 +110,13 @@ flowchart LR
   sitemaps. Discovery owns the `unlisted`, `listed`, and `delisted` state
   machine. A Poll owner may move between `unlisted` and `listed`; an
   administrator may move any Poll to `delisted`, which only an administrator
-  may clear. The public directory returns only effectively open `listed` Polls.
-  Delisting changes neither ownership, result visibility, nor Vote data.
+  may clear. Delisting captures the Creator's immediately preceding
+  `listed | unlisted` choice; clearing restores it. A legacy Delisted Poll
+  without usable action history clears to privacy-safe `unlisted`. Repeated
+  delist is an idempotent no-op, while clear against a non-Delisted Poll is an
+  invalid transition. The public directory and sitemap return only eligible
+  literal `listed` Polls. Delisting changes neither link reachability,
+  ownership, result visibility, Poll representation, nor Vote data.
 
 ### AD-6 — D1 owns facts; everything else is a projection
 
@@ -115,7 +127,11 @@ flowchart LR
   Poll-owned image bytes. Tallies, Ballot Manifests, discovery cards, exports,
   and live messages are projections. Accepted Vote facts are immutable except
   Meeting Poll availability, whose session-scoped identity may update its own
-  row.
+  row. Each actual delist or clear appends one private `moderation_action`,
+  ordered by a monotonic D1 sequence, and changes `discovery_state` in the same
+  D1 batch. The batch includes the live Administrator-role predicate and rolls
+  back action and state together on any failed statement. No-op, denied, and
+  failed commands append nothing.
 
 ### AD-7 — One constrained transaction accepts a Vote
 
@@ -218,7 +234,7 @@ sequenceDiagram
 
 ### AD-13 — One canonical, collision-safe Poll reference
 
-- **Binds:** FR-3, CAP-SHARE, public routing, and discovery
+- **Binds:** FR-3, CAP-SHARE, public routing, discovery, and moderation lookup
 - **Prevents:** Reserved-route collisions, mutable share links, and guessable
   generated references
 - **Rule:** Canonical Poll references occupy the root path to preserve the PRD
@@ -227,7 +243,10 @@ sequenceDiagram
   Canonical URLs do not change when display text changes. Every public voting,
   create-confirmation, and result view renders an explicit Share action and the
   canonical URL; progressive enhancement uses the Web Share API when available
-  and a copy-link fallback otherwise.
+  and a copy-link fallback otherwise. Administrator moderation lives at the
+  one fixed `/creator/moderation` route and resolves one canonical or alias
+  reference at a time; it neither enumerates Polls nor creates `/admin` or a
+  new root reservation.
 
 ### AD-14 — Environments share code, never state
 
@@ -250,7 +269,14 @@ sequenceDiagram
   or error code, duration, and provider outcome. They never record tokens, voter
   digests, Comments, ballot content, or Voter Codes. D1 Time Travel is the
   database recovery floor—7 days on Workers Free or 30 days on Workers Paid.
-  After a restore, reconcile R2 from D1 ownership records.
+  After a restore, reconcile R2 from D1 ownership records. Moderation emits
+  exactly one fixed, method-qualified `GET /creator/moderation` or
+  `POST /creator/moderation` operation. Explicit request-context flags classify
+  central-boundary `csrf_rejected` separately from capability
+  `authorization_denied`; an unflagged 403 is neither. After authorized lookup,
+  telemetry may correlate the internal Poll ID, but never logs a submitted
+  URL/reference/alias, question, owner ID, email, provider identity, or private
+  moderation history.
 
 ### AD-16 — Admission controls have explicit failure semantics
 
@@ -295,8 +321,13 @@ sequenceDiagram
   configuration, options, and deadlines; Discovery owns listing and moderation
   state; Voting owns Votes, selections, availability, duplicate claims, Voter
   Code redemption, and persisted Comments; Media owns media records and cleanup
-  tasks. Results owns no facts. Only the owning module's application commands
-  may write its tables. `CastVote` is the sole cross-module transaction
+  tasks. Results owns no facts. Only Discovery's `delist` and `clear_delisted`
+  commands may append moderation actions or write the Administrator-owned
+  `delisted` hold; owner listing commands remain confined to
+  `unlisted | listed`. The Discovery D1 adapter commits the guarded role check,
+  ordered action, state change, and catalog-revision trigger as one transaction.
+  Only the owning module's application commands may write its tables. `CastVote`
+  is the sole cross-module transaction
   coordinator and persists normalized contributions returned by Poll Type,
   Security, and Comment policy ports.
 
@@ -367,7 +398,12 @@ sequenceDiagram
   acceptance, Meeting revision, Comment moderation, manual close, result
   visibility, and pre-Vote option or type edits. The response validator combines
   that version with effective open/closed state so crossing a Deadline
-  invalidates a cached representation without a scheduled write.
+  invalidates a cached representation without a scheduled write. Listing and
+  moderation state are deliberately excluded because they do not alter the
+  linked Voter or authorized Results representation. An actual
+  `discovery_state` transition instead increments the separate
+  `discovery_catalog_revision` in the same D1 transaction; a no-op, denial, or
+  failure increments neither version.
 
 ## Consistency Conventions
 
@@ -480,9 +516,9 @@ erDiagram
 
 | Fact set | Owning module | Only legal mutation path |
 | --- | --- | --- |
-| Users, accounts, sessions | Identity | Better Auth adapter behind Identity commands |
+| Users, accounts, sessions, Administrator role | Identity | Better Auth adapter plus guarded out-of-band role assignment |
 | Poll lifecycle, type, options, Deadline, result visibility | Polls | Poll commands |
-| Listing state and moderation actions | Discovery | Discovery commands |
+| Listing state and ordered moderation actions | Discovery | Owner listing commands or guarded `delist` / `clear_delisted` transaction |
 | Votes, selections, availability, claims, code redemptions, Comments | Voting | `CastVote`, `CreateMeetingResponse`, `ReviseMeetingResponse`, moderation commands |
 | Media records and cleanup outbox | Media | Media adoption and deletion commands |
 | Tallies, Manifests, exports | Results | Read-only projections; no mutation path |
@@ -505,7 +541,7 @@ flowchart LR
 | --- | --- | --- |
 | FR-1, CAP-CREATOR-SELF-SERVICE | `identity`, `pages/api/auth`, `/sign-in`, creator middleware | AD-1, AD-4, AD-14 |
 | FR-2–FR-5, FR-28, CAP-SHARE | `polls`, D1 Poll repository, public routes and Share action | AD-3, AD-6, AD-11, AD-13, AD-17 |
-| FR-23, CAP-DISCOVER | `discovery`, catalog projection, `/discover` | AD-5, AD-6, AD-13, AD-16, AD-22 |
+| FR-23, CAP-DISCOVER | `discovery`, catalog projection, `/discover`, `/creator/moderation` | AD-4, AD-5, AD-6, AD-13, AD-15, AD-16, AD-19, AD-22, AD-24 |
 | FR-6–FR-7 | `polls/types/multiple-choice`, `voting` | AD-3, AD-7, AD-9 |
 | FR-8–FR-10 | `polls/types/ranked-choice`, `results/tabulate-irv` | AD-3, AD-9 |
 | FR-11 | `polls/types/image`, R2 media adapter | AD-3, AD-12 |
@@ -524,7 +560,6 @@ flowchart LR
 | Durable Object WebSockets | Conditional polling cannot meet the desired update latency inside the monthly cost ceiling, or measured request volume makes fan-out cheaper. |
 | D1 read replication | Global result or discovery reads show unacceptable latency; adopt the Sessions API with bookmark propagation if enabled. |
 | Discovery ranking and search | The listed catalog is large enough that newest-first pagination is no longer useful. |
-| Detailed listing moderation policy | Before CAP-DISCOVER opens to untrusted creators; the architecture already reserves reversible listing state and admin actions. |
 | Email, passkeys, or additional OAuth providers | Creator research shows Google and GitHub exclude a material part of the target audience. |
 | Voter Codes and VPN Blocking implementation | The first real Poll needs them, per the PRD phase gate. |
 | XLSX writer selection | The export epic; it must implement the export port and run inside workerd without changing domain or persistence rules. |

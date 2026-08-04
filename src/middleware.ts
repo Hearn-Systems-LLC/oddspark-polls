@@ -17,6 +17,7 @@ import {
 import type { RequestContext } from "./lib/request-context";
 import {
   isCreatorSurfacePath,
+  parseUserRole,
   validateReturnAddress,
   type CreatorPrincipal,
 } from "./modules/identity/index";
@@ -35,6 +36,13 @@ const SESSION_COOKIE_PATTERN =
 const CREATOR_SESSION_MARKER_COOKIE = "oddspark.creator_session_seen";
 const CREATOR_SESSION_MARKER_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const MODERATION_NO_STORE = "private, no-store";
+
+function isModerationSurfacePath(pathname: string): boolean {
+  return (
+    pathname === "/creator/moderation" || pathname === "/creator/moderation/"
+  );
+}
 
 function escapeRegExpLiteral(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -101,6 +109,8 @@ const requestContextMiddleware = defineMiddleware(async (context, next) => {
     pollId: null,
     sessionExpired: false,
     sessionLookupFailed: false,
+    csrfRejected: false,
+    authorizationDenied: false,
     resultsLookupFailed: false,
     voteRejection: false,
     providerOutcome: "none",
@@ -145,6 +155,7 @@ const sessionMiddleware = defineMiddleware(async (context, next) => {
   if (authData) {
     const principal: CreatorPrincipal = {
       userId: authData.user.id,
+      role: parseUserRole(authData.user.role),
       session: authData.session,
     };
     requestContext.principal = principal;
@@ -213,6 +224,9 @@ const csrfMiddleware = defineMiddleware(async (context, next) => {
   });
 
   if (!result.ok) {
+    if (context.locals.requestContext) {
+      context.locals.requestContext.csrfRejected = true;
+    }
     const requestId =
       context.locals.requestContext?.requestId ?? createRequestId();
 
@@ -221,6 +235,9 @@ const csrfMiddleware = defineMiddleware(async (context, next) => {
       headers: {
         "content-type": "text/plain; charset=utf-8",
         "x-request-id": requestId,
+        ...(isModerationSurfacePath(pathname)
+          ? { "cache-control": MODERATION_NO_STORE }
+          : {}),
       },
     });
   }
@@ -234,7 +251,11 @@ const creatorGuardMiddleware = defineMiddleware(async (context, next) => {
     return next();
   }
 
-  const returnAddress = validateReturnAddress(`${url.pathname}${url.search}`);
+  const returnAddress = validateReturnAddress(
+    isModerationSurfacePath(url.pathname)
+      ? "/creator/moderation"
+      : `${url.pathname}${url.search}`,
+  );
   const params = new URLSearchParams({ return: returnAddress });
   if (context.locals.requestContext?.sessionExpired) {
     params.set("reason", "expired");
@@ -244,6 +265,9 @@ const creatorGuardMiddleware = defineMiddleware(async (context, next) => {
     status: 303,
     headers: {
       location: `/sign-in?${params.toString()}`,
+      ...(isModerationSurfacePath(url.pathname)
+        ? { "cache-control": MODERATION_NO_STORE }
+        : {}),
     },
   });
   if (context.locals.requestContext?.sessionExpired) {
@@ -285,9 +309,13 @@ const telemetryMiddleware = defineMiddleware(async (context, next) => {
       const status = response.status;
       const result = telemetryResultForStatus(
         status,
-        rc.sessionLookupFailed,
-        rc.voteRejection,
-        rc.resultsLookupFailed,
+        {
+          sessionLookupFailed: rc.sessionLookupFailed,
+          voteRejection: rc.voteRejection,
+          resultsLookupFailed: rc.resultsLookupFailed,
+          csrfRejected: rc.csrfRejected,
+          authorizationDenied: rc.authorizationDenied,
+        },
       );
 
       emitTelemetry({

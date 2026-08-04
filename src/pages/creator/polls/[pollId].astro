@@ -102,6 +102,9 @@ let forceLockedView = false;
 let securityDraft: PollSecurityToggles | null = null;
 let forceSecurityFromPersisted = false;
 
+const DELISTED_CREATOR_COPY =
+  "Delisted by the Administrator. The link still works and Votes still count; the Poll no longer appears on Discover. Only the Administrator can reverse this.";
+
 // Ownership gate — set pollId on telemetry only after success.
 let poll = await persistence.findPollForOwner(pollId, ownerId);
 if (poll && requestContext) {
@@ -430,10 +433,19 @@ if (Astro.request.method === "POST") {
         Astro.response.status = 404;
       } else if (result.error.code === "poll_delisted") {
         // Policy rejection renders owner-qualified persisted truth, never the
-        // rejected creator draft (the administrator owns delisted).
-        formError = result.error.message;
+        // rejected creator draft (the administrator owns delisted). Keep the
+        // known owner-qualified Poll if a concurrent reference read is
+        // temporarily unavailable; the fresh lifecycle snapshot below still
+        // provides the authoritative Discovery state.
+        formError = null;
         Astro.response.status = 422;
-        poll = await persistence.findPollForOwner(pollId, ownerId);
+        const refreshedPoll = await persistence.findPollForOwner(
+          pollId,
+          ownerId,
+        );
+        if (refreshedPoll) {
+          poll = refreshedPoll;
+        }
       } else {
         formError = result.error.message;
         Astro.response.status = 500;
@@ -741,43 +753,73 @@ const detailPath = `/creator/polls/${pollId}`;
               </div>
             </form>
 
-            <form
-              method="post"
-              action={detailPath}
-              class="lifecycle-form listing-form"
-              data-listing-control
-              novalidate
-            >
-              <input type="hidden" name="csrf_token" value={csrfToken} />
-              <fieldset
-                class="field-block"
-                aria-describedby={fieldErrors.listing ? "detail-listing-error" : undefined}
-              >
-                <legend class="group-label">WHO CAN FIND IT</legend>
-                <div class="listing-choices">
-                  {LISTING_CHOICES.map((choice) => (
-                    <PollOption
-                      id={`detail-listing-${choice.value}`}
-                      name="listing"
-                      value={choice.value}
-                      label={choice.label}
-                      description={choice.description}
-                      checked={listingState === choice.value}
-                    />
-                  ))}
-                </div>
-                {fieldErrors.listing && (
-                  <p class="field-error" id="detail-listing-error">
-                    {fieldErrors.listing}
-                  </p>
-                )}
-              </fieldset>
-              <div class="listing-save">
-                <ButtonSecondary type="submit" name="intent" value="update-listing">
-                  SAVE LISTING
-                </ButtonSecondary>
-              </div>
-            </form>
+            {
+              listingState === "delisted" ? (
+                <section
+                  class="lifecycle-form listing-form listing-readonly"
+                  aria-labelledby="detail-listing-heading"
+                  data-listing-readonly
+                >
+                  <h2 class="group-label" id="detail-listing-heading">
+                    WHO CAN FIND IT
+                  </h2>
+                  <div
+                    class="listing-readonly-row"
+                    role="group"
+                    aria-labelledby="detail-listing-state"
+                    aria-describedby="detail-listing-description"
+                  >
+                    <p class="listing-readonly-state" id="detail-listing-state">
+                      DELISTED
+                    </p>
+                    <p
+                      class="listing-readonly-copy"
+                      id="detail-listing-description"
+                    >
+                      {DELISTED_CREATOR_COPY}
+                    </p>
+                  </div>
+                </section>
+              ) : (
+                <form
+                  method="post"
+                  action={detailPath}
+                  class="lifecycle-form listing-form"
+                  data-listing-control
+                  novalidate
+                >
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <fieldset
+                    class="field-block"
+                    aria-describedby={fieldErrors.listing ? "detail-listing-error" : undefined}
+                  >
+                    <legend class="group-label">WHO CAN FIND IT</legend>
+                    <div class="listing-choices">
+                      {LISTING_CHOICES.map((choice) => (
+                        <PollOption
+                          id={`detail-listing-${choice.value}`}
+                          name="listing"
+                          value={choice.value}
+                          label={choice.label}
+                          description={choice.description}
+                          checked={listingState === choice.value}
+                        />
+                      ))}
+                    </div>
+                    {fieldErrors.listing && (
+                      <p class="field-error" id="detail-listing-error">
+                        {fieldErrors.listing}
+                      </p>
+                    )}
+                  </fieldset>
+                  <div class="listing-save">
+                    <ButtonSecondary type="submit" name="intent" value="update-listing">
+                      SAVE LISTING
+                    </ButtonSecondary>
+                  </div>
+                </form>
+              )
+            }
 
             <div class="lifecycle-actions">
               {
@@ -1004,6 +1046,35 @@ const detailPath = `/creator/polls/${pollId}`;
 
   .listing-choices {
     display: grid;
+  }
+
+  .listing-readonly-row {
+    display: grid;
+    gap: var(--space-1);
+    min-height: 44px;
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: var(--space-hairline) solid var(--color-rule);
+    border-radius: var(--rounded-default);
+    box-sizing: border-box;
+  }
+
+  .listing-readonly-state,
+  .listing-readonly-copy {
+    margin: 0;
+  }
+
+  .listing-readonly-state {
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .listing-readonly-copy {
+    color: var(--color-text);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
   }
 
   .listing-save {

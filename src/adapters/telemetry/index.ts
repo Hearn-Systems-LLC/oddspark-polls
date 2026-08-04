@@ -13,8 +13,17 @@ export type { ProviderOutcome };
 export type TelemetryResultCode =
   | "ok"
   | "csrf_rejected"
+  | "authorization_denied"
   | "not_found"
   | "error";
+
+export type TelemetryResultFlags = {
+  sessionLookupFailed?: boolean;
+  voteRejection?: boolean;
+  resultsLookupFailed?: boolean;
+  csrfRejected?: boolean;
+  authorizationDenied?: boolean;
+};
 
 /**
  * Exactly six fields. The type is intentionally narrow so forbidden
@@ -151,6 +160,16 @@ export function telemetryOperationForRoute(
     return `${method} /creator/polls/:pollId`;
   }
 
+  // The operator desk is one fixed capability operation. Normalize its
+  // optional trailing slash and never derive operation names from query data.
+  if (
+    segments.length === 2 &&
+    segments[0] === "creator" &&
+    segments[1] === "moderation"
+  ) {
+    return `${method} /creator/moderation`;
+  }
+
   if (!hasPollReferenceParam) {
     return `${method} ${pathname}`;
   }
@@ -176,20 +195,28 @@ export function telemetryOperationForRoute(
  */
 export function telemetryResultForStatus(
   status: number,
-  sessionLookupFailed = false,
-  voteRejection = false,
-  resultsLookupFailed = false,
+  flags: TelemetryResultFlags = {},
 ): TelemetryResultCode {
-  if (sessionLookupFailed || resultsLookupFailed || status >= 500) {
+  if (
+    flags.sessionLookupFailed ||
+    flags.resultsLookupFailed ||
+    status >= 500
+  ) {
     return "error";
   }
   if (status === 403) {
-    return "csrf_rejected";
+    if (flags.csrfRejected) {
+      return "csrf_rejected";
+    }
+    if (flags.authorizationDenied) {
+      return "authorization_denied";
+    }
+    return "error";
   }
   if (status === 404) {
     return "not_found";
   }
-  if (voteRejection && (status === 422 || status === 429)) {
+  if (flags.voteRejection && (status === 422 || status === 429)) {
     return "error";
   }
   return "ok";

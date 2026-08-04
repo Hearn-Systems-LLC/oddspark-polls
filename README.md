@@ -218,6 +218,13 @@ Custom domain `polls.oddspark.dev` is wired later.
 - Guard: `pnpm migrations:guard`
 - Refresh checksums after adding a new migration: `pnpm migrations:checksum`
 
+## Administration
+
+The single Administrator role is assigned out of band with the Better Auth
+internal user ID. There is no in-product role-grant surface. Follow the
+[administration runbook](docs/administration.md) for the guarded, environment-by-environment
+assignment, transfer, revocation, verification, and recovery procedure.
+
 ## Design system
 
 Tokens come from DESIGN.md and live in `src/styles/tokens.css`. Mode is OS preference by default; a progressive-enhancement toggle persists light/dark in `localStorage`. Courier Prime + Newsreader are self-hosted under `public/fonts/`.

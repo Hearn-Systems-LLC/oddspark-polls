@@ -116,3 +116,9 @@
 - `/api/health` checks binding presence only (no D1 query, no `VOTE_RATE_LIMITER` check), and the deploy gate smokes staging but not production. Accepted as-is (Justin, 2026-07-31): presence-only + staging smoke is Story 1.5's bar; a production-leg smoke and a deepened probe are candidates for the ops hardening track [src/pages/api/health.ts, .github/workflows/deploy.yml].
 - A `#` inside an unquoted pasted secret would be silently truncated by dotenv while the provisioning helper reports success. Deferred: GitHub secrets are hex and Google's are `[A-Za-z0-9-_]`, so no real provider credential hits this; the script's `binding_key` comment documents the unmodeled dotenv forms [scripts/provision-auth-secrets.zsh].
 - The staging smoke races Workers version propagation: the PR #3 deploy gate failed on `/api/health` 404s because the smoke's five retries over ~20s all hit the pre-deploy version when a brand-new route shipped; the endpoint was live moments later and the re-run passed. Deferred: widen the smoke's retry/backoff window (or poll until the new version marker appears) so first-deploy-of-a-route doesn't need a manual `gh run rerun` [scripts/smoke.mjs, .github/workflows/deploy.yml].
+
+## Deferred from: code review of story-3.3 (2026-08-04)
+
+- `classifyNoChange` fallthrough throw: when DISCOVERY_STATES gains a fourth value, a delist against the new state would fall through to the throw guard at `src/adapters/d1/index.ts:1620` instead of returning a meaningful outcome [src/adapters/d1/index.ts].
+- `findTargetByReference` accepts empty `question` string at `src/adapters/d1/index.ts:1661` — an empty poll question renders confusingly in the admin desk. Low probability, low impact [src/adapters/d1/index.ts].
+- `findTargetByReference` accepts empty `canonical_reference` at `src/adapters/d1/index.ts:1662` — an empty canonical reference renders without a clickable link in the admin desk. Low probability, low impact [src/adapters/d1/index.ts].

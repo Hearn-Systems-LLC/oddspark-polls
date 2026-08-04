@@ -100,7 +100,7 @@ jobs:
         run: pnpm build:production
 
   deploy-staging:
-    name: Staging migrate → deploy → smoke
+    name: Staging preflight → migrate → deploy → smoke
     needs: test-and-build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -119,6 +119,12 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Staging Demo Poll preflight
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm preflight:demo staging
 
       - name: Staging migration
         env:
@@ -150,7 +156,7 @@ jobs:
           exit 1
 
   deploy-production:
-    name: Production migrate → deploy
+    name: Production preflight → migrate → deploy → smoke
     needs: deploy-staging
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -170,6 +176,15 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Promotion is forbidden unless the already-live configured aggregate
+      # matches the exact provider-free Demo contract. The query returns only
+      # ready/not_ready and never emits identities or internal IDs.
+      - name: Production Demo Poll preflight
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm preflight:demo production
+
       - name: Production migration
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -181,3 +196,18 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm deploy:production
+
+      - name: Production smoke
+        env:
+          SMOKE_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "$SMOKE_URL" ]; then
+            SMOKE_URL="https://oddspark-polls.hearnsystems.workers.dev"
+          fi
+          for i in 1 2 3 4 5; do
+            if SMOKE_URL="$SMOKE_URL" pnpm smoke:staging; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1

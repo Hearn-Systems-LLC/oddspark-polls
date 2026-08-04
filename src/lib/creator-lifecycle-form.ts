@@ -9,6 +9,7 @@ export type LifecycleIntent =
   | "update-security"
   | "update-listing"
   | "close"
+  | "reset-demo"
   | "delete";
 
 export type ParsedLifecycleForm = {
@@ -35,6 +36,7 @@ const INTENTS = new Set<LifecycleIntent>([
   "update-security",
   "update-listing",
   "close",
+  "reset-demo",
   "delete",
 ]);
 

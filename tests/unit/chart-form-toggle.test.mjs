@@ -7,7 +7,10 @@ const toggleSource = readFileSync(
 );
 const scriptSource = readFileSync("src/scripts/chart-form-toggle.ts", "utf8");
 const tallySource = readFileSync("src/components/results-tally.astro", "utf8");
-const pollPageSource = readFileSync("src/pages/[reference].astro", "utf8");
+const pollSurfaceSource = readFileSync(
+  "src/components/poll-voting-surface.astro",
+  "utf8",
+);
 const resultsPageSource = readFileSync(
   "src/pages/[reference]/results.astro",
   "utf8",
@@ -125,19 +128,19 @@ describe("chart-form-toggle script contract (Story 1.10)", () => {
   });
 
   it("loads alongside the poller on the post-vote surface", () => {
-    expect(pollPageSource).toMatch(
-      /showTally &&\s*\n?\s*postVoteResults\?\.kind === "visible" && \(\s*<script src="\.\.\/scripts\/chart-form-toggle\.ts"><\/script>/,
+    expect(pollSurfaceSource).toMatch(
+      /showTally &&\s*postVoteResults\?\.kind === "visible" &&\s*<script src="\.\.\/scripts\/chart-form-toggle\.ts"><\/script>/,
     );
-    expect(pollPageSource).toMatch(
+    expect(pollSurfaceSource).toMatch(
       /postVoteResults\.status === "open"[\s\S]*?results-live\.ts/,
     );
   });
 
   it("places the toggle and pie mount in the post-vote desktop grid", () => {
-    expect(pollPageSource).toMatch(
+    expect(pollSurfaceSource).toMatch(
       /:global\(\.chart-form-toggle\) \{[^}]*grid-column: 2;[^}]*grid-row: 4;/,
     );
-    expect(pollPageSource).toMatch(
+    expect(pollSurfaceSource).toMatch(
       /:global\(\.chart-form-pie\) \{[^}]*grid-column: 2;[^}]*grid-row: 5;/,
     );
   });

@@ -20,7 +20,10 @@ export default defineConfig({
   },
   webServer: {
     command: `ASTRO_DEV_BACKGROUND=0 pnpm dev --host 127.0.0.1 --port ${port} --ignore-lock`,
-    url: baseURL,
+    // Root deliberately returns 503 until the configured Demo is seeded;
+    // liveness belongs to the presence-only endpoint, and every Demo suite
+    // provisions its exact fixture only after this readiness boundary passes.
+    url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,
   },

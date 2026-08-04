@@ -15,12 +15,14 @@ export type TelemetryResultCode =
   | "csrf_rejected"
   | "authorization_denied"
   | "not_found"
+  | "demo_unavailable"
   | "error";
 
 export type TelemetryResultFlags = {
   sessionLookupFailed?: boolean;
   voteRejection?: boolean;
   resultsLookupFailed?: boolean;
+  demoUnavailable?: boolean;
   csrfRejected?: boolean;
   authorizationDenied?: boolean;
 };
@@ -197,6 +199,9 @@ export function telemetryResultForStatus(
   status: number,
   flags: TelemetryResultFlags = {},
 ): TelemetryResultCode {
+  if (flags.demoUnavailable) {
+    return "demo_unavailable";
+  }
   if (
     flags.sessionLookupFailed ||
     flags.resultsLookupFailed ||

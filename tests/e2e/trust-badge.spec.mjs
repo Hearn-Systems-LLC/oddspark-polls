@@ -200,10 +200,13 @@ test.describe("Trust Badge", () => {
     await expect(page.locator("[data-trust-badge]")).toHaveCount(0);
     await expect(page.locator(".trust-badge")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "VOTE" })).toBeAttached();
-    // Scoped to <main>: dev-mode Vite inlines the component's stylesheet in
-    // <head> on import alone — absence is about rendered markup, not CSS.
-    const mainHtml = await page.locator("main.poll-shell").innerHTML();
-    expect(mainHtml).not.toContain("trust-badge");
+    // Scoped to the shared voting surface: dev-mode Vite inlines the
+    // component's stylesheet in <head> on import alone — absence is about
+    // rendered markup, not CSS.
+    const surfaceHtml = await page
+      .locator("[data-poll-voting-surface]")
+      .innerHTML();
+    expect(surfaceHtml).not.toContain("trust-badge");
   });
 
   test("stacks one item per line at 375px with aligned left edges and no truncation", async ({

@@ -62,6 +62,15 @@ describe("creator lifecycle form parsing", () => {
     expect(() => parseLifecycleForm(form)).toThrow("unreadable_lifecycle_form");
   });
 
+  it("allows reset-demo with only the intent and CSRF token", () => {
+    const form = new FormData();
+    form.set("intent", "reset-demo");
+    form.set("csrf_token", "token");
+    expect(parseLifecycleForm(form).intent).toBe("reset-demo");
+    form.set("poll_id", "forged");
+    expect(() => parseLifecycleForm(form)).toThrow("unreadable_lifecycle_form");
+  });
+
   it("parses an update-security intent with true-only toggle semantics", () => {
     const form = new FormData();
     form.set("intent", "update-security");

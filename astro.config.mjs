@@ -5,6 +5,11 @@ import cloudflare from "@astrojs/cloudflare";
 // https://astro.build/config
 export default defineConfig({
   output: "server",
+  // Browser proof must represent the product surface, not Astro's local
+  // inspection overlay. Production never injects it; keep dev/e2e equivalent.
+  devToolbar: {
+    enabled: false,
+  },
   adapter: cloudflare({
     platformProxy: {
       enabled: true,

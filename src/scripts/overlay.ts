@@ -212,6 +212,27 @@ function enhance(): void {
       });
     },
   );
+
+  document.querySelectorAll<HTMLFormElement>("[data-reset-demo-form]").forEach(
+    (form) => {
+      form.addEventListener("submit", (event) => {
+        const submit = form.querySelector<HTMLButtonElement>(
+          'button[type="submit"]',
+        );
+        if (!submit) return;
+        if (form.dataset.submitting === "true") {
+          event.preventDefault();
+          return;
+        }
+        form.dataset.submitting = "true";
+        // Do not set disabled here: disabled successful controls are omitted
+        // from native form serialization, which would drop intent=reset-demo.
+        submit.setAttribute("aria-disabled", "true");
+        submit.style.pointerEvents = "none";
+        submit.textContent = form.dataset.pendingLabel ?? "RESETTING…";
+      });
+    },
+  );
 }
 
 enhance();

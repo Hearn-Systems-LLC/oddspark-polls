@@ -14,15 +14,25 @@ import ShareAction from "../../../components/share-action.astro";
 import { buildPollCardViewModel } from "../../../components/poll-card";
 import { formatVoteTotal } from "../../../components/live-indicator";
 import { createPollPersistence } from "../../../adapters/d1/index";
+import { createDemoPollPersistence } from "../../../adapters/d1/demo-poll";
 import { parseLifecycleForm } from "../../../lib/creator-lifecycle-form";
 import {
+  DEMO_RESET_FLASH_COOKIE_NAME,
+  createDemoResetFlash,
+  verifyDemoResetFlash,
+} from "../../../lib/demo-reset-flash";
+import {
   CREATE_POLL_COPY,
+  DEMO_POLL_COPY,
   LIFECYCLE_COPY,
   RECENTLY_CREATED_WINDOW_MS,
   SECURITY_COPY,
   SECURITY_TOGGLE_META,
   closePoll,
   deletePoll,
+  isDemoPollCompatible,
+  resetDemoPoll,
+  validateDemoPollReference,
   parseSecurityToggleDraft,
   snapshotSecurityToggles,
   updatePollDefinition,
@@ -82,6 +92,7 @@ const ownerId = principal.userId as UserId;
 const pollId = (Astro.params.pollId ?? "") as PollId;
 const csrfToken = requestContext?.csrfToken?.value ?? "";
 const persistence = createPollPersistence(env.DB);
+const demoPersistence = createDemoPollPersistence(env.DB);
 
 type OutcomeKind =
   | "created"
@@ -90,6 +101,7 @@ type OutcomeKind =
   | "poll-closed"
   | "security-updated"
   | "listing-updated"
+  | "demo-reset"
   | null;
 
 let fieldErrors: Record<string, string> = {};
@@ -148,7 +160,68 @@ if (Astro.request.method === "POST") {
     maxSelections: parsedForm.maxSelections,
   };
 
-  if (!poll) {
+  if (intent === "reset-demo") {
+    const result = await resetDemoPoll(
+      {
+        loadByReference: demoPersistence.loadByReference,
+        replace: demoPersistence.replace,
+      },
+      {
+        configuredReference: env.DEMO_POLL_REFERENCE,
+        requestedPollId: pollId,
+        ownerUserId: ownerId,
+      },
+    );
+    if (result.ok) {
+      if (result.value.kind === "replaced") {
+        const resetFlash = await createDemoResetFlash(
+          env.BETTER_AUTH_SECRET,
+          {
+            sessionId: principal.session.id,
+            ownerUserId: ownerId,
+            pollId: result.value.pollId,
+            representationVersion: result.value.representationVersion,
+          },
+        );
+        return new Response(null, {
+          status: 303,
+          headers: {
+            location: `/creator/polls/${result.value.pollId}`,
+            "cache-control": "private, no-store",
+            "set-cookie": `${DEMO_RESET_FLASH_COOKIE_NAME}=${resetFlash}; Path=/creator/polls/; Max-Age=60; HttpOnly; SameSite=Lax${Astro.url.protocol === "https:" ? "; Secure" : ""}`,
+          },
+        });
+      }
+      const targetPollId =
+        result.value.kind === "stale"
+          ? result.value.currentPollId
+          : result.value.pollId;
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: `/creator/polls/${targetPollId}`,
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+    if (result.error.code === "demo_reset_not_found") {
+      poll = null;
+      Astro.response.status = 404;
+    } else if (
+      result.error.code === "demo_reset_closed" ||
+      result.error.code === "demo_reset_moderated" ||
+      result.error.code === "demo_reset_ineligible" ||
+      result.error.code === "demo_reset_stale"
+    ) {
+      formError = result.error.message;
+      Astro.response.status = 422;
+      poll = await persistence.findPollForOwner(pollId, ownerId);
+    } else {
+      formError = result.error.message;
+      Astro.response.status = 500;
+      poll = await persistence.findPollForOwner(pollId, ownerId);
+    }
+  } else if (!poll) {
     Astro.response.status = 404;
   } else if (intent === "add-option") {
     const lifecycle = await loadLifecycle();
@@ -496,6 +569,59 @@ if (poll && !lifecycleSnapshot) {
   Astro.response.status = 404;
 }
 
+const configuredDemoReference = validateDemoPollReference(
+  env.DEMO_POLL_REFERENCE,
+);
+const configuredDemoSnapshot = configuredDemoReference.ok
+  ? await demoPersistence.loadByReference(configuredDemoReference.value)
+  : null;
+const isCurrentDesignatedDemo =
+  poll !== null &&
+  configuredDemoSnapshot !== null &&
+  configuredDemoSnapshot.pollId === pollId &&
+  configuredDemoSnapshot.ownerUserId === ownerId;
+const demoResetEmpty =
+  isCurrentDesignatedDemo && configuredDemoSnapshot?.voterCount === 0;
+const demoResetPolicyEligible =
+  isCurrentDesignatedDemo &&
+  configuredDemoSnapshot !== null &&
+  isDemoPollCompatible(configuredDemoSnapshot) &&
+  configuredDemoSnapshot.closedAtMs === null &&
+  configuredDemoSnapshot.discoveryState !== "delisted" &&
+  configuredDemoSnapshot.moderationActionCount === 0;
+const confirmResetDemo =
+  Astro.url.searchParams.get("confirm") === "reset-demo" &&
+  demoResetPolicyEligible &&
+  !demoResetEmpty;
+
+let demoResetOutcomeBody = DEMO_POLL_COPY.resetSuccessEmpty;
+const resetFlash = Astro.cookies.get(DEMO_RESET_FLASH_COOKIE_NAME)?.value;
+if (Astro.request.method === "GET" && resetFlash) {
+  Astro.response.headers.append(
+    "set-cookie",
+    `${DEMO_RESET_FLASH_COOKIE_NAME}=; Path=/creator/polls/; Max-Age=0; HttpOnly; SameSite=Lax${Astro.url.protocol === "https:" ? "; Secure" : ""}`,
+  );
+  if (poll && lifecycleSnapshot) {
+    const resetVersion = await verifyDemoResetFlash(
+      env.BETTER_AUTH_SECRET,
+      resetFlash,
+      {
+        sessionId: principal.session.id,
+        ownerUserId: ownerId,
+        pollId,
+        representationVersion: lifecycleSnapshot.representationVersion,
+      },
+    );
+    if (resetVersion !== null) {
+      outcome = "demo-reset";
+      demoResetOutcomeBody =
+        lifecycleSnapshot.voterCount === 0
+          ? DEMO_POLL_COPY.resetSuccessEmpty
+          : DEMO_POLL_COPY.resetSuccessRaced;
+    }
+  }
+}
+
 const canonicalUrl = poll
   ? `${Astro.url.origin}/${poll.canonicalReference}`
   : null;
@@ -556,6 +682,7 @@ const outcomeCopy: Record<Exclude<OutcomeKind, null>, string> = {
   "poll-closed": "Poll closed.",
   "security-updated": "Security updated.",
   "listing-updated": "Listing updated.",
+  "demo-reset": demoResetOutcomeBody,
 };
 
 const listingState = lifecycleSnapshot?.discoveryState ?? poll?.discoveryState;
@@ -587,7 +714,9 @@ const securityVotesIn = voterCount > 0;
 
 const title = poll
   ? outcome
-    ? `${outcomeCopy[outcome].replace(/\.$/, "")} — Oddspark Polls`
+    ? outcome === "demo-reset"
+      ? `${DEMO_POLL_COPY.resetSuccessHeading} — Oddspark Polls`
+      : `${outcomeCopy[outcome].replace(/\.$/, "")} — Oddspark Polls`
     : `${poll.question} — Oddspark Polls`
   : "Not found — Oddspark Polls";
 
@@ -607,7 +736,18 @@ const detailPath = `/creator/polls/${pollId}`;
     data-creator-surface
   >
     {
-      outcome && (
+      outcome === "demo-reset" ? (
+        <div class="outcome-line" data-outcome="demo-reset">
+          <h2
+            class="demo-reset-outcome-heading"
+            tabindex="-1"
+            autofocus
+          >
+            {DEMO_POLL_COPY.resetSuccessHeading}
+          </h2>
+          <p>{outcomeCopy[outcome]}</p>
+        </div>
+      ) : outcome ? (
         <p
           class="outcome-line"
           data-outcome={outcome === "created" ? "created" : outcome}
@@ -616,7 +756,7 @@ const detailPath = `/creator/polls/${pollId}`;
         >
           {outcomeCopy[outcome]}
         </p>
-      )
+      ) : null
     }
 
     <section
@@ -832,6 +972,22 @@ const detailPath = `/creator/polls/${pollId}`;
                   </form>
                 )
               }
+              {
+                demoResetPolicyEligible && (
+                  <ButtonSecondary
+                    href={demoResetEmpty ? undefined : `${detailPath}?confirm=reset-demo`}
+                    id="reset-demo-poll-invoker"
+                    disabled={demoResetEmpty}
+                    aria-haspopup={demoResetEmpty ? undefined : "dialog"}
+                    aria-controls={demoResetEmpty ? undefined : "reset-demo-poll-overlay"}
+                    data-overlay-open-for={demoResetEmpty ? undefined : "reset-demo-poll-overlay"}
+                  >
+                    {demoResetEmpty
+                      ? DEMO_POLL_COPY.resetDisabled
+                      : DEMO_POLL_COPY.resetTrigger}
+                  </ButtonSecondary>
+                )
+              }
               <ButtonSecondary
                 href={`${detailPath}?confirm=delete`}
                 id="delete-poll-invoker"
@@ -847,6 +1003,32 @@ const detailPath = `/creator/polls/${pollId}`;
                 </ButtonSecondary>
               </p>
             </div>
+
+            <Overlay
+              id="reset-demo-poll-overlay"
+              open={confirmResetDemo}
+              titleId="reset-demo-poll-title"
+              descriptionId="reset-demo-poll-description"
+              title={DEMO_POLL_COPY.resetTitle}
+            >
+              <p slot="description">{DEMO_POLL_COPY.resetBody}</p>
+              <div slot="actions" class="overlay-action-row">
+                <ButtonSecondary href={detailPath} data-overlay-cancel={true}>
+                  {DEMO_POLL_COPY.resetCancel}
+                </ButtonSecondary>
+                <form
+                  method="post"
+                  action={detailPath}
+                  data-reset-demo-form
+                  data-pending-label={DEMO_POLL_COPY.resetPending}
+                >
+                  <input type="hidden" name="csrf_token" value={csrfToken} />
+                  <ButtonDestructive type="submit" name="intent" value="reset-demo">
+                    {DEMO_POLL_COPY.resetConfirm}
+                  </ButtonDestructive>
+                </form>
+              </div>
+            </Overlay>
 
             <Overlay
               id="delete-poll-overlay"
@@ -965,6 +1147,18 @@ const detailPath = `/creator/polls/${pollId}`;
     margin: 0 0 var(--space-6);
     font-size: var(--type-body-lg-size);
     line-height: var(--type-body-lg-lh);
+  }
+
+  .demo-reset-outcome-heading,
+  .outcome-line > p {
+    margin: 0;
+  }
+
+  .demo-reset-outcome-heading {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
   }
 
   .detail-status {

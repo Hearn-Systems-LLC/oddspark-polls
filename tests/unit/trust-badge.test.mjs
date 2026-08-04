@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 const badgeSource = readFileSync("src/components/trust-badge.astro", "utf8");
 const badgeLogicSource = readFileSync("src/components/trust-badge.ts", "utf8");
 const tokensSource = readFileSync("src/styles/tokens.css", "utf8");
-const votePageSource = readFileSync("src/pages/[reference].astro", "utf8");
+const voteSurfaceSource = readFileSync(
+  "src/components/poll-voting-surface.astro",
+  "utf8",
+);
 const tallySource = readFileSync("src/components/results-tally.astro", "utf8");
 const resultsPageSource = readFileSync(
   "src/pages/[reference]/results.astro",
@@ -110,8 +113,8 @@ describe("trust badge component contract (Story 2.4, UX-DR7)", () => {
   });
 
   it("sits immediately before the vote-action block on the writable ballot branch", () => {
-    expect(votePageSource).toMatch(
-      /\{pollToggles && <TrustBadge toggles=\{pollToggles\} \/>\}\s*<div class="vote-action">/,
+    expect(voteSurfaceSource).toMatch(
+      /<TrustBadge toggles=\{pollToggles\} \/>\s*<div class="vote-action">/,
     );
   });
 });
@@ -133,21 +136,23 @@ describe("trust badge Tally composition contract (Story 2.4, AC #4)", () => {
   });
 
   it("threads persisted toggles to both Tally surfaces", () => {
-    expect(votePageSource).toContain("toggles={pollToggles ?? undefined}");
+    expect(voteSurfaceSource).toContain(
+      "toggles={tallyOwnsBadge ? pollToggles : undefined}",
+    );
     expect(resultsPageSource).toContain("toggles={view.securityToggles}");
   });
 
   it("places the post-vote badge with the bars in the desktop grid", () => {
     // The post-vote instance rises 32px (no --space-7; --space-8 is the token).
-    expect(votePageSource).toMatch(
+    expect(voteSurfaceSource).toMatch(
       /\.poll-shell\[data-post-vote="true"\] :global\(\.results-tally-badge\)\s*\{[^}]*margin-top:\s*var\(--space-8\)/,
     );
     // At lg the Tally dissolves (display: contents), so the badge is a direct
     // grid child and needs explicit placement with the bars; Share yields.
-    expect(votePageSource).toMatch(
+    expect(voteSurfaceSource).toMatch(
       /:global\(\.results-tally-badge\)\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*6;/,
     );
-    expect(votePageSource).toMatch(
+    expect(voteSurfaceSource).toMatch(
       /\.poll-shell\[data-post-vote="true"\] > \.share-block\s*\{[^}]*grid-row:\s*7;/,
     );
   });

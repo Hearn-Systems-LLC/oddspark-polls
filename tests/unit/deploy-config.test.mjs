@@ -76,6 +76,7 @@ describe("buildRemoteDeployConfig", () => {
       wranglerJson.env.staging.vars.TURNSTILE_SITE_KEY,
     );
     expect(config.vars.TURNSTILE_SITE_KEY).not.toBe(ALWAYS_PASS);
+    expect(config.vars.DEMO_POLL_REFERENCE).toBe("demo");
     expect(config.secrets.required).toEqual(REQUIRED_SECRETS);
     expect(config.ratelimits).toEqual(wranglerJson.env.staging.ratelimits);
     expect(config.kv_namespaces).toEqual(wranglerJson.env.staging.kv_namespaces);
@@ -93,6 +94,7 @@ describe("buildRemoteDeployConfig", () => {
     expect(config.vars.TURNSTILE_SITE_KEY).not.toBe(
       wranglerJson.env.staging.vars.TURNSTILE_SITE_KEY,
     );
+    expect(config.vars.DEMO_POLL_REFERENCE).toBe("demo");
     expect(config.secrets.required).toEqual(REQUIRED_SECRETS);
     expect(config.ratelimits).toEqual(wranglerJson.env.production.ratelimits);
     expect(JSON.stringify(config)).not.toContain(ALWAYS_PASS);

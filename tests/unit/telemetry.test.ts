@@ -139,6 +139,12 @@ describe("telemetry adapter", () => {
     expect(classifyAuthProviderOutcome("/creator", 200, null)).toBe("none");
   });
 
+  it("emits the one generic Demo unavailable result before generic 5xx classification", () => {
+    expect(
+      telemetryResultForStatus(503, { demoUnavailable: true }),
+    ).toBe("demo_unavailable");
+  });
+
   it("prefers a Turnstile provider-outcome override over auth classification", () => {
     expect(
       resolveProviderOutcome("/some-poll", 422, null, "timeout"),

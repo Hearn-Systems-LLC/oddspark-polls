@@ -6,6 +6,63 @@
  */
 
 /**
+ * Parse the JSON-with-comments form Wrangler accepts without corrupting
+ * comment-like characters or trailing-comma text inside string values.
+ *
+ * @param {string} text JSONC source
+ * @returns {object}
+ */
+export function parseJsonc(text) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i += 1;
+      out += "\n";
+      continue;
+    }
+    out += ch;
+  }
+
+  const chars = [...out];
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < chars.length; i += 1) {
+    const ch = chars[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < chars.length && /\s/u.test(chars[j])) j += 1;
+      if (chars[j] === "}" || chars[j] === "]") chars[i] = " ";
+    }
+  }
+  return JSON.parse(chars.join(""));
+}
+
+/**
  * Build a deploy-ready Wrangler JSON object for a named remote environment.
  *
  * @param {object} wranglerJson Parsed root wrangler.jsonc

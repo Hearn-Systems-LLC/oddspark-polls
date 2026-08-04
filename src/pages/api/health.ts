@@ -32,6 +32,12 @@ export const GET: APIRoute = () => {
   ) {
     missing.push("TURNSTILE_SECRET_KEY");
   }
+  if (
+    typeof env.DEMO_POLL_REFERENCE !== "string" ||
+    env.DEMO_POLL_REFERENCE.trim().length === 0
+  ) {
+    missing.push("DEMO_POLL_REFERENCE");
+  }
 
   if (missing.length > 0) {
     return Response.json(

@@ -1,0 +1,280 @@
+---
+import ButtonPrimary from "./button-primary.astro";
+import PollOption from "./poll-option.astro";
+import ResultsTally from "./results-tally.astro";
+import ShareAction from "./share-action.astro";
+import TrustBadge from "./trust-badge.astro";
+import Turnstile from "./turnstile.astro";
+import { formatUtc } from "../lib/datetime";
+import { VOTE_COPY } from "../modules/voting/index";
+import {
+  splitVoteCopy,
+  type PollDeliveryState,
+  type VoteOutcomeView,
+} from "../lib/poll-delivery";
+
+interface Props {
+  delivery: PollDeliveryState;
+  formAction: string;
+  canonicalUrl: string;
+  liveEndpoint: string;
+  turnstileSiteKey: string;
+  embedded?: boolean;
+}
+
+const {
+  delivery,
+  formAction,
+  canonicalUrl,
+  liveEndpoint,
+  turnstileSiteKey,
+  embedded = false,
+} = Astro.props;
+const {
+  poll,
+  submissionId,
+  outcome,
+  readOnly,
+  actionDisabled,
+  postVoteResults,
+  yourBallotLabels,
+  yourBallotOptionIds,
+  resultsRenderedAtMs,
+  pollToggles,
+  compactCounted,
+  showReadOnlyOptions,
+  showTally,
+  resultsExplanation,
+  postVoteComposition,
+  selected,
+  multiSelect,
+  effectiveMinSelections,
+  effectiveMaxSelections,
+  boundsHint,
+} = delivery;
+const selectedCount = selected.size;
+
+const splitTimedText = (
+  text: string,
+  time: VoteOutcomeView["time"],
+): [string, string] | null => {
+  if (time === null) return null;
+  const tokenIndex = text.indexOf(time.placeholder);
+  return tokenIndex < 0
+    ? null
+    : [text.slice(0, tokenIndex), text.slice(tokenIndex + time.placeholder.length)];
+};
+const stripTimedToken = (text: string): string =>
+  text.replace(/\s*\{(?:when|deadline)\}/g, "");
+const outcomeHeadingTime = outcome ? splitTimedText(outcome.heading, outcome.time) : null;
+const outcomeBodyTime = outcome ? splitTimedText(outcome.body, outcome.time) : null;
+const resultsExplanationTime = resultsExplanation
+  ? splitTimedText(resultsExplanation.body, resultsExplanation.time)
+  : null;
+const offlineCopy = splitVoteCopy(VOTE_COPY.offline);
+const tallyOwnsBadge = readOnly;
+---
+
+<section
+  class:list={["poll-shell", embedded && "is-embedded"]}
+  data-poll-voting-surface
+  data-post-vote={postVoteComposition ? "true" : undefined}
+  aria-labelledby={embedded ? "demo-poll-question" : undefined}
+>
+  {
+    !readOnly && (
+      <p
+        class="vote-outcome is-rejection"
+        data-offline-outcome
+        data-offline-heading-copy={offlineCopy.heading}
+        data-offline-body-copy={offlineCopy.body}
+        tabindex="-1"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      >
+        <strong data-offline-outcome-heading></strong>
+        <span data-offline-outcome-body></span>
+      </p>
+    )
+  }
+  {
+    outcome && (
+      <p
+        class:list={["vote-outcome", outcome.tone === "rejection" && "is-rejection"]}
+        data-vote-outcome
+        data-outcome-code={outcome.code}
+        tabindex="-1"
+        autofocus
+      >
+        <strong>
+          {outcomeHeadingTime && outcome.time ? (
+            <>
+              {outcomeHeadingTime[0]}
+              <time datetime={new Date(outcome.time.timestampMs).toISOString()} data-deadline={outcome.time.timestampMs}>
+                {formatUtc(outcome.time.timestampMs)}
+              </time>
+              {outcomeHeadingTime[1]}
+            </>
+          ) : stripTimedToken(outcome.heading)}
+        </strong>
+        {outcome.body && (
+          <>
+            {" "}
+            {outcomeBodyTime && outcome.time ? (
+              <>
+                {outcomeBodyTime[0]}
+                <time datetime={new Date(outcome.time.timestampMs).toISOString()} data-deadline={outcome.time.timestampMs}>
+                  {formatUtc(outcome.time.timestampMs)}
+                </time>
+                {outcomeBodyTime[1]}
+              </>
+            ) : stripTimedToken(outcome.body)}
+          </>
+        )}
+      </p>
+    )
+  }
+  {
+    !readOnly && poll.deadlineMs !== null && (
+      <div class="poll-meta">
+        <div class="poll-deadline">
+          <time datetime={new Date(poll.deadlineMs).toISOString()} data-deadline={poll.deadlineMs}>
+            {formatUtc(poll.deadlineMs)}
+          </time>
+          <span data-deadline-countdown hidden></span>
+        </div>
+      </div>
+    )
+  }
+  <h1 class="poll-question" id={embedded ? "demo-poll-question" : undefined}>{poll.question}</h1>
+  {poll.description && <p class="poll-description">{poll.description}</p>}
+  {
+    resultsExplanation && (
+      <p class="results-explanation" data-results-explanation data-results-state={resultsExplanation.kind}>
+        {resultsExplanationTime && resultsExplanation.time ? (
+          <>
+            {resultsExplanationTime[0]}
+            <time datetime={new Date(resultsExplanation.time.timestampMs).toISOString()} data-deadline={resultsExplanation.time.timestampMs}>
+              {formatUtc(resultsExplanation.time.timestampMs)}
+            </time>
+            {resultsExplanationTime[1]}
+          </>
+        ) : stripTimedToken(resultsExplanation.body)}
+      </p>
+    )
+  }
+  {
+    showReadOnlyOptions ? (
+      <ul class="poll-options">
+        {poll.options.map((option) => (
+          <li>
+            <PollOption id={`option-${option.id}`} name="option_id" value={option.id} label={option.label} checked={false} type={multiSelect ? "checkbox" : "radio"} readOnly />
+          </li>
+        ))}
+      </ul>
+    ) : compactCounted ? null : (
+      <form
+        method="post"
+        action={formAction}
+        data-vote-form
+        data-vote-locked={actionDisabled ? "true" : "false"}
+        data-multi-select={multiSelect ? "true" : "false"}
+        data-min={effectiveMinSelections}
+        data-max={effectiveMaxSelections}
+        {...(multiSelect && selectedCount >= effectiveMaxSelections ? { "data-max-reached": "true" } : {})}
+        aria-label={embedded ? "Vote in the Demo Poll" : undefined}
+      >
+        <input type="hidden" name="submission_id" value={submissionId} />
+        {multiSelect && (
+          <p class="vote-bounds-hint" id="vote-bounds-hint" data-bounds-hint aria-live="polite">{boundsHint}</p>
+        )}
+        <fieldset class="poll-options" aria-describedby={multiSelect ? "vote-bounds-hint" : undefined}>
+          <legend class="visually-hidden">Options</legend>
+          {poll.options.map((option) => (
+            <PollOption id={`option-${option.id}`} name="option_id" value={option.id} label={option.label} checked={selected.has(option.id)} type={multiSelect ? "checkbox" : "radio"} />
+          ))}
+        </fieldset>
+        <TrustBadge toggles={pollToggles} />
+        <div class="vote-action">
+          {!multiSelect && <p class="vote-hint" data-vote-hint hidden>SELECT AN OPTION TO UNLOCK VOTE</p>}
+          {poll.captchaEnabled && typeof turnstileSiteKey === "string" && turnstileSiteKey.trim().length > 0 && <Turnstile siteKey={turnstileSiteKey} />}
+          {poll.captchaEnabled && typeof turnstileSiteKey === "string" && turnstileSiteKey.trim().length > 0 && <noscript>JavaScript is required for the human check on this Poll.</noscript>}
+          <ButtonPrimary type="submit" class="vote-button" disabled={actionDisabled}>VOTE</ButtonPrimary>
+        </div>
+      </form>
+    )
+  }
+  {
+    showTally && postVoteResults?.kind === "visible" && (
+      <section class:list={["tally-region", embedded && "embedded-tally"]} aria-label={embedded ? "Current Demo Poll results" : undefined}>
+        <ResultsTally
+          tally={postVoteResults.tally}
+          status={postVoteResults.status}
+          yourBallotLabels={yourBallotLabels}
+          yourBallotOptionIds={outcome?.code === "counted" ? yourBallotOptionIds : undefined}
+          toggles={tallyOwnsBadge ? pollToggles : undefined}
+          loading
+          leadership={embedded && !readOnly ? "entropy" : "canonical"}
+          liveEndpoint={postVoteResults.status === "open" ? liveEndpoint : undefined}
+          initialRenderAtMs={resultsRenderedAtMs}
+        />
+      </section>
+    )
+  }
+  <section class="share-block" aria-label="Share this Poll">
+    <ShareAction canonicalUrl={canonicalUrl} />
+  </section>
+</section>
+
+<script src="../scripts/vote-form.ts"></script>
+{!readOnly && poll.captchaEnabled && turnstileSiteKey.trim().length > 0 && <script src="../scripts/turnstile.ts"></script>}
+<script src="../scripts/share-action.ts"></script>
+{showTally && postVoteResults?.kind === "visible" && <script src="../scripts/chart-form-toggle.ts"></script>}
+{showTally && postVoteResults?.kind === "visible" && postVoteResults.status === "open" && <script src="../scripts/results-live.ts"></script>}
+
+<style>
+  .poll-shell { width: min(100%, var(--space-measure)); margin-inline: auto; }
+  .poll-shell:not(.is-embedded) { padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap); }
+  .poll-shell.is-embedded { padding: 0; }
+  .poll-meta { display: flex; justify-content: flex-end; margin-bottom: var(--space-4); }
+  .poll-deadline { display: grid; gap: var(--space-1); justify-items: end; color: var(--color-dim); font-family: var(--font-machine); font-size: var(--type-label-caps-lg-size); line-height: var(--type-label-caps-lh); letter-spacing: var(--type-label-caps-ls); text-align: right; text-transform: uppercase; }
+  .poll-question { margin: 0 0 var(--space-4); font-family: var(--font-human); font-size: var(--type-poll-question-size); font-weight: 400; line-height: var(--type-poll-question-lh); overflow-wrap: anywhere; }
+  .poll-description { margin: 0 0 var(--space-6); color: var(--color-dim); font-size: var(--type-body-size); line-height: var(--type-body-lh); white-space: pre-wrap; }
+  .results-explanation { margin: 0 0 var(--space-6); color: var(--color-text); font-size: var(--type-body-lg-size); line-height: var(--type-body-lg-lh); }
+  .poll-options { margin: 0; padding: 0; border: 0; }
+  .poll-options > li { list-style: none; }
+  [data-vote-form][data-vote-inflight="true"] .poll-options { pointer-events: none; }
+  [data-vote-form][data-vote-inflight="true"] :global(.vote-button) { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
+  [data-vote-form][data-max-reached="true"] :global(label.poll-option:has(.poll-option-input:not(:checked))) { cursor: default; }
+  [data-vote-form][data-max-reached="true"] :global(label.poll-option:has(.poll-option-input:not(:checked)):hover) { background: transparent; }
+  .vote-outcome { margin: 0 0 var(--space-6); color: var(--color-text); font-size: var(--type-body-lg-size); line-height: var(--type-body-lg-lh); }
+  .vote-outcome:focus { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
+  .vote-outcome.is-rejection strong { color: var(--color-alarm); }
+  .vote-outcome[hidden] { display: none; }
+  .vote-action { display: grid; gap: var(--space-3); justify-items: start; margin-top: var(--space-6); }
+  .vote-bounds-hint { margin: 0 0 var(--space-3); color: var(--color-dim); font-size: var(--type-caption-size); line-height: var(--type-caption-lh); }
+  .vote-hint { margin: 0; color: var(--color-dim); font-family: var(--font-machine); font-size: var(--type-label-caps-size); line-height: var(--type-label-caps-lh); letter-spacing: var(--type-label-caps-ls); text-transform: uppercase; }
+  .vote-hint[hidden] { display: none; }
+  .embedded-tally, .share-block { margin-top: var(--space-10); padding-top: var(--space-6); border-top: var(--space-hairline) solid var(--color-rule); }
+  .poll-shell[data-post-vote="true"] :global(.results-tally-badge) { margin-top: var(--space-8); }
+  @media (min-width: 640px) { .poll-shell:not(.is-embedded) { padding-inline: var(--space-margin-desktop); } }
+  @media (min-width: 1024px) {
+    .poll-shell[data-post-vote="true"]:not(.is-embedded) { display: grid; grid-template-columns: 320px 1fr; column-gap: var(--space-8); align-items: start; width: 100%; }
+    .poll-shell[data-post-vote="true"] > .vote-outcome { grid-column: 1; grid-row: 1; }
+    .poll-shell[data-post-vote="true"] > .poll-question { grid-column: 1; grid-row: 2; }
+    .poll-shell[data-post-vote="true"] > .poll-description { grid-column: 1; grid-row: 3; }
+    .poll-shell[data-post-vote="true"] > .tally-region,
+    .poll-shell[data-post-vote="true"] > .tally-region > :global(.results-tally) { display: contents; }
+    .poll-shell[data-post-vote="true"] :global(.results-tally-ballot) { grid-column: 1; grid-row: 4; }
+    .poll-shell[data-post-vote="true"] :global(.results-tally-summary) { grid-column: 2; grid-row: 1; }
+    .poll-shell[data-post-vote="true"] :global(.results-tally-tied),
+    .poll-shell[data-post-vote="true"] :global(.results-tally-empty) { grid-column: 2; grid-row: 2; }
+    .poll-shell[data-post-vote="true"] :global(.results-tally-live) { grid-column: 2; grid-row: 3; }
+    .poll-shell[data-post-vote="true"] :global(.chart-form-toggle) { grid-column: 2; grid-row: 4; }
+    .poll-shell[data-post-vote="true"] :global(.results-tally-bars),
+    .poll-shell[data-post-vote="true"] :global(.chart-form-pie) { grid-column: 2; grid-row: 5; }
+    .poll-shell[data-post-vote="true"] :global(.results-tally-badge) { grid-column: 2; grid-row: 6; }
+    .poll-shell[data-post-vote="true"] > .share-block { grid-column: 1 / -1; grid-row: 7; }
+  }
+</style>

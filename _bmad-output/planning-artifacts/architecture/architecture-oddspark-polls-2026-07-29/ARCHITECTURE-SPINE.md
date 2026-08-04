@@ -13,6 +13,7 @@ binds:
   - 'UJ-1..UJ-7'
   - 'CAP-CREATOR-SELF-SERVICE'
   - 'CAP-DISCOVER'
+  - 'CAP-DEMO-POLL'
   - 'CAP-SHARE'
 sources:
   - 'User direction on public creation, voting, discovery, and sharing, 2026-07-29'
@@ -125,9 +126,15 @@ flowchart LR
   of truth
 - **Rule:** D1 is the sole transactional source of truth. R2 stores only
   Poll-owned image bytes. Tallies, Ballot Manifests, discovery cards, exports,
-  and live messages are projections. Accepted Vote facts are immutable except
-  Meeting Poll availability, whose session-scoped identity may update its own
-  row. Each actual delist or clear appends one private `moderation_action`,
+  and live messages are projections. In the ordinary lifecycle, accepted Vote
+  facts remain immutable while their Poll aggregate exists; Meeting Poll
+  availability is the one in-aggregate exception, because its session-scoped
+  identity may update its own row. `ResetDemoPoll` is the one sanctioned
+  aggregate-lifecycle exception: it may atomically replace only the explicitly
+  configured Demo Poll under its stable canonical reference, transfer stable
+  option IDs, and delete the old aggregate so its Poll-owned Voting facts
+  cascade. It must refuse whenever any current or historical Discovery
+  moderation fact exists. Each actual delist or clear appends one private `moderation_action`,
   ordered by a monotonic D1 sequence, and changes `discovery_state` in the same
   D1 batch. The batch includes the live Administrator-role predicate and rolls
   back action and state together on any failed statement. No-op, denied, and
@@ -327,9 +334,15 @@ sequenceDiagram
   `unlisted | listed`. The Discovery D1 adapter commits the guarded role check,
   ordered action, state change, and catalog-revision trigger as one transaction.
   Only the owning module's application commands may write its tables. `CastVote`
-  is the sole cross-module transaction
-  coordinator and persists normalized contributions returned by Poll Type,
-  Security, and Comment policy ports.
+  is the ordinary cross-module transaction coordinator and persists normalized
+  contributions returned by Poll Type, Security, and Comment policy ports.
+  `ResetDemoPoll` is the only additional cross-capability coordinator. The
+  provider-free `polls/demo-poll` policy owns designation, fixed-template
+  validation, and reset eligibility; the D1 Demo replacement adapter owns the
+  purpose-shaped batch; landing and creator Poll detail routes only map HTTP
+  effects. The coordinator may replace Polls-owned identity/options and thereby
+  destroy Poll-owned Voting facts only for the configured Demo and only with no
+  moderation history. It never writes Discovery state or moderation facts.
 
 ### AD-20 — Meeting response creation and revision are different commands
 
@@ -404,6 +417,17 @@ sequenceDiagram
   `discovery_state` transition instead increments the separate
   `discovery_catalog_revision` in the same D1 transaction; a no-op, denial, or
   failure increments neither version.
+  `ResetDemoPoll` transfers the configured Demo to a successor whose version is
+  the transaction-current version plus one. The D1 batch stages guarded
+  successor insertion, stable option-ID transfer, stable-reference transfer,
+  and old-aggregate deletion, then uses a conditional duplicate-reference
+  assertion to roll back every partial shape. An actual replacement issues a
+  one-shot, session-bound `demo-reset-flash` tied to successor ID and reset
+  version. Vote/reset and Delist/reset races linearize at the batch: a prior Vote
+  contributes its increment before reset; a losing Vote refreshes against the
+  stable reference; Delist-first refuses reset; reset-first makes a stale
+  moderation target retry. No migration is required because the existing
+  Poll-owned cascades and stable option identities are sufficient.
 
 ## Consistency Conventions
 
@@ -518,6 +542,7 @@ erDiagram
 | --- | --- | --- |
 | Users, accounts, sessions, Administrator role | Identity | Better Auth adapter plus guarded out-of-band role assignment |
 | Poll lifecycle, type, options, Deadline, result visibility | Polls | Poll commands |
+| Designated Demo aggregate replacement | Polls + Voting coordination | `ResetDemoPoll` through the D1 Demo replacement adapter; no Discovery fact may exist |
 | Listing state and ordered moderation actions | Discovery | Owner listing commands or guarded `delist` / `clear_delisted` transaction |
 | Votes, selections, availability, claims, code redemptions, Comments | Voting | `CastVote`, `CreateMeetingResponse`, `ReviseMeetingResponse`, moderation commands |
 | Media records and cleanup outbox | Media | Media adoption and deletion commands |
@@ -550,6 +575,7 @@ flowchart LR
 | FR-20–FR-22 | `results`, export adapters, result endpoints | AD-6, AD-9, AD-10, AD-21 |
 | FR-24 | `comments`, Vote transaction | AD-6, AD-7, AD-17 |
 | FR-25–FR-27 | Astro landing/demo pages, public repository | AD-2, AD-10, AD-14 |
+| FR-26, CAP-DEMO-POLL | `polls/demo-poll` owns designation; `ResetDemoPoll`; D1 Demo replacement adapter; landing and creator Poll detail routes | AD-1, AD-6, AD-7, AD-14, AD-19, AD-22, AD-24 |
 | UX live motion and trust surfaces | server result projection plus `scripts/results-live.ts` | AD-2, AD-8, AD-10 |
 
 ## Deferred

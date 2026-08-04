@@ -27,6 +27,11 @@ declare global {
     TURNSTILE_SECRET_KEY: string;
   }
 
+  interface DemoPollBindings {
+    /** Public, server-owned canonical Custom Link for the landing Demo. */
+    DEMO_POLL_REFERENCE: string;
+  }
+
   namespace App {
     interface Locals extends Runtime {
       requestContext?: RequestContext;
@@ -35,12 +40,12 @@ declare global {
   }
 
   namespace Cloudflare {
-    interface Env extends AuthBindings, TurnstileBindings {}
-    interface StagingEnv extends AuthBindings, TurnstileBindings {}
-    interface ProductionEnv extends AuthBindings, TurnstileBindings {}
+    interface Env extends AuthBindings, TurnstileBindings, DemoPollBindings {}
+    interface StagingEnv extends AuthBindings, TurnstileBindings, DemoPollBindings {}
+    interface ProductionEnv extends AuthBindings, TurnstileBindings, DemoPollBindings {}
   }
 
-  interface Env extends AuthBindings, TurnstileBindings {
+  interface Env extends AuthBindings, TurnstileBindings, DemoPollBindings {
     DB: D1Database;
     MEDIA: R2Bucket;
     ASSETS: Fetcher;

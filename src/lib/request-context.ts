@@ -25,6 +25,8 @@ export type RequestContext = {
    * view. The committed vote outcome still renders; telemetry marks the one
    * existing request record as an error. */
   resultsLookupFailed: boolean;
+  /** Set only when the configured landing Demo cannot be safely resolved. */
+  demoUnavailable: boolean;
   /** Set by the vote page when it assigns a 422/429 vote-rejection outcome.
    * Only then does telemetry record 422/429 as an error — a creator-surface
    * validation 422 keeps its ordinary "ok" semantics. */

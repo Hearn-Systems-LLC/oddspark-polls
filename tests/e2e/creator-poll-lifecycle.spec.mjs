@@ -434,7 +434,7 @@ test.describe("creator poll lifecycle", () => {
     await page.goto(`/creator/polls/${pollId}?confirm=delete`);
     const overlay = page.locator("#delete-poll-overlay");
     await expect(overlay).toBeVisible();
-    await expect(page.locator("[data-overlay-cancel]")).toBeFocused();
+    await expect(overlay.locator("[data-overlay-cancel]")).toBeFocused();
     await expect(overlay).toContainText(`Delete "${hostileQuestion}"?`);
     await expect(overlay.locator("img")).toHaveCount(0);
     await expect(overlay).toContainText(
@@ -459,14 +459,14 @@ test.describe("creator poll lifecycle", () => {
     await invoker.focus();
     await page.keyboard.press("Enter");
     await expect(overlay).toBeVisible();
-    await expect(page.locator("[data-overlay-cancel]")).toBeFocused();
+    await expect(overlay.locator("[data-overlay-cancel]")).toBeFocused();
     await expect(invoker).toHaveAttribute("aria-expanded", "true");
     await page.keyboard.press("Shift+Tab");
     await expect(
       overlay.getByRole("button", { name: "DELETE POLL" }),
     ).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(page.locator("[data-overlay-cancel]")).toBeFocused();
+    await expect(overlay.locator("[data-overlay-cancel]")).toBeFocused();
 
     // A panel click is inert; a scrim click dismisses and restores focus.
     await overlay.locator("[data-overlay-panel]").click({ position: { x: 5, y: 5 } });

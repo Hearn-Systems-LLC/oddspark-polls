@@ -9,11 +9,13 @@ const mutableEnv = env as unknown as Record<string, unknown>;
 const originalDigestSecret = env.VOTE_DIGEST_SECRET;
 const originalTurnstileSecret = env.TURNSTILE_SECRET_KEY;
 const originalTurnstileSiteKey = env.TURNSTILE_SITE_KEY;
+const originalDemoPollReference = env.DEMO_POLL_REFERENCE;
 
 afterEach(() => {
   mutableEnv.VOTE_DIGEST_SECRET = originalDigestSecret;
   mutableEnv.TURNSTILE_SECRET_KEY = originalTurnstileSecret;
   mutableEnv.TURNSTILE_SITE_KEY = originalTurnstileSiteKey;
+  mutableEnv.DEMO_POLL_REFERENCE = originalDemoPollReference;
 });
 
 describe("GET /api/health", () => {
@@ -79,5 +81,16 @@ describe("GET /api/health", () => {
       ok: false,
       missing: ["TURNSTILE_SITE_KEY"],
     });
+  });
+
+  it("names a missing Demo reference without disclosing its configured value", async () => {
+    mutableEnv.DEMO_POLL_REFERENCE = undefined;
+
+    const response = await GET({} as unknown as Parameters<typeof GET>[0]);
+
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body).toEqual({ ok: false, missing: ["DEMO_POLL_REFERENCE"] });
+    expect(JSON.stringify(body)).not.toContain(String(originalDemoPollReference));
   });
 });

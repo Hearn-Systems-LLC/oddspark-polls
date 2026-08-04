@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Staging smoke check: HTTP GET against placeholder page.
+ * Staging smoke check: HTTP GET against the product landing page.
  * Asserts 200, the smoke marker, and that the served HTML carries the
  * solar token hex read from the canonical token source (tokens.css).
  *

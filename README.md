@@ -202,7 +202,7 @@ constrained by IP Checks. The browser still makes a direct third-party request
 to Cloudflare's Turnstile iframe when CAPTCHA is on for that Poll; CAPTCHA-off
 polls load no widget and make no Turnstile client request.
 
-### Live URLs (foundation placeholder)
+### Live URLs (product landing page)
 
 | Environment | URL |
 | --- | --- |

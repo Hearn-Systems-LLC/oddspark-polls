@@ -47,9 +47,9 @@ Verbatim from `_bmad-output/planning-artifacts/epics.md` § Story 3.4 (lines 772
   - [x] Capture and inspect committed proof under `test-results/story-3-4-landing-proof/` at 375px dark and 1280px light (matching the `story-3-2-discover-proof` convention): single column holds, 68ch measure respected, no horizontal overflow, 44px+ targets on the create entry, visible focus rings, no card/box/shadow styling. Inspect the screenshots yourself; never ask the user for visual proof.
 
 - [ ] Task 4: Documentation sync and repository gate (AC: all)
-  - [ ] UPDATE `CHANGELOG.md` under `## [Unreleased]` for the user-observable change: the root URL now serves the product landing page (statement, build account, repository link, create entry, Discover link) replacing the foundation showcase.
-  - [ ] UPDATE `README.md` heading `### Live URLs (foundation placeholder)` (line 205): the root URL is no longer a placeholder, and README is the source of truth for environment reality. Adjust that heading/line to describe the landing page; no other README change is expected.
-  - [ ] UPDATE `EXPERIENCE.md` only where reality changed: the landing IA rows already describe this page — reconcile the Demo Poll's absence until Story 3.5 if the text implies it ships now, and record the header composition (mode toggle retained, four-entry discipline). Update `DESIGN.md` only if a genuinely new component or token contract was required; otherwise leave it untouched. Optionally refresh the stale `scripts/smoke.mjs:3` header comment ("placeholder page") in the same PR; the script's logic stays untouched.
+  - [x] UPDATE `CHANGELOG.md` under `## [Unreleased]` for the user-observable change: the root URL now serves the product landing page (statement, build account, repository link, create entry, Discover link) replacing the foundation showcase.
+  - [x] UPDATE `README.md` heading `### Live URLs (foundation placeholder)` (line 205): the root URL is no longer a placeholder, and README is the source of truth for environment reality. Adjust that heading/line to describe the landing page; no other README change is expected.
+  - [x] UPDATE `EXPERIENCE.md` only where reality changed: the landing IA rows already describe this page — reconcile the Demo Poll's absence until Story 3.5 if the text implies it ships now, and record the header composition (mode toggle retained, four-entry discipline). Update `DESIGN.md` only if a genuinely new component or token contract was required; otherwise leave it untouched. Optionally refresh the stale `scripts/smoke.mjs:3` header comment ("placeholder page") in the same PR; the script's logic stays untouched.
   - [ ] Under Node `24.18.0` and pnpm `11.17.0`, run the exact local gate in repository order: `pnpm migrations:guard`, `pnpm test`, `pnpm check`, `pnpm test:e2e`, `pnpm types`, `git diff --exit-code worker-configuration.d.ts`, `pnpm build:production`, and `git diff --check`. Record fresh totals in this story; prior-story totals are historical, not proof.
   - [ ] Keep this story's Dev Agent Record, File List, and `sprint-status.yaml` current through implementation and review. No `TODO`, skipped/only tests, placeholder branch, or undocumented deferral may remain. Dev-story never pushes, deploys, or mutates remotes.
 
@@ -169,6 +169,7 @@ OpenAI Codex (GPT-5)
 - 2026-08-04 RED: the exact smoke-marker source assertion caught an extra class, and the new AstroContainer tests exposed that the workerd transform reduced `tokens.css?raw` to an empty CSS side-effect module.
 - 2026-08-04 GREEN/REFACTOR: restored the exact marker shape and added a narrowly scoped virtual raw-token module in the integration config; the focused route/middleware suite passed 3/3, computed font proof passed 1/1, full `pnpm test` passed 77 files / 1,199 tests, and `pnpm check` passed.
 - 2026-08-04 BROWSER: the replacement landing spec passed 4/4 and generated inspected 375px-dark and 1280px-light proof. A later full-suite run was interrupted by a host removable-volume `EPERM`; the Results case active at interruption passed 1/1 when rerun in isolation after access recovery, confirming the stop was environmental rather than a landing regression.
+- 2026-08-04 DOCS: synchronized the Unreleased changelog, README live-URL heading, current-vs-Story-3.5 landing UX contract, and smoke-script header comment. No new primitive or token contract was introduced, so `DESIGN.md` remains unchanged.
 
 ### Completion Notes List
 
@@ -180,6 +181,10 @@ OpenAI Codex (GPT-5)
 
 - `_bmad-output/implementation-artifacts/3-4-landing-page.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/EXPERIENCE.md`
+- `CHANGELOG.md`
+- `README.md`
+- `scripts/smoke.mjs`
 - `src/pages/index.astro`
 - `tests/e2e/landing.spec.mjs`
 - `tests/e2e/placeholder.spec.ts` (deleted)
@@ -195,3 +200,4 @@ OpenAI Codex (GPT-5)
 - 2026-08-04: Replaced the foundation showcase with the Story 3.4 product landing page and exact source-contract coverage.
 - 2026-08-04: Added isolated route, middleware, smoke-marker, and computed-font proof for the landing contract.
 - 2026-08-04: Replaced the placeholder browser spec and captured inspected mobile-dark and desktop-light landing proof.
+- 2026-08-04: Synchronized public and UX documentation with the shipped Story 3.4 landing surface and Story 3.5 Demo Poll boundary.

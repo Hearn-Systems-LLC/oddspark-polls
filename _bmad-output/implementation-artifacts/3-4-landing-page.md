@@ -7,7 +7,7 @@ epic: 3 — Public Face: Discovery, Landing & Demo
 
 # Story 3.4: Landing Page
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -46,12 +46,12 @@ Verbatim from `_bmad-output/planning-artifacts/epics.md` § Story 3.4 (lines 772
   - [x] DELETE `tests/e2e/placeholder.spec.ts` and ADD `tests/e2e/landing.spec.mjs`. `playwright.config.ts` has no explicit `testMatch`; the default glob already covers `.spec.mjs` (proven by `discover.spec.mjs`). PORT, do not lose, the coverage the placeholder spec uniquely carries: the mode toggle persists `oddspark-mode` and applies `data-mode`, and focus-visible rings resolve to exactly 2px solid with 2px offset. The new spec additionally proves: opening statement, build account, and smoke marker visible; all three entries navigate (Discover → `/discover`; create entry → `/creator/new` redirecting to `/sign-in?return=%2Fcreator%2Fnew` when signed out — assert the encoded spelling; repository link carries the exact URL); the fresh computed-style font bindings from Task 2; keyboard focus order follows reading order; clean console and network log.
   - [x] Capture and inspect committed proof under `test-results/story-3-4-landing-proof/` at 375px dark and 1280px light (matching the `story-3-2-discover-proof` convention): single column holds, 68ch measure respected, no horizontal overflow, 44px+ targets on the create entry, visible focus rings, no card/box/shadow styling. Inspect the screenshots yourself; never ask the user for visual proof.
 
-- [ ] Task 4: Documentation sync and repository gate (AC: all)
+- [x] Task 4: Documentation sync and repository gate (AC: all)
   - [x] UPDATE `CHANGELOG.md` under `## [Unreleased]` for the user-observable change: the root URL now serves the product landing page (statement, build account, repository link, create entry, Discover link) replacing the foundation showcase.
   - [x] UPDATE `README.md` heading `### Live URLs (foundation placeholder)` (line 205): the root URL is no longer a placeholder, and README is the source of truth for environment reality. Adjust that heading/line to describe the landing page; no other README change is expected.
   - [x] UPDATE `EXPERIENCE.md` only where reality changed: the landing IA rows already describe this page — reconcile the Demo Poll's absence until Story 3.5 if the text implies it ships now, and record the header composition (mode toggle retained, four-entry discipline). Update `DESIGN.md` only if a genuinely new component or token contract was required; otherwise leave it untouched. Optionally refresh the stale `scripts/smoke.mjs:3` header comment ("placeholder page") in the same PR; the script's logic stays untouched.
-  - [ ] Under Node `24.18.0` and pnpm `11.17.0`, run the exact local gate in repository order: `pnpm migrations:guard`, `pnpm test`, `pnpm check`, `pnpm test:e2e`, `pnpm types`, `git diff --exit-code worker-configuration.d.ts`, `pnpm build:production`, and `git diff --check`. Record fresh totals in this story; prior-story totals are historical, not proof.
-  - [ ] Keep this story's Dev Agent Record, File List, and `sprint-status.yaml` current through implementation and review. No `TODO`, skipped/only tests, placeholder branch, or undocumented deferral may remain. Dev-story never pushes, deploys, or mutates remotes.
+  - [x] Under Node `24.18.0` and pnpm `11.17.0`, run the exact local gate in repository order: `pnpm migrations:guard`, `pnpm test`, `pnpm check`, `pnpm test:e2e`, `pnpm types`, `git diff --exit-code worker-configuration.d.ts`, `pnpm build:production`, and `git diff --check`. Record fresh totals in this story; prior-story totals are historical, not proof.
+  - [x] Keep this story's Dev Agent Record, File List, and `sprint-status.yaml` current through implementation and review. No `TODO`, skipped/only tests, placeholder branch, or undocumented deferral may remain. Dev-story never pushes, deploys, or mutates remotes.
 
 ## Dev Notes
 
@@ -170,12 +170,14 @@ OpenAI Codex (GPT-5)
 - 2026-08-04 GREEN/REFACTOR: restored the exact marker shape and added a narrowly scoped virtual raw-token module in the integration config; the focused route/middleware suite passed 3/3, computed font proof passed 1/1, full `pnpm test` passed 77 files / 1,199 tests, and `pnpm check` passed.
 - 2026-08-04 BROWSER: the replacement landing spec passed 4/4 and generated inspected 375px-dark and 1280px-light proof. A later full-suite run was interrupted by a host removable-volume `EPERM`; the Results case active at interruption passed 1/1 when rerun in isolation after access recovery, confirming the stop was environmental rather than a landing regression.
 - 2026-08-04 DOCS: synchronized the Unreleased changelog, README live-URL heading, current-vs-Story-3.5 landing UX contract, and smoke-script header comment. No new primitive or token contract was introduced, so `DESIGN.md` remains unchanged.
+- 2026-08-04 GATE: under Node 24.18.0 / pnpm 11.17.0, `migrations:guard` passed 11/11 checksums; `pnpm test` passed 77 files / 1,199 tests; `pnpm check` passed; `pnpm test:e2e` passed 152/152 in 12.2 minutes; `pnpm types` completed; binding drift was clean; `pnpm build:production` passed; and `git diff --check` passed. Sandbox-only listener/Wrangler-log denials were rerun with the required permission and passed.
 
 ### Completion Notes List
 
 - Task 1: Replaced the foundation showcase with the indexable, self-canonical product landing page in statement → technical account/repository/smoke marker → create → Discover order. The page remains one SSR column, retains the mode toggle and smoke coupling, uses one anchor-form primary action, and adds no data/session read, cache policy, route log, or client script.
 - Task 2: Added exact source contracts, direct-container route/indexability/smoke coverage, isolated full-chain request-ID/telemetry coverage, and real-browser computed Newsreader/Courier Prime assertions. The integration-only Vite hook preserves the production `?raw` semantics that the workerd CSS transform otherwise discarded.
 - Task 3: Replaced the foundation placeholder browser spec with exact content/navigation, mode persistence, focus order/ring, computed-font, clean-log, and responsive geometry coverage. Inspected proof confirms the single-column 68ch silhouette, flat token-only blocks, 44px+ create target, and visible keyboard focus in mobile dark and desktop light.
+- Task 4: Synchronized public/UX documentation, retained the Story 3.5 Demo Poll boundary, and completed the exact repository gate with no binding drift, skipped tests, source placeholders, or undocumented deferrals. The story and sprint ledger are ready for adversarial code review; no push, deploy, or remote mutation occurred.
 
 ### File List
 
@@ -201,3 +203,4 @@ OpenAI Codex (GPT-5)
 - 2026-08-04: Added isolated route, middleware, smoke-marker, and computed-font proof for the landing contract.
 - 2026-08-04: Replaced the placeholder browser spec and captured inspected mobile-dark and desktop-light landing proof.
 - 2026-08-04: Synchronized public and UX documentation with the shipped Story 3.4 landing surface and Story 3.5 Demo Poll boundary.
+- 2026-08-04: Completed the full repository gate and moved Story 3.4 to review.

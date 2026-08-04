@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 
 const source = readFileSync("src/pages/index.astro", "utf8");
 const introSource = readFileSync("src/components/landing-intro.astro", "utf8");
+const repositoryLinkSource = readFileSync(
+  "src/components/public-repository-link.astro",
+  "utf8",
+);
 const votingSurfaceSource = readFileSync(
   "src/components/poll-voting-surface.astro",
   "utf8",
@@ -72,9 +76,10 @@ describe("landing page source contract", () => {
   });
 
   it("keeps repository, unavailable retry, create, and Discover destinations explicit", () => {
-    expect(introSource).toContain(
+    expect(repositoryLinkSource).toContain(
       "https://github.com/Hearn-Systems-LLC/oddspark-polls",
     );
+    expect(introSource).toContain('<PublicRepositoryLink surface="landing" />');
     expect(source).toContain('href="/">{DEMO_POLL_COPY.retry}</a>');
     expect(source).toContain('href="/creator/new"');
     expect(source).toContain('href="/discover"');

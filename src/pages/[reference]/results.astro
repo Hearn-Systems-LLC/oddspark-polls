@@ -1,6 +1,7 @@
 ---
 import { env } from "cloudflare:workers";
 import ResultsTally from "../../components/results-tally.astro";
+import PublicRepositoryLink from "../../components/public-repository-link.astro";
 import ShareAction from "../../components/share-action.astro";
 import BaseLayout from "../../layouts/base-layout.astro";
 import {
@@ -161,6 +162,7 @@ const afterCloseParts =
               canonicalUrl={`${Astro.url.origin}/${view.canonicalReference}`}
             />
           </section>
+          <PublicRepositoryLink />
         </>
       )
     }

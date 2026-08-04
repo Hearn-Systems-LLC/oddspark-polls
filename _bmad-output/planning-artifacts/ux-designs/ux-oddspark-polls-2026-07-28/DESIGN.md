@@ -630,6 +630,19 @@ Not a card. A row: title in `{typography.poll-question}`, a `{typography.caption
 
 A text-labelled `SHARE` button in `button-secondary` metrics — transparent fill, 1px `{colors.rule-dark}` border lifting to `{colors.dim-dark}` on hover, `{typography.button}` — sitting beside the Poll's canonical URL, which renders as selectable `{typography.body}` `{colors.text-dark}` text. Never `button-primary`: there is one primary action per screen, and on the voting surface it is the vote. The copy confirmation is `{components.share-action.confirmationLabel}` in `{typography.label-caps}` `{colors.text-dark}` beside the control, persisting until the next interaction — the same idiom as the codes-copied confirmation, and not a toast. No vendor logos, no brand colors, no icon-only treatment: the action is a word in the product's own voice, which is also what keeps it honest in both color modes. Behavior — Web Share API enhancement, clipboard fallback, the no-JavaScript baseline — is in `EXPERIENCE.md § Component Patterns`.
 
+### `public-repository-link` — Public repository entry (landing and public Poll footer, Phase 1)
+
+One presentation component owns the repository destination. On the landing
+page it renders the existing `VIEW REPOSITORY` text entry in the build account.
+On canonical voting and every existing non-404 Results state it renders `VIEW
+THE PUBLIC REPOSITORY` after the Share block, separated by one top hairline and
+`{spacing.10}` / `{spacing.6}` whitespace. The link uses
+`{typography.label-caps}` and `{colors.entropy-dark}`, has a 44px minimum target,
+and takes the standard mode-resolved 2px focus outline at 2px offset. It opens
+in the same tab, contains no icon or brand color, and has no JavaScript or
+hydration behavior. The embedded landing Demo and creator, auth,
+administration, moderation, and not-found surfaces never render the footer.
+
 ### `listing-badge` — Listing state badge (creator surface, Phase 1)
 
 A `{typography.label-caps-lg}` word — `UNLISTED`, `LISTED`, or `DELISTED` — on each creator `poll-card` and on the Poll detail, beside the Poll's open/closed status. Unlisted renders `{colors.dim-dark}` — the default needs no emphasis. Listed renders `{colors.entropy-dark}` — a data fact about where the Poll appears. Delisted renders `{colors.alarm-dark}` — the one state the Creator must not miss. The word carries the state and the color annotates it; the system's no-color-alone rule applies here as everywhere. The opt-in control at creation reuses the `poll-option` single-select chooser, exactly as the Visibility Setting chooser does, with each state's consequence in a `{typography.body}` `{colors.dim-dark}` line beneath its label; in the Delisted state the control renders read-only with the moderation line.

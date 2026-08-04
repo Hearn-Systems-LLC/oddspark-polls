@@ -31,6 +31,8 @@ test-results/
 test-results/*
 !test-results/story-3-5-demo-poll-proof/
 !test-results/story-3-5-demo-poll-proof/*.png
+!test-results/story-3-6-presentable-repository-proof/
+!test-results/story-3-6-presentable-repository-proof/*.png
 playwright-report/
 blob-report/
 playwright/.cache/

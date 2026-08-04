@@ -5,11 +5,13 @@ import ButtonPrimary from "../components/button-primary.astro";
 // provably derived from the canonical token source.
 import tokensCss from "../styles/tokens.css?raw";
 
+Astro.response.headers.set("cache-control", "private, no-store");
+
 const method = Astro.request.method;
 if (method !== "GET" && method !== "HEAD") {
   return new Response("Method not allowed.", {
     status: 405,
-    headers: { allow: "GET, HEAD" },
+    headers: { allow: "GET, HEAD", "cache-control": "private, no-store" },
   });
 }
 
@@ -54,8 +56,8 @@ const canonicalUrl = new URL(validatedPath, Astro.url.origin).href;
 
       <hr class="rule" />
 
-      <section class="landing-block" data-landing-build-account>
-        <h2 class="label-caps landing-label">How it's built</h2>
+      <section class="landing-block" data-landing-build-account aria-labelledby="landing-build-label">
+        <h2 class="label-caps landing-label" id="landing-build-label">How it's built</h2>
         <p class="landing-build-copy" data-landing-build-copy>Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public — see the repository.</p>
         <a
           class="label-caps landing-text-link"
@@ -68,6 +70,7 @@ const canonicalUrl = new URL(validatedPath, Astro.url.origin).href;
           class="label-caps"
           data-smoke-marker="oddspark-token-solar"
           data-token-solar={solarHex}
+          aria-hidden="true"
         >
           smoke · solar · {solarHex}
         </p>

@@ -7,7 +7,7 @@ epic: 3 — Public Face: Discovery, Landing & Demo
 
 # Story 3.4: Landing Page
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -52,6 +52,15 @@ Verbatim from `_bmad-output/planning-artifacts/epics.md` § Story 3.4 (lines 772
   - [x] UPDATE `EXPERIENCE.md` only where reality changed: the landing IA rows already describe this page — reconcile the Demo Poll's absence until Story 3.5 if the text implies it ships now, and record the header composition (mode toggle retained, four-entry discipline). Update `DESIGN.md` only if a genuinely new component or token contract was required; otherwise leave it untouched. Optionally refresh the stale `scripts/smoke.mjs:3` header comment ("placeholder page") in the same PR; the script's logic stays untouched.
   - [x] Under Node `24.18.0` and pnpm `11.17.0`, run the exact local gate in repository order: `pnpm migrations:guard`, `pnpm test`, `pnpm check`, `pnpm test:e2e`, `pnpm types`, `git diff --exit-code worker-configuration.d.ts`, `pnpm build:production`, and `git diff --check`. Record fresh totals in this story; prior-story totals are historical, not proof.
   - [x] Keep this story's Dev Agent Record, File List, and `sprint-status.yaml` current through implementation and review. No `TODO`, skipped/only tests, placeholder branch, or undocumented deferral may remain. Dev-story never pushes, deploys, or mutates remotes.
+
+### Review Findings
+
+- [x] [Review][Patch] Add `cache-control: private, no-store` to the 200 response [src/pages/index.astro: — missing at top of frontmatter block]
+- [x] [Review][Patch] Add `cache-control: private, no-store` to the 405 response [src/pages/index.astro:12]
+- [x] [Review][Patch] Add `id` and `aria-labelledby` to the build-account section for screen-reader parity with Create/Browse sections [src/pages/index.astro:57]
+- [x] [Review][Patch] Add `aria-hidden="true"` to the smoke-marker paragraph so raw hex is not read as narrative content [src/pages/index.astro:67]
+- [x] [Review][Defer] Mode-toggle `aria-pressed="false"` is static when JS is disabled — pre-existing; `mode-override.ts` updates it at runtime [src/pages/index.astro:44]
+- [x] [Review][Defer] Header markup is duplicated inline rather than extracted to a component — story scope fence defers extraction to Story 3.5 [src/pages/index.astro:31-48]
 
 ## Dev Notes
 

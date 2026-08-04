@@ -17,6 +17,10 @@ export type RequestContext = {
   /** Set when the Better Auth session lookup itself failed (D1 error, missing
    * binding). The request degrades to signed-out; telemetry marks the record. */
   sessionLookupFailed: boolean;
+  /** Set only by central CSRF middleware before its 403 response. */
+  csrfRejected: boolean;
+  /** Set only by an explicit application capability boundary before its 403. */
+  authorizationDenied: boolean;
   /** Set when the read-only vote surface cannot resolve its authorized Results
    * view. The committed vote outcome still renders; telemetry marks the one
    * existing request record as an error. */

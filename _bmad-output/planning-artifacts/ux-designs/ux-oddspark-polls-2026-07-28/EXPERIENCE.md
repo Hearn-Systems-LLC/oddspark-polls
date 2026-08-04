@@ -1,7 +1,7 @@
 ---
 name: Oddspark Polls
 status: final
-updated: 2026-07-29
+updated: 2026-08-04
 sources:
   - /Volumes/fast/Github/oddspark-polls/_bmad-output/planning-artifacts/prds/prd-oddspark-polls-2026-07-28/prd.md
   - /Volumes/fast/Github/oddspark-polls/_bmad-output/planning-artifacts/prds/prd-oddspark-polls-2026-07-28/addendum.md
@@ -47,6 +47,7 @@ Every surface below traces to a stated need; the journey column names the journe
 | Creator — Poll list | `/creator` | Landing nav when signed in, post-sign-in and post-create redirects | The signed-in Creator's own Polls, live and closed, with at-a-glance counts (FR-1) | UJ-1, UJ-6 | 1 |
 | Creator — Poll creation | `/creator/new` | Poll list, landing create entry, return from sign-in | Question, options, Poll Type, Security Toggles, Visibility Setting, Discovery Setting, Deadline, Custom Link (FR-2, FR-23) | UJ-1, UJ-3, UJ-4, UJ-6 | 1 |
 | Creator — Poll detail | `/creator/{link}` | Poll list row | Monitor, edit description, close, delete, export, moderate Comments, reset Demo Poll (FR-4, 5, 22, 24, 26) | UJ-1 | 1 |
+| Administrator — Discovery moderation | `/creator/moderation` | Direct link, or return from the existing sign-in flow | Find exactly one Poll by its link or reference; Delist it from public enumeration or clear the hold without changing the Poll, Votes, owner, link, or Visibility Setting (FR-23) | UJ-1 | 1 |
 | Creator — Voter Codes | `/creator/{link}/codes` | Poll detail | Generate N codes, view and copy the list for distribution (FR-17) | UJ-4 | Deferred* |
 | Creator — Export | `/creator/{link}/export.csv`, `.xlsx` | Poll detail | Raw Votes and Tally download (FR-22) | UJ-1 | 1 |
 | Slot builder | Section within `/creator/new` | Poll creation, Meeting Poll type | Candidate slots: date, start, end, in the Creator's timezone (FR-12) | UJ-3 | 3 |
@@ -58,6 +59,10 @@ Every surface below traces to a stated need; the journey column names the journe
 **Route rules.** Custom Links live at the root path — `polls.oddspark.dev/team-lunch` (FR-3). Polls without a Custom Link get a short random ID at the same level. Because Polls occupy the root namespace, the reserved set must be rejected at Custom Link assignment: `/`, `/creator` and everything beneath it, `/discover`, `/sign-in`, `/assets/*`, `/api/*` (including the auth routes under `/api/auth/*`), `/favicon.ico`, `/robots.txt`, `/sitemap.xml`, and the two per-Poll sub-paths `results` and `manifest`. `[ASSUMPTION: `/creator` is the creator surface's path segment; the sources require only that it is reserved, not what it is called.]`
 
 **Discovery is opt-in per Poll** (FR-23). `/discover` is the only public enumeration of Polls that exists: effectively open, Listed Polls, newest first, paginated. Every new Poll starts **Unlisted** — reachable by link, absent from the catalog, sitemaps, and indexes. The Creator can move a Poll between Unlisted and **Listed** at any time, as an explicit opt-in at creation or afterward; Listed Polls appear on Discover and in sitemaps while the Poll is open. The Administrator can **Delist** any Poll, and only the Administrator can clear Delisted. Unlisted and Delisted Polls remain reachable by link. The Poll list at `/creator` enumerates only the signed-in Creator's own Polls. The landing page links four things: the Demo Poll, the repository, the create entry, and Discover.
+
+**Administrator moderation is fixed and non-enumerating.** `/creator/moderation` is the only operator surface; there is no `/admin`, second login, all-Poll browser, moderation history, reason, appeal, or notification flow. The Administrator pastes one bare reference or same-origin, one-segment Poll URL. An alias resolves to the canonical target, and the result exposes only the escaped question, canonical voting link, effective open/closed state, and Discovery state. A successful `DELIST` or `CLEAR DELISTED` follows POST→303→GET with the canonical reference and one bounded outcome token. The redirected GET re-reads D1 before showing success, so the query string never asserts state by itself.
+
+The lookup and action are ordinary server-rendered GET and POST forms and work completely without JavaScript. JavaScript may improve focus placement but owns no parsing, authorization, state transition, redirect, or success truth. Signed-out access uses the existing validated `/sign-in?return=/creator/moderation` flow; any signed-in non-Administrator receives a non-cacheable 403 before lookup, so target existence is never disclosed. Ordinary Creator and Voter journeys do not gain an operator control.
 
 **Depth is two levels.** Landing → Poll, Discover → Poll, or Poll list → Poll detail. Nothing nests deeper. There are no modals except two confirmations (delete a Poll, delete a Comment) and one panel (the Voter Code list), and none of them stack. The chart-form control on the Tally changes a view in place and is not a navigation step.
 
@@ -126,6 +131,15 @@ The voice is **wry**: dry, understated, delivered flat. It is the voice of somet
 | Discover: no listed Polls yet | **Nothing here yet.** Polls appear when their Creators opt them in. Yours could be the first. |
 | Discover: failed to load | **The directory didn't load.** Try again — everything that was on screen is still there. |
 | Creator: Poll delisted | **Delisted by the Administrator.** The link still works and Votes still count; the Poll no longer appears on Discover. Only the Administrator can reverse this. |
+| Administrator: lookup and actions | **FIND POLL** · **DELIST** · **CLEAR DELISTED** |
+| Administrator: invalid or empty submitted target | **Enter a valid Poll link or reference from this site.** |
+| Administrator: target not found | **This Poll doesn't exist.** |
+| Administrator: target load failed | **The Poll couldn't be loaded. Try again.** |
+| Administrator: capability denied | **Administrator access required.** |
+| Administrator: clear against a non-Delisted Poll | **This Poll isn't Delisted.** |
+| Administrator: delist succeeded | **Poll delisted.** |
+| Administrator: clear succeeded | **Delisting cleared.** |
+| Administrator: persistence not confirmed | **The moderation change couldn't be confirmed. Reload before trying again.** |
 
 **A note on the confirmation line.** "Results are live, updating as they arrive." is the canonical wording, chosen to be layout-neutral. The key-screen mocks surfaced that the earlier phrasing — "Results below, updating as they arrive" — is simply false at `{breakpoints.lg}`, where the Tally sits *beside* the confirmation in the two-column layout rather than below it. A responsive copy variant ("below" single-column, "beside" two-column) would also work and is rejected as more machinery than the sentence is worth.
 
@@ -212,6 +226,15 @@ Behavioral only. Visual specs live in `DESIGN.md § Components`, under the same 
 | Discover: error | `/discover` | The failure line with a retry action; any previously loaded rows stay on screen. |
 | Creator: Poll delisted | `/creator`, Poll detail | The `DELISTED` badge with the moderation line; the listing control renders read-only. The Poll itself is unaffected — the link resolves, Votes count, the Tally obeys the Visibility Setting. |
 | Visitor: delisted Poll by link | Voting page, Tally view | Renders exactly as any open Poll — delisting removes the Poll from the catalog and sitemaps, never from its URL. No banner, no notice to the Voter: moderation is not the Voter's business. |
+| Administrator: initial lookup | `/creator/moderation` with no query | `ADMINISTRATOR`, `Moderation`, the explanatory line, one `POLL LINK OR REFERENCE` field, and `FIND POLL`; no target, outcome, or error. Reading and Tab order begin at the top with no forced focus jump. |
+| Administrator: invalid or empty submitted lookup | `/creator/moderation` | The safe invalid-target line renders without echoing the rejected value. Focus moves to the alert; the form remains ahead of it in document order. Malformed, duplicate, oversized, unsupported-origin, credentialed, fragmented, or multi-segment input all use this state. |
+| Administrator: target not found | `/creator/moderation` | Plain not-found copy, no partial target facts and no distinction between a missing and deleted Poll. Focus moves to the error line. |
+| Administrator: target found | `/creator/moderation?target={canonical-reference}` | Escaped question as the focused target heading, then canonical voting link, `LIFECYCLE`, `DISCOVERY`, and one 44px text action: `DELIST` unless currently Delisted, otherwise `CLEAR DELISTED`. No owner, Visibility Setting, options, Tally, Comments, ballots, history, or reason. |
+| Administrator: moderation succeeded | Canonical POST→303→GET | The redirect carries only canonical `target` and `outcome=delisted|cleared`. After fresh truth matches that token, focus moves to `Poll delisted.` or `Delisting cleared.`; a forged or stale token produces no success line. The refreshed target remains below it. |
+| Administrator: persistence error or invalid clear | `/creator/moderation` after POST | The target stays in view, no success is implied, and focus moves to the exact error line. Reload precedes a retry when persistence was not confirmed. |
+| Administrator: signed out | `/creator/moderation` | `303` to the existing sign-in entry with the validated return address `/creator/moderation`; no target is parsed first. |
+| Creator: Administrator route forged | `/creator/moderation` | Non-cacheable `403` with `Administrator access required.` before target parsing or lookup. Owning the target Poll changes nothing. |
+| Administrator: JavaScript unavailable | `/creator/moderation` | The GET lookup, strict POST action, canonical 303 redirect, fresh success/error render, and keyboard operation all remain complete. No spinner, toast, confirmation, or client-owned state is missing. |
 | Session expired mid-create | Creator — creation | Redirect to the sign-in entry with a return address; after re-auth the Creator returns to the in-progress form. Without JavaScript, unsaved form content may be lost — which is why the create entry prompts sign-in up front rather than at publish time. |
 
 ## Interaction Primitives
@@ -237,6 +260,8 @@ Behavioral only. Visual specs live in `DESIGN.md § Components`, under the same 
 
 The layout **scales by widening, not by rearranging**. No component appears only at a large breakpoint and nothing is hidden at a small one; the desktop layout is the mobile layout with two blocks placed side by side, which is precisely what oddspark.dev does.
 
+The moderation surface is one centered column at every viewport. On a phone the lookup field and `FIND POLL` stack; from the small breakpoint upward they share one row, while the target panel remains question → wrapping canonical link → two compact fact columns → action. Long allowed references wrap inside the measure, controls stay at least 44px high, and neither the 375px nor desktop silhouette permits horizontal overflow. The operator page uses the same light/dark tokens and adds no new component or token contract.
+
 Because the Tally can sit *beside* the confirmation rather than below it, **no copy in the product describes where anything is on the page** — see § Voice and Tone.
 
 **The voter surface stays lightweight** (PRD §5). Server-rendered HTML, no framework payload, hand-written JavaScript only where interaction genuinely requires it: selection state, the rank builder, the availability grid, the Turnstile widget, the chart-form toggle, the share enhancement, and the live-results subscription. A Voter on a phone on a poor connection reads the question and votes without waiting for a bundle. Everything specified in this document must survive that constraint — if a pattern here can't be built inside it, the pattern is wrong, not the constraint.
@@ -260,6 +285,7 @@ Behavioral. Contrast values and the `faint`-token restriction live in `DESIGN.md
 - **Every control has a text label.** No icon-only buttons anywhere in the product — including the chart-form toggle, which is the words `BARS` and `PIE`.
 - **The new public controls meet the same floor.** The sign-in choices are text-labelled buttons that name the provider and the action (`CONTINUE WITH GOOGLE`); the share action is a text-labelled `SHARE` button whose `LINK COPIED` confirmation posts one polite announcement; the listing control is a native single-select choice at creation, with the current state carried as a text badge; pagination controls are real links labelled `NEWER` / `OLDER` at 48px targets. Nothing new is icon-only, keyboard-inaccessible, or conveyed by color alone.
 - **Post-submit focus applies to the new flows too.** A returned-from-OAuth render — signed in, denied, or expired — follows the same contract as every other post-submit render: the outcome line is a `tabindex="-1"` element, first in the main landmark, focused on load, and the document `<title>` leads with the outcome: `Signed in — Oddspark Polls`, `That didn't sign you in — Oddspark Polls`.
+- **Moderation focus follows the result.** Initial load leaves document reading order undisturbed. A valid lookup focuses the target question; a safe lookup or mutation error focuses its alert; the canonical post-action redirect focuses the freshly verified success line. Document order remains lookup field → `FIND POLL` → outcome/target → canonical link → `DELIST` or `CLEAR DELISTED`; after a focused success line, the next interactive targets are the canonical link and action. Every control has a visible tokenized focus outline and at least a 44px target, and the same server-rendered focus targets remain when JavaScript is unavailable.
 - **The Voter Code field is not autofocused**, so the Poll question is announced before a screen-reader user is dropped into an edit field.
 - **Third-party accessibility stops at the iframe.** The Turnstile widget's focus ring, contrast, and announcements are Cloudflare's. Binding `theme` to the resolved mode and `appearance: "interaction-only"` is the whole of what the product controls, and it is not restyled.
 

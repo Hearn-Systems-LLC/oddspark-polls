@@ -3,9 +3,12 @@ import {
   DISCOVERY_PAGE_SIZE,
   DISCOVERY_COPY,
   LISTING_CHOICES,
+  MODERATION_COPY,
   encodeDiscoveryCursor,
+  moderatePollDiscovery,
   parseListingDraft,
   parseDiscoveryRequest,
+  queryModerationTarget,
   queryDiscoveryCatalog,
   setPollListing,
 } from "../../src/modules/discovery/index";
@@ -20,6 +23,10 @@ import type { PollId, UserId } from "../../src/shared/domain/index";
 const POLL_ID = "poll-1" as PollId;
 const OWNER = "owner-1" as UserId;
 const NOW = 1_800_000_000_000;
+const ADMINISTRATOR = {
+  userId: "administrator-1",
+  role: "administrator",
+} as const;
 
 describe("parseListingDraft", () => {
   it.each([
@@ -165,6 +172,210 @@ describe("setPollListing", () => {
       cause: "provider detail",
     });
     log.mockRestore();
+  });
+});
+
+describe("moderatePollDiscovery", () => {
+  it("refuses a non-Administrator before time or persistence is consulted", async () => {
+    const applyModeration = vi.fn();
+    const nowMs = vi.fn(() => NOW);
+
+    const result = await moderatePollDiscovery(
+      { applyModeration, nowMs },
+      { userId: OWNER, role: "creator" },
+      POLL_ID,
+      "delist",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "authorization_denied",
+        message: MODERATION_COPY.accessRequired,
+      },
+    });
+    expect(nowMs).not.toHaveBeenCalled();
+    expect(applyModeration).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "delist",
+      "updated",
+      { ok: true, value: { kind: "updated", intent: "delist" } },
+    ],
+    [
+      "delist",
+      "unchanged",
+      { ok: true, value: { kind: "unchanged", intent: "delist" } },
+    ],
+    [
+      "clear_delisted",
+      "updated",
+      {
+        ok: true,
+        value: { kind: "updated", intent: "clear_delisted" },
+      },
+    ],
+    [
+      "clear_delisted",
+      "invalid_transition",
+      {
+        ok: false,
+        error: {
+          code: "invalid_moderation_transition",
+          message: MODERATION_COPY.invalidTransition,
+        },
+      },
+    ],
+    [
+      "delist",
+      "not_found",
+      {
+        ok: false,
+        error: { code: "poll_not_found", message: DISCOVERY_COPY.notFound },
+      },
+    ],
+    [
+      "delist",
+      "authorization_denied",
+      {
+        ok: false,
+        error: {
+          code: "authorization_denied",
+          message: MODERATION_COPY.accessRequired,
+        },
+      },
+    ],
+  ] as const)(
+    "maps %s persistence outcome %s through stable application results",
+    async (intent, persistenceOutcome, expected) => {
+      const applyModeration = vi.fn(async () => persistenceOutcome);
+
+      const result = await moderatePollDiscovery(
+        { applyModeration, nowMs: () => NOW },
+        ADMINISTRATOR,
+        POLL_ID,
+        intent,
+      );
+
+      expect(result).toEqual(expected);
+      expect(applyModeration).toHaveBeenCalledWith({
+        actorUserId: ADMINISTRATOR.userId,
+        pollId: POLL_ID,
+        intent,
+        updatedAtMs: NOW,
+      });
+    },
+  );
+
+  it("maps provider failures safely without emitting inner telemetry", async () => {
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const result = await moderatePollDiscovery(
+      {
+        applyModeration: async () => {
+          throw new Error("private D1 detail");
+        },
+        nowMs: () => NOW,
+      },
+      ADMINISTRATOR,
+      POLL_ID,
+      "delist",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "poll_moderation_failed",
+        message: MODERATION_COPY.failed,
+      },
+    });
+    expect(error).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("private D1 detail");
+    error.mockRestore();
+  });
+});
+
+describe("queryModerationTarget", () => {
+  const target = {
+    pollId: POLL_ID,
+    question: "Can this be found?",
+    canonicalReference: "canonical-reference",
+    discoveryState: "listed",
+    deadlineMs: NOW + 1,
+    closedAtMs: null,
+  } as const;
+
+  it("refuses a non-Administrator before invoking the target loader", async () => {
+    const loadTarget = vi.fn();
+
+    const result = await queryModerationTarget(
+      { loadTarget, nowMs: () => NOW },
+      { userId: OWNER, role: "creator" },
+      "candidate-reference",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "authorization_denied",
+        message: MODERATION_COPY.accessRequired,
+      },
+    });
+    expect(loadTarget).not.toHaveBeenCalled();
+  });
+
+  it("derives effective status from the purpose-shaped target projection", async () => {
+    const result = await queryModerationTarget(
+      { loadTarget: async () => target, nowMs: () => NOW },
+      ADMINISTRATOR,
+      "alias-reference",
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      value: { ...target, status: "open" },
+    });
+  });
+
+  it("maps missing targets and loader failures to stable safe errors", async () => {
+    expect(
+      await queryModerationTarget(
+        { loadTarget: async () => null, nowMs: () => NOW },
+        ADMINISTRATOR,
+        "missing-reference",
+      ),
+    ).toEqual({
+      ok: false,
+      error: { code: "poll_not_found", message: DISCOVERY_COPY.notFound },
+    });
+
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const failed = await queryModerationTarget(
+      {
+        loadTarget: async () => {
+          throw new Error("private lookup detail");
+        },
+        nowMs: () => NOW,
+      },
+      ADMINISTRATOR,
+      "candidate-reference",
+    );
+    expect(failed).toEqual({
+      ok: false,
+      error: {
+        code: "poll_moderation_lookup_failed",
+        message: MODERATION_COPY.loadFailed,
+      },
+    });
+    expect(error).not.toHaveBeenCalled();
+    expect(JSON.stringify(failed)).not.toContain("private lookup detail");
+    error.mockRestore();
   });
 });
 

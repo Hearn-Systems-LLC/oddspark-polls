@@ -188,6 +188,12 @@ describe("telemetry adapter", () => {
     ["POST", "/creator/new", false, "POST /creator/new"],
     [
       "GET",
+      "/creator/moderation/",
+      false,
+      "GET /creator/moderation",
+    ],
+    [
+      "GET",
       "/creator/polls/11111111-1111-4111-8111-111111111111",
       false,
       "GET /creator/polls/:pollId",
@@ -243,18 +249,39 @@ describe("telemetry adapter", () => {
   });
 
   it("records flagged vote rejections (422) and rate limits (429) as errors, not ok", () => {
-    expect(telemetryResultForStatus(422, false, true)).toBe("error");
-    expect(telemetryResultForStatus(429, false, true)).toBe("error");
+    expect(
+      telemetryResultForStatus(422, { voteRejection: true }),
+    ).toBe("error");
+    expect(
+      telemetryResultForStatus(429, { voteRejection: true }),
+    ).toBe("error");
   });
 
   it("keeps an unflagged 422/429 (creator-surface validation) as ok", () => {
     expect(telemetryResultForStatus(422)).toBe("ok");
     expect(telemetryResultForStatus(429)).toBe("ok");
-    expect(telemetryResultForStatus(422, false, false)).toBe("ok");
+    expect(
+      telemetryResultForStatus(422, { voteRejection: false }),
+    ).toBe("ok");
   });
 
-  it("keeps the existing 403/404/5xx result mapping unchanged", () => {
-    expect(telemetryResultForStatus(403)).toBe("csrf_rejected");
+  it("classifies 403 only from explicit rejection flags with CSRF precedence", () => {
+    expect(telemetryResultForStatus(403)).toBe("error");
+    expect(
+      telemetryResultForStatus(403, { csrfRejected: true }),
+    ).toBe("csrf_rejected");
+    expect(
+      telemetryResultForStatus(403, { authorizationDenied: true }),
+    ).toBe("authorization_denied");
+    expect(
+      telemetryResultForStatus(403, {
+        csrfRejected: true,
+        authorizationDenied: true,
+      }),
+    ).toBe("csrf_rejected");
+  });
+
+  it("keeps the existing 404/5xx result mapping unchanged", () => {
     expect(telemetryResultForStatus(404)).toBe("not_found");
     expect(telemetryResultForStatus(500)).toBe("error");
     expect(telemetryResultForStatus(502)).toBe("error");
@@ -267,12 +294,20 @@ describe("telemetry adapter", () => {
   });
 
   it("marks any status as an error when the session lookup itself failed", () => {
-    expect(telemetryResultForStatus(200, true)).toBe("error");
-    expect(telemetryResultForStatus(404, true)).toBe("error");
+    expect(
+      telemetryResultForStatus(200, { sessionLookupFailed: true }),
+    ).toBe("error");
+    expect(
+      telemetryResultForStatus(404, { sessionLookupFailed: true }),
+    ).toBe("error");
   });
 
   it("marks any status as an error when the Results lookup itself failed", () => {
-    expect(telemetryResultForStatus(200, false, false, true)).toBe("error");
-    expect(telemetryResultForStatus(404, false, false, true)).toBe("error");
+    expect(
+      telemetryResultForStatus(200, { resultsLookupFailed: true }),
+    ).toBe("error");
+    expect(
+      telemetryResultForStatus(404, { resultsLookupFailed: true }),
+    ).toBe("error");
   });
 });

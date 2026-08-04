@@ -3,6 +3,8 @@ import { env } from "cloudflare:workers";
 import type { APIContext } from "astro";
 import { experimental_AstroContainer as AstroContainer } from "astro/container";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createModerationPersistence } from "../../src/adapters/d1/index";
+import { moderatePollDiscovery } from "../../src/modules/discovery/index";
 import {
   ALL as sitemapAll,
   GET as sitemapGet,
@@ -13,10 +15,12 @@ import {
   GET as robotsGet,
 } from "../../src/pages/robots.txt";
 import * as RobotsEndpoint from "../../src/pages/robots.txt";
+import type { PollId, UserId } from "../../src/shared/domain/index";
 
 type MigrationTestEnv = Cloudflare.Env & { TEST_MIGRATIONS: D1Migration[] };
 const testEnv = env as MigrationTestEnv;
 const OWNER = "discovery-endpoint-owner";
+const ADMINISTRATOR = "discovery-endpoint-administrator" as UserId;
 const ORIGIN = "https://polls.example.test";
 
 function context(path: string, init?: RequestInit): APIContext {
@@ -59,8 +63,28 @@ async function seed(input: {
   return id;
 }
 
+async function moderate(
+  pollId: string,
+  intent: "delist" | "clear_delisted",
+): Promise<void> {
+  const result = await moderatePollDiscovery(
+    {
+      applyModeration: createModerationPersistence(testEnv.DB).applyModeration,
+      nowMs: () => Date.now(),
+    },
+    { userId: ADMINISTRATOR, role: "administrator" },
+    pollId as PollId,
+    intent,
+  );
+  expect(result).toEqual({
+    ok: true,
+    value: { kind: "updated", intent },
+  });
+}
+
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+  await testEnv.DB.prepare("DELETE FROM moderation_action").run();
   await testEnv.DB.prepare("DELETE FROM vote_selection").run();
   await testEnv.DB.prepare("DELETE FROM voter_claim").run();
   await testEnv.DB.prepare("DELETE FROM vote").run();
@@ -71,6 +95,11 @@ beforeEach(async () => {
     "INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?1, 'Discovery Endpoint', 'discovery-endpoint@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z')",
   )
     .bind(OWNER)
+    .run();
+  await testEnv.DB.prepare(
+    "INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at, role) VALUES (?1, 'Discovery Administrator', 'discovery-endpoint-administrator@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z', 'administrator')",
+  )
+    .bind(ADMINISTRATOR)
     .run();
 });
 
@@ -151,6 +180,27 @@ describe("sitemap.xml", () => {
     expect(await (await sitemapGet(context("/sitemap.xml"))).text()).not.toContain(
       "/endpoint-10",
     );
+  });
+
+  it("reflects real delist and clear commands while prior Unlisted stays absent", async () => {
+    const listedId = await seed({ index: 11, state: "listed" });
+    const unlistedId = await seed({ index: 12, state: "unlisted" });
+
+    const initial = await (await sitemapGet(context("/sitemap.xml"))).text();
+    expect(initial).toContain(`${ORIGIN}/endpoint-11</loc>`);
+    expect(initial).not.toContain("endpoint-12");
+
+    await moderate(listedId, "delist");
+    await moderate(unlistedId, "delist");
+    const delisted = await (await sitemapGet(context("/sitemap.xml"))).text();
+    expect(delisted).not.toContain("endpoint-11");
+    expect(delisted).not.toContain("endpoint-12");
+
+    await moderate(listedId, "clear_delisted");
+    await moderate(unlistedId, "clear_delisted");
+    const cleared = await (await sitemapGet(context("/sitemap.xml"))).text();
+    expect(cleared).toContain(`${ORIGIN}/endpoint-11</loc>`);
+    expect(cleared).not.toContain("endpoint-12");
   });
 
   it("walks beyond one 1,000-row merged batch", async () => {

@@ -15,6 +15,12 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Administrator Discovery moderation: the single out-of-band-assigned
+  Administrator can find a Poll by link or reference, remove it from Discover
+  and the sitemap without changing its link, ownership, Visibility Setting, or
+  Votes, and clear the hold back to the Creator's prior Listed or Unlisted
+  choice. A Delisted Creator sees a read-only explanation; Voters see the
+  unchanged Poll.
 - Public Discover catalog and crawl metadata: open Listed Polls now appear in
   a newest-first, keyset-paginated directory with accepted-Vote attendance,
   real no-JavaScript links, bounded progressive enhancement, canonical/noindex

@@ -101,7 +101,12 @@ export function d1Query(sql) {
   return parsed[0]?.results ?? [];
 }
 
-export async function seedCreatorSession() {
+const USER_ROLES = new Set(["creator", "administrator"]);
+
+export async function seedCreatorSession(role = "creator") {
+  if (!USER_ROLES.has(role)) {
+    throw new Error(`Unknown E2E user role: ${role}`);
+  }
   const secret = betterAuthSecret();
   if (!secret) {
     throw new Error("BETTER_AUTH_SECRET is missing from .dev.vars");
@@ -111,8 +116,9 @@ export async function seedCreatorSession() {
   const token = randomUUID().replaceAll("-", "").repeat(2);
   const now = new Date().toISOString();
   const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const name = role === "administrator" ? "E2E Administrator" : "E2E Creator";
   d1Execute(
-    `INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${userId}', 'E2E Creator', '${userId}@example.test', 1, '${now}', '${now}');` +
+    `INSERT INTO user (id, name, email, email_verified, role, created_at, updated_at) VALUES ('${userId}', '${name}', '${userId}@example.test', 1, '${role}', '${now}', '${now}');` +
       `INSERT INTO session (id, expires_at, token, user_id, created_at, updated_at) VALUES ('${sessionId}', '${expires}', '${token}', '${userId}', '${now}', '${now}');`,
   );
 
@@ -143,10 +149,11 @@ export function cleanupCreator(userId) {
   // Clean vote and Poll facts explicitly so test failures remain inspectable
   // and retries do not inherit accepted submissions.
   d1Execute(
-    `DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
+    `DELETE FROM moderation_action WHERE actor_user_id = '${userId}' OR poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
+      `DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}'));` +
       `DELETE FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
-    `DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
+      `DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM poll_reference WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM poll WHERE owner_user_id = '${userId}';` +
       `DELETE FROM session WHERE user_id = '${userId}';` +

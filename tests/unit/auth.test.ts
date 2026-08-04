@@ -63,7 +63,7 @@ describe("Better Auth factory", () => {
     expect(options.secret).toBe(env.BETTER_AUTH_SECRET);
     expect(options.baseURL).toBe(env.BETTER_AUTH_URL);
     expect(options.trustedOrigins).toEqual([env.BETTER_AUTH_URL]);
-    expect(options.emailAndPassword).toBeUndefined();
+    expect("emailAndPassword" in options).toBe(false);
     expect(options.socialProviders).toEqual({
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
@@ -96,6 +96,15 @@ describe("Better Auth factory", () => {
         image: "image",
         createdAt: "created_at",
         updatedAt: "updated_at",
+      },
+      additionalFields: {
+        role: {
+          type: ["creator", "administrator"],
+          required: true,
+          defaultValue: "creator",
+          input: false,
+          returned: true,
+        },
       },
     });
     expect(options.session).toEqual({
@@ -144,6 +153,19 @@ describe("Better Auth factory", () => {
     });
   });
 
+  it("keeps the Administrator role server-owned without enabling general administration", () => {
+    const options = createAuthOptions(createTestEnv());
+
+    expect(options.user?.additionalFields?.role).toEqual({
+      type: ["creator", "administrator"],
+      required: true,
+      defaultValue: "creator",
+      input: false,
+      returned: true,
+    });
+    expect("plugins" in options).toBe(false);
+  });
+
   it("strips provider ID tokens before account creates and updates", async () => {
     const options = createAuthOptions(createTestEnv());
     const createBefore = options.databaseHooks?.account?.create?.before;
@@ -163,8 +185,8 @@ describe("Better Auth factory", () => {
     expect(createBefore).toBeTypeOf("function");
     expect(updateBefore).toBeTypeOf("function");
 
-    const createResult = await createBefore!(account, null);
-    const updateResult = await updateBefore!(account, null);
+    const createResult = await createBefore!(account);
+    const updateResult = await updateBefore!(account);
 
     expect(createResult).toMatchObject({
       data: {

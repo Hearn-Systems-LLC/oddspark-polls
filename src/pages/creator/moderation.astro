@@ -1,0 +1,448 @@
+---
+import { env } from "cloudflare:workers";
+import BaseLayout from "../../layouts/base-layout.astro";
+import ButtonPrimary from "../../components/button-primary.astro";
+import ButtonSecondary from "../../components/button-secondary.astro";
+import Input from "../../components/input.astro";
+import { createModerationPersistence } from "../../adapters/d1/index";
+import {
+  parseModerationForm,
+  parseModerationGetQuery,
+  type ModerationOutcome,
+} from "../../lib/moderation-form";
+import {
+  DISCOVERY_COPY,
+  MODERATION_COPY,
+  moderatePollDiscovery,
+  queryModerationTarget,
+  type AdministratorModerationActor,
+  type ModerationTarget,
+} from "../../modules/discovery/index";
+import { hasAdministratorCapability } from "../../modules/identity/index";
+import type { PollId } from "../../shared/domain/index";
+
+const NO_STORE = "private, no-store";
+Astro.response.headers.set("cache-control", NO_STORE);
+
+if (
+  Astro.request.method !== "GET" &&
+  Astro.request.method !== "HEAD" &&
+  Astro.request.method !== "POST"
+) {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: { allow: "GET, HEAD, POST", "cache-control": NO_STORE },
+  });
+}
+
+const requestContext = Astro.locals.requestContext;
+const principal = requestContext?.principal ?? null;
+if (!principal) {
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/sign-in?return=${encodeURIComponent("/creator/moderation")}`,
+      "cache-control": NO_STORE,
+    },
+  });
+}
+
+// Capability comes before query/form parsing and before every target lookup.
+if (!hasAdministratorCapability(principal)) {
+  if (requestContext) {
+    requestContext.authorizationDenied = true;
+  }
+  return new Response(MODERATION_COPY.accessRequired, {
+    status: 403,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": NO_STORE,
+    },
+  });
+}
+
+const actor: AdministratorModerationActor = {
+  userId: principal.userId,
+  role: principal.role,
+};
+const csrfToken = requestContext?.csrfToken?.value ?? "";
+const persistence = createModerationPersistence(env.DB);
+const queryTarget = (reference: string) =>
+  queryModerationTarget(
+    {
+      loadTarget: (candidate) =>
+        persistence.findTargetByReference(candidate),
+      nowMs: () => Date.now(),
+    },
+    actor,
+    reference,
+  );
+
+let responseStatus = 200;
+let lookupValue = "";
+let target: ModerationTarget | null = null;
+let pageError: string | null = null;
+let requestedOutcome: ModerationOutcome | null = null;
+
+const applyQueryResult = async (reference: string): Promise<boolean> => {
+  const result = await queryTarget(reference);
+  if (result.ok) {
+    target = result.value;
+    lookupValue = result.value.canonicalReference;
+    if (requestContext) {
+      requestContext.pollId = result.value.pollId;
+    }
+    return true;
+  }
+
+  if (result.error.code === "authorization_denied") {
+    if (requestContext) {
+      requestContext.authorizationDenied = true;
+    }
+    responseStatus = 403;
+    pageError = MODERATION_COPY.accessRequired;
+  } else if (result.error.code === "poll_not_found") {
+    responseStatus = 404;
+    pageError = DISCOVERY_COPY.notFound;
+  } else {
+    responseStatus = 500;
+    pageError = MODERATION_COPY.loadFailed;
+  }
+  return false;
+};
+
+if (Astro.request.method === "POST") {
+  let formData: FormData;
+  try {
+    formData = await Astro.request.formData();
+  } catch {
+    return new Response("Unreadable form submission.", {
+      status: 422,
+      headers: { "cache-control": NO_STORE },
+    });
+  }
+
+  const parsed = parseModerationForm(formData, Astro.url.origin);
+  if (!parsed.ok) {
+    responseStatus = 422;
+    pageError = MODERATION_COPY.invalidTarget;
+  } else {
+    const found = await applyQueryResult(parsed.value.target);
+    if (found && target) {
+      const result = await moderatePollDiscovery(
+        {
+          applyModeration: (input) => persistence.applyModeration(input),
+          nowMs: () => Date.now(),
+        },
+        actor,
+        target.pollId as PollId,
+        parsed.value.intent,
+      );
+      if (result.ok) {
+        const outcome =
+          parsed.value.intent === "delist" ? "delisted" : "cleared";
+        const location = `/creator/moderation?${new URLSearchParams({
+          target: target.canonicalReference,
+          outcome,
+        }).toString()}`;
+        return new Response(null, {
+          status: 303,
+          headers: { location, "cache-control": NO_STORE },
+        });
+      }
+
+      if (result.error.code === "authorization_denied") {
+        if (requestContext) {
+          requestContext.authorizationDenied = true;
+        }
+        return new Response(MODERATION_COPY.accessRequired, {
+          status: 403,
+          headers: {
+            "content-type": "text/plain; charset=utf-8",
+            "cache-control": NO_STORE,
+          },
+        });
+      }
+      if (result.error.code === "poll_not_found") {
+        target = null;
+        responseStatus = 404;
+        pageError = DISCOVERY_COPY.notFound;
+      } else if (result.error.code === "invalid_moderation_transition") {
+        responseStatus = 422;
+        pageError = MODERATION_COPY.invalidTransition;
+      } else {
+        responseStatus = 500;
+        pageError = MODERATION_COPY.failed;
+      }
+    }
+  }
+} else {
+  const parsed = parseModerationGetQuery(
+    Astro.url.searchParams,
+    Astro.url.origin,
+  );
+  if (!parsed.ok) {
+    responseStatus = 400;
+    pageError = MODERATION_COPY.invalidTarget;
+  } else if (parsed.value.target !== null) {
+    requestedOutcome = parsed.value.outcome;
+    await applyQueryResult(parsed.value.target);
+  }
+}
+
+Astro.response.status = responseStatus;
+
+// HEAD follows the same authorization/query/status work but never renders a
+// body, even in direct container tests.
+if (Astro.request.method === "HEAD") {
+  return new Response(null, {
+    status: responseStatus,
+    headers: { "cache-control": NO_STORE },
+  });
+}
+
+const outcomeMessage =
+  target && requestedOutcome === "delisted" && target.discoveryState === "delisted"
+    ? MODERATION_COPY.delisted
+    : target && requestedOutcome === "cleared" && target.discoveryState !== "delisted"
+      ? MODERATION_COPY.cleared
+      : null;
+const actionIntent =
+  target?.discoveryState === "delisted" ? "clear_delisted" : "delist";
+const actionLabel =
+  actionIntent === "clear_delisted"
+    ? MODERATION_COPY.clearDelisted
+    : MODERATION_COPY.delist;
+---
+
+<BaseLayout title="Moderation — Oddspark Polls">
+  <main class="moderation-shell" data-moderation-surface>
+    <header class="moderation-header">
+      <p class="eyebrow">ADMINISTRATOR</p>
+      <h1>Moderation</h1>
+      <p class="intro">
+        Find one Poll by its link or reference. Delisting changes public
+        discovery only; the Poll and its Votes stay in place.
+      </p>
+    </header>
+
+    <form method="get" action="/creator/moderation" class="lookup-form">
+      <Input
+        id="moderation-target"
+        name="target"
+        label={MODERATION_COPY.lookupLabel}
+        value={lookupValue}
+        placeholder="poll-reference"
+        error={pageError !== null && target === null}
+        describedby={pageError !== null && target === null ? "moderation-error" : undefined}
+        autocapitalize="none"
+        spellcheck="false"
+        autocomplete="off"
+      />
+      <ButtonPrimary type="submit">{MODERATION_COPY.findPoll}</ButtonPrimary>
+    </form>
+
+    {
+      pageError && (
+        <p
+          id="moderation-error"
+          class="status-line is-error"
+          role="alert"
+          tabindex="-1"
+          autofocus
+          data-moderation-error
+        >
+          {pageError}
+        </p>
+      )
+    }
+
+    {
+      outcomeMessage && (
+        <p
+          class="status-line"
+          tabindex="-1"
+          autofocus
+          data-moderation-outcome={requestedOutcome}
+        >
+          {outcomeMessage}
+        </p>
+      )
+    }
+
+    {
+      target && (
+        <section class="target-panel" aria-labelledby="moderation-target-heading" data-moderation-target>
+          <h2
+            id="moderation-target-heading"
+            tabindex="-1"
+            autofocus={!pageError && !outcomeMessage}
+          >
+            {target.question}
+          </h2>
+          <a class="canonical-link" href={`/${target.canonicalReference}`}>
+            /{target.canonicalReference}
+          </a>
+          <dl class="target-facts">
+            <div>
+              <dt>LIFECYCLE</dt>
+              <dd>{target.status.toUpperCase()}</dd>
+            </div>
+            <div>
+              <dt>DISCOVERY</dt>
+              <dd>{target.discoveryState.toUpperCase()}</dd>
+            </div>
+          </dl>
+          <form method="post" action="/creator/moderation" class="action-form">
+            <input type="hidden" name="csrf_token" value={csrfToken} />
+            <input type="hidden" name="target" value={target.canonicalReference} />
+            <ButtonSecondary type="submit" name="intent" value={actionIntent}>
+              {actionLabel}
+            </ButtonSecondary>
+          </form>
+        </section>
+      )
+    }
+  </main>
+
+  <script is:inline>
+    document
+      .querySelector("[data-moderation-error], [data-moderation-outcome], [data-moderation-target] h2")
+      ?.focus({ preventScroll: true });
+  </script>
+</BaseLayout>
+
+<style>
+  .moderation-shell {
+    width: min(100%, var(--space-measure));
+    min-height: 100dvh;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+  }
+
+  .moderation-header {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .eyebrow,
+  .target-facts dt {
+    margin: 0;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+  }
+
+  h1,
+  h2 {
+    margin: 0;
+    font-family: var(--font-human);
+    font-weight: 400;
+  }
+
+  h1 {
+    font-size: var(--type-heading-lg-size);
+    line-height: var(--type-heading-lg-lh);
+  }
+
+  h2 {
+    font-size: var(--type-heading-md-size);
+    line-height: var(--type-heading-md-lh);
+  }
+
+  h2:focus-visible,
+  .status-line:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .intro,
+  .status-line {
+    margin: 0;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .intro {
+    color: var(--color-dim);
+  }
+
+  .lookup-form {
+    display: grid;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+  }
+
+  .lookup-form :global(.btn-primary) {
+    justify-self: start;
+  }
+
+  .status-line {
+    margin-top: var(--space-6);
+  }
+
+  .status-line.is-error {
+    color: var(--color-alarm);
+  }
+
+  .target-panel {
+    display: grid;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+    padding-top: var(--space-6);
+    border-top: var(--space-hairline) solid var(--color-rule);
+  }
+
+  .canonical-link {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    min-height: 44px;
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .canonical-link:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .target-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin: 0;
+  }
+
+  .target-facts div {
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .target-facts dd {
+    margin: 0;
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+  }
+
+  .action-form {
+    margin-top: var(--space-2);
+  }
+
+  @media (min-width: 640px) {
+    .moderation-shell {
+      padding-inline: var(--space-margin-desktop);
+    }
+
+    .lookup-form {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+    }
+  }
+</style>

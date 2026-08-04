@@ -3,8 +3,9 @@ import {
   type D1Migration,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { betterAuth } from "better-auth";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createAuth } from "../../src/adapters/auth/index";
+import { createAuth, createAuthOptions } from "../../src/adapters/auth/index";
 
 type MigrationTestEnv = Cloudflare.Env & {
   TEST_MIGRATIONS: D1Migration[];
@@ -163,5 +164,27 @@ describe("Better Auth D1 schema", () => {
       .bind(created.account.id)
       .first<{ id_token: string | null }>();
     expect(updated?.id_token).toBeNull();
+  });
+
+  it("defaults API-created users to creator and rejects submitted role escalation", async () => {
+    const auth = betterAuth({
+      ...createAuthOptions(testEnv),
+      emailAndPassword: { enabled: true },
+    });
+    const email = `${crypto.randomUUID()}@example.test`;
+    const created = await auth.api.signUpEmail({
+      body: {
+        name: "Role Boundary Creator",
+        email,
+        password: "integration-password-123",
+        role: "administrator",
+      } as never,
+    });
+
+    expect(created.user.role).toBe("creator");
+    const row = await testEnv.DB.prepare("SELECT role FROM user WHERE id = ?")
+      .bind(created.user.id)
+      .first<{ role: string }>();
+    expect(row?.role).toBe("creator");
   });
 });

@@ -385,7 +385,10 @@ sequenceDiagram
   `Origin` and Fetch Metadata are not same-origin. Authenticated creator and
   administrator forms additionally require a session-bound CSRF token.
   Better Auth's mounted auth handler retains its own CSRF and OAuth state
-  protections. No capability route may bypass the central middleware.
+  protections. The ordered chain is request context → telemetry wrapper →
+  session extraction → CSRF boundary → creator-surface guard, so every outcome
+  receives one request ID and one completion record. No capability route may
+  bypass the central middleware.
 
 ### AD-23 — The Shared Kernel owns cross-capability contracts
 
@@ -473,12 +476,15 @@ scaffolding.
 ```text
 src/
   pages/                 # Astro inbound HTTP adapters and server-rendered pages
-  middleware.ts          # session extraction and request context only
+  middleware.ts          # request context → telemetry → session → CSRF → creator guard
   components/            # server-rendered UI bound to DESIGN.md
   scripts/               # isolated progressive-enhancement TypeScript
+  lib/                   # delivery composition and cross-route helpers
+  layouts/               # shared HTML document shells
+  styles/                # token expression, fonts, and global presentation
   modules/
     identity/            # creator principal and authorization policy
-    polls/               # lifecycle plus poll-type strategies
+    polls/               # lifecycle, Demo designation/reset policy, poll types
     voting/              # security composition and CastVote
     results/             # Tally and Manifest projections
     discovery/           # listed-poll eligibility and catalog queries
@@ -488,7 +494,10 @@ src/
     application/         # command/query primitives and outbound ports
   adapters/
     auth/                # Better Auth and OAuth
+    cache/               # isolated public Discovery projections
     d1/                  # repositories, batches, projection SQL
+      demo-poll.ts       # purpose-shaped Demo aggregate replacement batch
+    digest/              # secret-keyed duplicate and admission identities
     r2/                  # temporary/adopted image objects
     turnstile/           # challenge verification
     rate-limit/          # best-effort admission controls
@@ -574,7 +583,7 @@ flowchart LR
 | FR-15–FR-19 | `voting/security`, D1 claims/codes, provider adapters | AD-7, AD-8, AD-16, AD-22 |
 | FR-20–FR-22 | `results`, export adapters, result endpoints | AD-6, AD-9, AD-10, AD-21 |
 | FR-24 | `comments`, Vote transaction | AD-6, AD-7, AD-17 |
-| FR-25–FR-27 | Astro landing/demo pages, public repository | AD-2, AD-10, AD-14 |
+| FR-25–FR-27 | Astro landing/demo pages, shared presentation-only public-repository entry, public repository | AD-1, AD-2, AD-10, AD-14 |
 | FR-26, CAP-DEMO-POLL | `polls/demo-poll` owns designation; `ResetDemoPoll`; D1 Demo replacement adapter; landing and creator Poll detail routes | AD-1, AD-6, AD-7, AD-14, AD-19, AD-22, AD-24 |
 | UX live motion and trust surfaces | server result projection plus `scripts/results-live.ts` | AD-2, AD-8, AD-10 |
 

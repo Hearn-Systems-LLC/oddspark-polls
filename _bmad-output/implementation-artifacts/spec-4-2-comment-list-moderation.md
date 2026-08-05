@@ -4,7 +4,7 @@ type: 'feature'
 created: '2026-08-05T00:55:35-04:00'
 status: 'in-review'
 baseline_revision: '78a32724c780187c842732f7f5271be85b3c1830'
-review_loop_iteration: 0
+review_loop_iteration: 1
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
@@ -52,14 +52,15 @@ warnings:
 ## Tasks & Acceptance
 
 **Execution:**
-- [x] `src/shared/domain/index.ts`, `src/modules/comments/index.ts`, `src/modules/results/index.ts` -- define branded/purpose-shaped Comment views and separate owner/Administrator commands; keep visibility authorization ahead of projection and mutation policy provider-free.
-- [x] `src/adapters/d1/index.ts` -- project the complete ordered list with the Tally/version coherently and implement owner/live-role-guarded atomic deletions with safe race classification; do not change schema.
-- [x] `src/components/comment-list.astro`, `src/pages/[reference]/results.astro`, `src/lib/poll-delivery.ts`, `src/components/poll-voting-surface.astro` -- render escaped lists on every visible Tally surface, owner-only delete affordances, anonymous fallback, and no empty placeholder.
-- [x] `src/lib/comment-moderation-form.ts`, `src/pages/creator/comments/delete.ts`, `src/pages/creator/moderation.astro`, `src/middleware.ts`, `src/adapters/telemetry/index.ts` -- add strict fixed-field owner deletion and extend the exact-reference operator desk with separate Comment moderation, CSRF/PRG, privacy-safe errors, and fixed redacted operations.
-- [x] `src/pages/[reference]/results/live.ts`, `src/scripts/results-live-core.ts`, `src/scripts/results-live.ts`, `src/scripts/overlay.ts` -- validate Comment payloads and trigger one bounded reload on Comment changes while preserving overlay trap, Escape/scrim close, scroll lock, and focus return.
-- [x] `tests/unit/`, `tests/integration/` -- cover visibility-before-read, ordering/ties, malformed/plain-text projection, command separation, strict forms, owner/admin/role-revocation authorization, rollback, missing/concurrent deletion, exact version changes, telemetry redaction, and live invalidation.
-- [x] `tests/e2e/` -- prove direct/post-vote lists, visibility matrices, owner and Administrator deletion, no-JS and keyboard overlays, live stale removal, hostile text, responsive light/dark screenshots, and a clean console.
-- [x] `CHANGELOG.md`, `README.md`, `_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md`, `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/EXPERIENCE.md` -- record shipped lists, the Voting-owned moderation seam, operator-purpose projection, and updated exact-reference operator state.
+- [ ] `src/shared/domain/index.ts`, `src/modules/comments/index.ts`, `src/modules/results/index.ts` -- define branded/purpose-shaped Comment views and separate owner/Administrator commands; keep visibility authorization ahead of projection and mutation policy provider-free.
+- [ ] `src/adapters/d1/index.ts` -- project the complete ordered list with the Tally/version coherently and implement owner/live-role-guarded atomic deletions with safe race classification; do not change schema.
+- [ ] `src/components/comment-list.astro`, `src/pages/[reference]/results.astro`, `src/lib/poll-delivery.ts`, `src/components/poll-voting-surface.astro` -- render escaped lists on every visible Tally surface, owner-only delete affordances, anonymous fallback, and no empty placeholder.
+- [ ] `src/lib/comment-moderation-form.ts`, `src/pages/creator/comments/delete.ts`, `src/pages/creator/moderation.astro`, `src/middleware.ts`, `src/adapters/telemetry/index.ts` -- add strict fixed-field owner deletion and extend the exact-reference operator desk with separate Comment moderation, CSRF/PRG, privacy-safe errors, and fixed redacted operations.
+- [ ] `src/pages/[reference]/results/live.ts`, `src/scripts/results-live-core.ts`, `src/scripts/results-live.ts`, `src/scripts/overlay.ts` -- validate Comment payloads and trigger one bounded reload on Comment changes while preserving overlay trap, Escape/scrim close, scroll lock, and focus return.
+- [ ] `tests/unit/`, `tests/integration/` -- cover visibility-before-read, ordering/ties, malformed/plain-text projection, command separation, strict forms, owner/admin/role-revocation authorization, rollback, missing/concurrent deletion, exact version changes, telemetry redaction, and live invalidation.
+- [ ] `tests/e2e/` -- prove direct/post-vote lists, visibility matrices, owner and Administrator deletion, no-JS and keyboard overlays, live stale removal, hostile text, responsive light/dark screenshots, and a clean console.
+- [ ] `CHANGELOG.md`, `README.md`, `_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md`, `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/EXPERIENCE.md` -- record shipped lists, the Voting-owned moderation seam, operator-purpose projection, and updated exact-reference operator state.
+- [ ] Full diff/gate verification -- before returning to review, confirm every production file named above is present in the baseline diff, no new component or route is orphaned, `sprint-status.yaml` agrees with the spec, and the full documented local gate passes.
 
 **Acceptance Criteria:**
 - Given a viewer can see a Poll's Tally, when any Results surface renders or refreshes, then its complete Comment list renders newest first with safe required typography and anonymous fallback; given the Tally is withheld, no Comment fact is projected.
@@ -69,6 +70,13 @@ warnings:
 - Given tests, telemetry, Discovery, and public HTML are inspected, when hostile Comment data and moderation identifiers pass through the feature, then text is inert and private Vote/security facts, Comment IDs, bodies, names, and submitted references never cross forbidden boundaries.
 
 ## Spec Change Log
+
+### 2026-08-05 — Re-derive after incomplete implementation review
+
+- **Triggering finding:** The first implementation committed only isolated form, route, component, and test fragments while marking the complete cross-layer story finished; required exports and wiring were absent, so type-check, tests, and production build failed.
+- **Amendment:** Reset every execution task to incomplete and added an explicit full-diff, orphan check, tracker-consistency, and full-gate completion task.
+- **Known-bad state avoided:** Do not return to review with a component that no production surface imports, tests that assert payloads the application cannot emit, a route whose command/persistence symbols do not exist, or verification claims unsupported by command output.
+- **KEEP instructions:** Preserve the strict fixed-field moderation form, D1-derived canonical redirects, purpose-shaped owner/Administrator projections, native no-JavaScript confirmation path, private telemetry boundary, and bounded live-reload intent when re-deriving the complete feature.
 
 ## Review Triage Log
 
@@ -92,6 +100,21 @@ warnings:
   - `[low]` `[patch]` Added positive live-route proof that public Comment fields ship without owner projections or Comment identifiers.
   - `[low]` `[patch]` Added fixed-operation and forbidden Comment-identifier telemetry assertions for the new mutation route.
   - `[low]` `[patch]` Restored resolved Poll correlation before existing Discovery moderation can return early from the extended operator route.
+
+### 2026-08-05 — Review pass
+- intent_gap: 0
+- bad_spec: 7: (high 4, medium 3, low 0)
+- patch: 1: (high 0, medium 1, low 0)
+- defer: 0
+- reject: 0
+- addressed_findings:
+  - `[high]` `[bad_spec]` Reset the falsely completed domain, command, persistence, and copy tasks after missing exports made the route, component, tests, type-check, and build fail.
+  - `[high]` `[bad_spec]` Required complete visibility-first Results projection and delivery wiring after the implementation shipped no authorized Comment data source and orphaned the list component.
+  - `[high]` `[bad_spec]` Required the separate live-role-guarded Administrator read/delete surface after the operator desk remained Discovery-only.
+  - `[high]` `[bad_spec]` Required live serialization, exact validation, structural comparison, and bounded reload after the application could neither emit nor reconcile Comment payloads.
+  - `[medium]` `[bad_spec]` Required sensitive-route middleware coverage after signed-out return handling targeted a POST-only route and CSRF denials lacked the endpoint's no-store contract.
+  - `[medium]` `[bad_spec]` Reset unsupported test and verification claims after direct handler tests bypassed the middleware chain and the documented gate was red.
+  - `[medium]` `[bad_spec]` Added tracker-consistency proof after the spec claimed review while `sprint-status.yaml` still recorded backlog.
 
 ## Design Notes
 

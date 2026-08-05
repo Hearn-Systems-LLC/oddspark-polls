@@ -43,6 +43,7 @@ function snapshot(
     ipChecksEnabled: false,
     voterCodesEnabled: false,
     captchaEnabled: false,
+    commentsEnabled: false,
     vpnBlockingEnabled: false,
     options: [
       {

@@ -59,6 +59,7 @@ const OPTION_B = "vote-adapter-option-b" as PollOptionId;
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
   await testEnv.DB.prepare("DELETE FROM voter_claim").run();
+  await testEnv.DB.prepare("DELETE FROM vote_comment").run();
   await testEnv.DB.prepare("DELETE FROM vote_selection").run();
   await testEnv.DB.prepare("DELETE FROM vote").run();
   await testEnv.DB.prepare("DELETE FROM poll_option").run();
@@ -79,16 +80,18 @@ async function insertPoll(
     minSelections?: number | null;
     multiSelectEnabled?: boolean;
     sessionChecksEnabled?: boolean;
+    commentsEnabled?: boolean;
   } = {},
 ): Promise<void> {
   await testEnv.DB.batch([
     testEnv.DB.prepare(
-      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, ip_checks_enabled, captcha_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 0, 0)",
+      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, ip_checks_enabled, captcha_enabled, comments_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'vote-adapter-owner', 'multiple_choice', 'Choose one', 'live', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, 0, 0)",
     ).bind(
       POLL_ID,
       overrides.sessionChecksEnabled === false ? 0 : 1,
       overrides.ipChecksEnabled === true ? 1 : 0,
       overrides.captchaEnabled === true ? 1 : 0,
+      overrides.commentsEnabled === true ? 1 : 0,
       overrides.multiSelectEnabled === true ? 1 : 0,
       overrides.minSelections ?? null,
       overrides.maxSelections ?? null,
@@ -347,6 +350,7 @@ describe("createVotePersistence", () => {
       sessionChecksEnabled: true,
       ipChecksEnabled: false,
       captchaEnabled: false,
+      commentsEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -397,6 +401,158 @@ describe("createVotePersistence", () => {
         DIGEST_1,
       ),
     ).resolves.toEqual([]);
+  });
+
+  it("commits a Comment with its Vote and increments representation once", async () => {
+    await insertPoll({ commentsEnabled: true });
+    const persistence = createVotePersistence(testEnv.DB);
+    await persistence.insertVote(
+      batch({
+        contributions: [
+          { kind: "vote_selection", voteId: "vote-1", pollOptionId: OPTION_A },
+          {
+            kind: "vote_comment",
+            id: "comment-1",
+            voteId: "vote-1",
+            body: "Plain <context>",
+            displayName: "Jo",
+            createdAtMs: NOW,
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      testEnv.DB.prepare(
+        "SELECT id, vote_id, body, display_name, created_at_ms FROM vote_comment",
+      ).first(),
+    ).resolves.toEqual({
+      id: "comment-1",
+      vote_id: "vote-1",
+      body: "Plain <context>",
+      display_name: "Jo",
+      created_at_ms: NOW,
+    });
+    await expect(
+      testEnv.DB.prepare(
+        "SELECT representation_version AS version FROM poll WHERE id = ?1",
+      ).bind(POLL_ID).first(),
+    ).resolves.toEqual({ version: 2 });
+  });
+
+  it("rolls back the Vote when Comments are disabled before the D1 batch", async () => {
+    await insertPoll({ commentsEnabled: false });
+    const persistence = createVotePersistence(testEnv.DB);
+
+    await expect(
+      persistence.insertVote(
+        batch({
+          contributions: [
+            { kind: "vote_selection", voteId: "vote-1", pollOptionId: OPTION_A },
+            {
+              kind: "vote_comment",
+              id: "comment-1",
+              voteId: "vote-1",
+              body: "Late context",
+              displayName: null,
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/comments_disabled/);
+    await expect(counts()).resolves.toEqual({
+      claims: 0,
+      selections: 0,
+      version: 1,
+      votes: 0,
+    });
+    await expect(
+      testEnv.DB.prepare("SELECT COUNT(*) AS count FROM vote_comment").first(),
+    ).resolves.toEqual({ count: 0 });
+  });
+
+  it("rejects a Comment contribution for a different Vote before D1 writes", async () => {
+    await insertPoll({ commentsEnabled: true });
+    const persistence = createVotePersistence(testEnv.DB);
+
+    await expect(
+      persistence.insertVote(
+        batch({
+          contributions: [
+            { kind: "vote_selection", voteId: "vote-1", pollOptionId: OPTION_A },
+            {
+              kind: "vote_comment",
+              id: "comment-1",
+              voteId: "different-vote",
+              body: "Wrong owner",
+              displayName: null,
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/invalid vote comment contribution/);
+    await expect(counts()).resolves.toEqual({
+      claims: 0,
+      selections: 0,
+      version: 1,
+      votes: 0,
+    });
+  });
+
+  it("rejects non-canonical Comment contributions before any D1 write", async () => {
+    const prepare = vi.fn();
+    const persistence = createVotePersistence({
+      prepare,
+      batch: vi.fn(),
+    } as unknown as D1Database);
+    const base = {
+      kind: "vote_comment" as const,
+      id: "comment-1",
+      voteId: "vote-1",
+      body: "Context",
+      displayName: "Jo",
+      createdAtMs: NOW,
+    };
+    const invalid = [
+      { ...base, id: "" },
+      { ...base, body: " Context" },
+      { ...base, body: "line one\r\nline two" },
+      { ...base, body: "context\0hidden" },
+      { ...base, displayName: " Jo" },
+      { ...base, displayName: "Jo\0hidden" },
+      { ...base, displayName: "Jo\nAdmin" },
+      { ...base, createdAtMs: NOW + 1 },
+    ];
+
+    for (const contribution of invalid) {
+      await expect(
+        persistence.insertVote(
+          batch({ contributions: [contribution] }),
+        ),
+      ).rejects.toThrow(/invalid vote comment contribution/);
+    }
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the Vote when Comment persistence collides", async () => {
+    await insertPoll({ commentsEnabled: true });
+    const persistence = createVotePersistence(testEnv.DB);
+    await expect(
+      persistence.insertVote(
+        batch({
+          contributions: [
+            { kind: "vote_selection", voteId: "vote-1", pollOptionId: OPTION_A },
+            { kind: "vote_comment", id: "comment-1", voteId: "vote-1", body: "One", displayName: null, createdAtMs: NOW },
+            { kind: "vote_comment", id: "comment-2", voteId: "vote-1", body: "Two", displayName: null, createdAtMs: NOW },
+          ],
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(testEnv.DB.prepare("SELECT COUNT(*) AS count FROM vote").first()).resolves.toEqual({ count: 0 });
+    await expect(testEnv.DB.prepare("SELECT COUNT(*) AS count FROM vote_comment").first()).resolves.toEqual({ count: 0 });
+    await expect(testEnv.DB.prepare("SELECT representation_version AS version FROM poll WHERE id = ?1").bind(POLL_ID).first()).resolves.toEqual({ version: 1 });
   });
 
   it("rejects hostile claim reads before any D1 prepare or bind call", async () => {

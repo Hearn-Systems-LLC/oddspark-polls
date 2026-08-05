@@ -20,6 +20,7 @@ export type ParsedLifecycleForm = {
   multiSelect: string;
   minSelections: string;
   maxSelections: string;
+  commentsEnabled: string;
   pollType: string | null;
   sessionChecks: string;
   ipChecks: string;
@@ -46,6 +47,7 @@ const DEFINITION_KEYS = [
   "multiSelect",
   "minSelections",
   "maxSelections",
+  "commentsEnabled",
   "pollType",
 ] as const;
 
@@ -120,6 +122,15 @@ export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
     return unreadable();
   }
 
+  const commentsEnabled = singleton(formData, "commentsEnabled") || "false";
+  if (
+    (intent === "add-option" || intent === "update-definition") &&
+    commentsEnabled !== "true" &&
+    commentsEnabled !== "false"
+  ) {
+    return unreadable();
+  }
+
   const security = emptySecurityDraft();
   if (intent === "update-security") {
     for (const key of SECURITY_KEYS) {
@@ -139,6 +150,7 @@ export function parseLifecycleForm(formData: FormData): ParsedLifecycleForm {
     multiSelect: singleton(formData, "multiSelect") || "false",
     minSelections: singleton(formData, "minSelections"),
     maxSelections: singleton(formData, "maxSelections"),
+    commentsEnabled,
     pollType: formData.has("pollType")
       ? singleton(formData, "pollType")
       : null,

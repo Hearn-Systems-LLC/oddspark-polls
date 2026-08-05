@@ -44,6 +44,19 @@ describe("creator lifecycle form parsing", () => {
     expect(() => parseLifecycleForm(form)).toThrow("unreadable_lifecycle_form");
   });
 
+  it("rejects a tampered Comments setting on definition submissions", () => {
+    const form = new FormData();
+    form.set("intent", "update-definition");
+    form.set("question", "Route truth?");
+    form.append("option", "Alpha");
+    form.append("option", "Beta");
+    form.set("commentsEnabled", "sometimes");
+
+    expect(() => parseLifecycleForm(form)).toThrow(
+      "unreadable_lifecycle_form",
+    );
+  });
+
   it("rejects option arrays beyond the render ceiling", () => {
     const form = new FormData();
     form.set("intent", "add-option");

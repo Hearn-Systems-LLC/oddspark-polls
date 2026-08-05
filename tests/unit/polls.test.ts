@@ -90,6 +90,7 @@ describe("validateCreatePoll", () => {
         voterCodesEnabled: false,
         captchaEnabled: false,
         vpnBlockingEnabled: false,
+        commentsEnabled: false,
       });
     }
   });
@@ -1118,6 +1119,7 @@ describe("createPoll command", () => {
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -1363,6 +1365,7 @@ describe("createPoll duplicate-ID dedupe (D4)", () => {
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -1644,6 +1647,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -1683,6 +1687,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },
@@ -1726,6 +1731,7 @@ describe("createPoll retry-after-deadline dedupe", () => {
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       options: [
         { label: "Pizza", position: 0 },
         { label: "Tacos", position: 1 },

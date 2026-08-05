@@ -79,3 +79,19 @@ item was silently deleted.
 | DW-047 | Story 3.3 review | Reject corrupt empty Poll questions in the moderation target mapper. `src/adapters/d1/index.ts` | `nice` | Amelia (Developer) |
 | DW-048 | Story 3.3 review | Reject corrupt empty canonical references in the moderation target mapper. `src/adapters/d1/index.ts` | `nice` | Amelia (Developer) |
 | DW-049 | Story 3.4 review | Make the no-JavaScript mode-toggle pressed state reflect OS preference or remove the misleading pressed state from the static baseline. `src/components/site-header.astro`, `src/scripts/mode-override.ts` | `nice` | Sally (UX Designer) |
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-comment-with-your-vote.md`
+  summary: Prevent a post-commit vote-flash signing failure from rendering a fresh retry that can duplicate a Vote when duplicate checks are disabled.
+  evidence: `src/lib/poll-delivery.ts` persisted the Vote before flash signing at the Story 4.1 baseline; a signing exception falls into the broad retry path and replaces the submission ID.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-1-comment-with-your-vote.md`
+  summary: Replace the timed in-flight Vote-form restore with a completion-aware recovery contract that cannot mint a fresh submission ID while the original POST may still commit.
+  evidence: `src/scripts/vote-form.ts` already restored the form after ten seconds at the Story 4.1 baseline; when Session and IP Checks are both off, a slow original request and the fresh-ID retry can both commit Votes.
+
+### DW-50: Follow-up review still recommended for 4-1-comment-with-your-vote after the damping cap was spent
+origin: review-budget-followup
+location: n/a
+source_spec: `spec-4-1-comment-with-your-vote.md`
+severity: low
+reason: The follow-up-review damping cap (limits.max_followup_reviews = 1) was spent with the story finalized (status: done, verify green) while the review pass still recommended an independent follow-up. The work was committed by bmad-loop run 20260804-223921-acae; this entry preserves the lingering recommendation for a deliberate later review.
+status: open

@@ -81,7 +81,7 @@ development_status:
   epic-3-retrospective: done
 
   epic-4: backlog
-  4-1-comment-with-your-vote: backlog
+  4-1-comment-with-your-vote: done
   4-2-comment-list-moderation: backlog
   4-3-csv-export: backlog
   4-4-xlsx-export: backlog

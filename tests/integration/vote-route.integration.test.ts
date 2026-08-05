@@ -48,6 +48,7 @@ async function seedPoll(options: {
   ipChecksEnabled?: boolean;
   reference?: string;
   sessionChecksEnabled?: boolean;
+  commentsEnabled?: boolean;
 }): Promise<{
   optionA: PollOptionId;
   optionB: PollOptionId;
@@ -68,16 +69,17 @@ async function seedPoll(options: {
     testEnv.DB.prepare(
       `INSERT INTO poll (
         id, owner_user_id, poll_type, question, result_visibility,
-        session_checks_enabled, ip_checks_enabled, captcha_enabled, multi_select_enabled,
+        session_checks_enabled, ip_checks_enabled, captcha_enabled, comments_enabled, multi_select_enabled,
         min_selections, max_selections, deadline_ms, closed_at_ms,
         representation_version, created_at_ms, updated_at_ms
-      ) VALUES (?1, ?2, 'multiple_choice', 'Route IP?', 'live', ?3, ?4, ?5, 0, NULL, NULL, NULL, NULL, 1, ?6, ?6)`,
+      ) VALUES (?1, ?2, 'multiple_choice', 'Route IP?', 'live', ?3, ?4, ?5, ?6, 0, NULL, NULL, NULL, NULL, 1, ?7, ?7)`,
     ).bind(
       pollId,
       OWNER,
       options.sessionChecksEnabled === false ? 0 : 1,
       options.ipChecksEnabled === true ? 1 : 0,
       options.captchaEnabled === true ? 1 : 0,
+      options.commentsEnabled === true ? 1 : 0,
       nowMs,
     ),
     testEnv.DB.prepare(
@@ -359,7 +361,9 @@ describe("POST /:reference IP Checks delivery boundary", () => {
       const response = await runVoteRoute(context, poll.reference);
 
       expect(response.status).toBe(500);
-      expect(await response.text()).toBe("Voting is unavailable.");
+      const html = await response.text();
+      expect(html).toContain('data-outcome-code="ip_check_unavailable"');
+      expect(html).toMatch(new RegExp(`value="${poll.optionA}"[^>]*checked`));
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       expect(await counts(poll.pollId)).toEqual({
         votes: 0,
@@ -400,6 +404,7 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     const poll = await seedPoll({
       sessionChecksEnabled: false,
       ipChecksEnabled: true,
+      commentsEnabled: true,
     });
     const rawAddress = "203.0.113.44";
     const injectedDigest = "d".repeat(64);
@@ -415,20 +420,28 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     });
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const body = formBody(poll.optionA);
+    body.set("comment", "Keep <this> context");
+    body.set("display_name", "Jo & Co");
 
     const response = await runVoteRoute(
       makeContext(
         new Request(`https://polls.example.test/${poll.reference}`, {
           method: "POST",
           headers: voteHeaders({ "cf-connecting-ip": rawAddress }),
-          body: formBody(poll.optionA),
+          body,
         }),
       ),
       poll.reference,
     );
 
     expect(response.status).toBe(500);
-    expect(await response.text()).toBe("Voting is unavailable.");
+    const html = await response.text();
+    expect(html).toContain('data-outcome-code="ip_check_unavailable"');
+    expect(html).toMatch(new RegExp(`value="${poll.optionA}"[^>]*checked`));
+    expect(html).toContain("Keep &lt;this&gt; context");
+    expect(html).toContain("Jo &amp; Co");
+    expect(html).toContain("data-comment-composer");
     expect(purposes).toEqual(["ip", "rate_limit"]);
     expect(await counts(poll.pollId)).toEqual({
       votes: 0,
@@ -520,7 +533,9 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     );
 
     expect(response.status).toBe(500);
-    expect(await response.text()).toBe("Voting is unavailable.");
+    const html = await response.text();
+    expect(html).toContain('data-outcome-code="ip_check_unavailable"');
+    expect(html).toMatch(new RegExp(`value="${poll.optionA}"[^>]*checked`));
     expect(purposes).toEqual(["ip", "rate_limit"]);
     expect(await counts(poll.pollId)).toEqual({
       votes: 0,
@@ -1259,6 +1274,282 @@ describe("POST /:reference CAPTCHA delivery boundary", () => {
     expect(html).toContain(CAPTCHA_BODY);
     expect(html).toContain("data-turnstile");
     expect(await counts(poll.pollId)).toMatchObject({ votes: 0 });
+  });
+});
+
+describe("Comment With Your Vote", () => {
+  const ORIGIN = "https://polls.example.test";
+
+  it("renders the composer only for an enabled Poll in canonical DOM order", async () => {
+    const enabled = await seedPoll({ commentsEnabled: true, sessionChecksEnabled: false });
+    const enabledResponse = await runVoteRoute(
+      makeContext(new Request(`${ORIGIN}/${enabled.reference}`)),
+      enabled.reference,
+    );
+    const enabledHtml = await enabledResponse.text();
+    expect(enabledHtml).toContain("data-comment-composer");
+    expect(enabledHtml.indexOf("data-comment-composer")).toBeGreaterThan(
+      enabledHtml.indexOf("class=\"poll-options\""),
+    );
+    expect(enabledHtml.indexOf("data-comment-composer")).toBeLessThan(
+      enabledHtml.indexOf("VOTE</button>"),
+    );
+
+    const disabled = await seedPoll({ commentsEnabled: false, sessionChecksEnabled: false });
+    const disabledResponse = await runVoteRoute(
+      makeContext(new Request(`${ORIGIN}/${disabled.reference}`)),
+      disabled.reference,
+    );
+    expect(await disabledResponse.text()).not.toContain("data-comment-composer");
+  });
+
+  it("commits escaped plain text atomically with a no-JS Vote", async () => {
+    const poll = await seedPoll({ commentsEnabled: true, sessionChecksEnabled: false });
+    const body = formBody(poll.optionA);
+    body.set("comment", "<script>alert(1)</script>");
+    body.set("display_name", "Jo");
+    const response = await runVoteRoute(
+      makeContext(new Request(`${ORIGIN}/${poll.reference}`, {
+        method: "POST",
+        headers: voteHeaders(),
+        body,
+      })),
+      poll.reference,
+    );
+    expect(response.status).toBe(303);
+    await expect(
+      testEnv.DB.prepare(
+        "SELECT vc.body, vc.display_name FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = ?1",
+      ).bind(poll.pollId).first(),
+    ).resolves.toEqual({ body: "<script>alert(1)</script>", display_name: "Jo" });
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 1, version: 2 });
+  });
+
+  it("rejects disabled forgery without committing or echoing submitted text", async () => {
+    const poll = await seedPoll({ commentsEnabled: false, sessionChecksEnabled: false });
+    const body = formBody(poll.optionA);
+    body.set("comment", "secret forged text");
+    body.set("display_name", "Jo");
+    const response = await runVoteRoute(
+      makeContext(new Request(`${ORIGIN}/${poll.reference}`, {
+        method: "POST",
+        headers: voteHeaders(),
+        body,
+      })),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(html).not.toContain("secret forged text");
+    expect(html).not.toContain("data-comment-composer");
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 1 });
+  });
+
+  it("refreshes the form without echoing fields when Comments are disabled mid-request", async () => {
+    const poll = await seedPoll({
+      commentsEnabled: true,
+      sessionChecksEnabled: false,
+    });
+    const realBatch = testEnv.DB.batch.bind(testEnv.DB);
+    const realPrepare = testEnv.DB.prepare.bind(testEnv.DB);
+    let interceptVoteBatch = true;
+    vi.spyOn(testEnv.DB, "batch").mockImplementation(async (statements) => {
+      if (interceptVoteBatch) {
+        interceptVoteBatch = false;
+        await realPrepare(
+          "UPDATE poll SET comments_enabled = 0, representation_version = representation_version + 1 WHERE id = ?1",
+        )
+          .bind(poll.pollId)
+          .run();
+      }
+      return realBatch(statements);
+    });
+    const body = formBody(poll.optionA);
+    body.set("comment", "must not echo");
+    body.set("display_name", "Private Name");
+
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders({ "cf-connecting-ip": "203.0.113.55" }),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(html).not.toContain("must not echo");
+    expect(html).not.toContain("Private Name");
+    expect(html).not.toContain("data-comment-composer");
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 2 });
+  });
+
+  it("hides disabled fields even when the authoritative refresh fails", async () => {
+    const poll = await seedPoll({
+      commentsEnabled: true,
+      sessionChecksEnabled: false,
+    });
+    const realBatch = testEnv.DB.batch.bind(testEnv.DB);
+    const realPrepare = testEnv.DB.prepare.bind(testEnv.DB);
+    let interceptVoteBatch = true;
+    let failRefresh = false;
+    vi.spyOn(testEnv.DB, "batch").mockImplementation(async (statements) => {
+      if (interceptVoteBatch) {
+        interceptVoteBatch = false;
+        await realPrepare(
+          "UPDATE poll SET comments_enabled = 0, representation_version = representation_version + 1 WHERE id = ?1",
+        )
+          .bind(poll.pollId)
+          .run();
+      }
+      try {
+        return await realBatch(statements);
+      } catch (error) {
+        failRefresh = true;
+        throw error;
+      }
+    });
+    vi.spyOn(testEnv.DB, "prepare").mockImplementation((query) => {
+      if (failRefresh) throw new Error("refresh unavailable");
+      return realPrepare(query);
+    });
+    const body = formBody(poll.optionA);
+    body.set("comment", "must stay private");
+    body.set("display_name", "Private Name");
+
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(html).not.toContain("must stay private");
+    expect(html).not.toContain("Private Name");
+    expect(html).not.toContain("data-comment-composer");
+  });
+
+  it("retains safe fields and selections on Comment validation failure", async () => {
+    const poll = await seedPoll({ commentsEnabled: true, sessionChecksEnabled: false });
+    const body = formBody(poll.optionA);
+    body.set("comment", "x".repeat(501));
+    body.set("display_name", "Jo & Co");
+    const response = await runVoteRoute(
+      makeContext(new Request(`${ORIGIN}/${poll.reference}`, {
+        method: "POST",
+        headers: voteHeaders(),
+        body,
+      })),
+      poll.reference,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(html).toContain("Keep your Comment to 500 characters.");
+    expect(html).toContain("x".repeat(501));
+    expect(html).toContain("Jo &amp; Co");
+    expect(html).toMatch(new RegExp(`value=\"${poll.optionA}\"[^>]*checked`));
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 1 });
+  });
+
+  it("rejects ambiguous or non-text Comment fields without committing", async () => {
+    const poll = await seedPoll({
+      commentsEnabled: true,
+      sessionChecksEnabled: false,
+    });
+    const duplicate = formBody(poll.optionA);
+    duplicate.append("comment", "first");
+    duplicate.append("comment", "second");
+    const duplicateResponse = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: duplicate,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(duplicateResponse.status).toBe(422);
+
+    const fileBody = new FormData();
+    fileBody.set("submission_id", crypto.randomUUID());
+    fileBody.set("option_id", poll.optionA);
+    fileBody.set("comment", new File(["forged"], "comment.txt"));
+    const fileResponse = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: {
+            origin: ORIGIN,
+            "sec-fetch-site": "same-origin",
+          },
+          body: fileBody,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(fileResponse.status).toBe(422);
+    expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 1 });
+  });
+
+  it("bounds attacker-sized Comment echoes while retaining an error surface", async () => {
+    const poll = await seedPoll({
+      commentsEnabled: true,
+      sessionChecksEnabled: false,
+    });
+    const oversized = "z".repeat(20_000);
+    const body = formBody(poll.optionA);
+    body.set("comment", oversized);
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(html).toContain("Keep your Comment to 500 characters.");
+    expect(html).not.toContain(oversized);
+    expect(html).toContain("x".repeat(501));
+  });
+
+  it("counts CRLF retries against the browser-normalized Comment length", async () => {
+    const poll = await seedPoll({
+      commentsEnabled: true,
+      sessionChecksEnabled: false,
+    });
+    const body = new URLSearchParams({
+      submission_id: crypto.randomUUID(),
+      comment: `${"x\r\n".repeat(225)}`,
+    });
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(422);
+    expect(html).toContain("50 characters left");
   });
 });
 

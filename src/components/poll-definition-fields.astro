@@ -16,6 +16,7 @@ interface Props {
     multiSelect: string;
     minSelections: string;
     maxSelections: string;
+    commentsEnabled?: string;
   };
   fieldErrors?: Record<string, string>;
   optionNote?: string | null;
@@ -113,6 +114,12 @@ const MULTI_SELECT_CHOICES = [
                 {values.maxSelections || values.options.filter((option) => option.trim().length > 0).length})
               </span>
             )}
+        </p>
+      </div>
+      <div class="field-block">
+        <p class="group-label">COMMENTS WITH VOTES</p>
+        <p class="read-only-value">
+          {values.commentsEnabled === "true" ? "ENABLED" : "DISABLED"}
         </p>
       </div>
     </>
@@ -242,6 +249,27 @@ const MULTI_SELECT_CHOICES = [
           <p class="helper-note" id="multi-select-bounds-help">
             Leave blank for 1 to all options.
           </p>
+        </div>
+      </fieldset>
+
+      <fieldset class="field-block">
+        <legend class="group-label">COMMENTS WITH VOTES</legend>
+        <div class="multi-select-choices">
+          <PollOption
+            id="comments-disabled"
+            name="commentsEnabled"
+            value="false"
+            label="DISABLED"
+            checked={values.commentsEnabled !== "true"}
+          />
+          <PollOption
+            id="comments-enabled"
+            name="commentsEnabled"
+            value="true"
+            label="ENABLED"
+            description="Voters may attach one optional Comment and display name."
+            checked={values.commentsEnabled === "true"}
+          />
         </div>
       </fieldset>
     </>

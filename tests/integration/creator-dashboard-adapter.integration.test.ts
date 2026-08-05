@@ -68,6 +68,7 @@ function pollRows(
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       multiSelectEnabled: overrides.multiSelectEnabled ?? false,
       minSelections: null,
       maxSelections: null,

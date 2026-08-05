@@ -28,6 +28,7 @@ export const DEMO_POLL_TEMPLATE = Object.freeze({
   voterCodesEnabled: false,
   captchaEnabled: true,
   vpnBlockingEnabled: false,
+  commentsEnabled: false,
   initialDiscoveryState: "unlisted" as const,
 });
 
@@ -108,6 +109,7 @@ export type DemoPollSnapshot = {
   voterCodesEnabled: boolean;
   captchaEnabled: boolean;
   vpnBlockingEnabled: boolean;
+  commentsEnabled?: boolean;
   options: Array<{
     id: PollOptionId;
     label: string;
@@ -133,6 +135,7 @@ export type DemoPollCompatibleSnapshot = Pick<
   | "voterCodesEnabled"
   | "captchaEnabled"
   | "vpnBlockingEnabled"
+  | "commentsEnabled"
   | "options"
   | "deadlineMs"
 >;
@@ -158,7 +161,8 @@ export function isDemoPollCompatible(snapshot: DemoPollCompatibleSnapshot): bool
     snapshot.ipChecksEnabled === DEMO_POLL_TEMPLATE.ipChecksEnabled &&
     snapshot.voterCodesEnabled === DEMO_POLL_TEMPLATE.voterCodesEnabled &&
     snapshot.captchaEnabled === DEMO_POLL_TEMPLATE.captchaEnabled &&
-    snapshot.vpnBlockingEnabled === DEMO_POLL_TEMPLATE.vpnBlockingEnabled
+    snapshot.vpnBlockingEnabled === DEMO_POLL_TEMPLATE.vpnBlockingEnabled &&
+    (snapshot.commentsEnabled ?? false) === DEMO_POLL_TEMPLATE.commentsEnabled
   );
 }
 

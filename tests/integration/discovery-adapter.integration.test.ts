@@ -53,6 +53,7 @@ function pollRows(): PollPersistenceRows {
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,

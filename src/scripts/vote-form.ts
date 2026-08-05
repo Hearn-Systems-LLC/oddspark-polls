@@ -3,6 +3,7 @@
 // disabled-until-selection affordance when JS is available.
 
 import { enhanceDeadlineTimes } from "./deadline-time";
+import { COMMENT_CAPS } from "../modules/comments/index";
 
 // Local deadline timestamps + sub-24-hour countdowns (shared with the
 // direct Results route's hidden After Close explanation).
@@ -66,6 +67,23 @@ if (form) {
   const options = Array.from(
     form.querySelectorAll<HTMLInputElement>('input[name="option_id"]'),
   );
+  const commentBody = form.querySelector<HTMLTextAreaElement>(
+    "[data-comment-body]",
+  );
+  const commentDisplayName = form.querySelector<HTMLInputElement>(
+    "[data-comment-display-name]",
+  );
+  const commentCounter = form.querySelector<HTMLElement>(
+    "[data-comment-counter]",
+  );
+  const syncCommentCounter = (): void => {
+    if (!commentBody || !commentCounter) return;
+    const remaining = Math.max(0, COMMENT_CAPS.body - commentBody.value.length);
+    commentCounter.textContent = `${remaining} ${remaining === 1 ? "character" : "characters"} left`;
+    commentCounter.hidden = remaining > 50;
+  };
+  commentBody?.addEventListener("input", syncCommentCounter);
+  syncCommentCounter();
   const locked = form.dataset.voteLocked === "true";
   const multiSelect = form.dataset.multiSelect === "true";
   const parsedMin = Number(form.dataset.min);
@@ -125,6 +143,8 @@ if (form) {
     if (voteButton) {
       voteButton.disabled = locked || !hasSelection;
     }
+    if (commentBody) commentBody.readOnly = false;
+    if (commentDisplayName) commentDisplayName.readOnly = false;
     if (hint) {
       hint.hidden = locked || hasSelection;
     }
@@ -196,6 +216,8 @@ if (form) {
       voteButton.textContent = idleVoteLabel;
       voteButton.removeAttribute("aria-busy");
     }
+    if (commentBody) commentBody.readOnly = false;
+    if (commentDisplayName) commentDisplayName.readOnly = false;
     syncSelectionState();
   };
 
@@ -209,6 +231,8 @@ if (form) {
       voteButton.disabled = true;
       voteButton.setAttribute("aria-busy", "true");
     }
+    if (commentBody) commentBody.readOnly = true;
+    if (commentDisplayName) commentDisplayName.readOnly = true;
     // Esc/stop mid-POST fires no pageshow. A completed navigation discards
     // this timer with the document; an aborted one restores the usable form.
     // A TIMED restore cannot tell an aborted POST from a slow one — the

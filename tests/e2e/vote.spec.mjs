@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
   assertUuid,
@@ -14,6 +15,9 @@ import {
 } from "./creator-session.mjs";
 
 test.describe.configure({ mode: "serial", timeout: 120_000 });
+
+const commentProofDir = "test-results/story-4-1-comment-proof";
+mkdirSync(commentProofDir, { recursive: true });
 
 test.describe("public voting flow", () => {
   test.skip(
@@ -105,7 +109,13 @@ test.describe("public voting flow", () => {
     );
   }
 
-  async function publishPoll(page, context, baseURL, question = "Pick one") {
+  async function publishPoll(
+    page,
+    context,
+    baseURL,
+    question = "Pick one",
+    commentsEnabled = false,
+  ) {
     const seeded = await seedCreatorSession();
     assertUuid(seeded.userId);
     seededUserIds.push(seeded.userId);
@@ -123,6 +133,9 @@ test.describe("public voting flow", () => {
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
     await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill(reference);
+    if (commentsEnabled) {
+      await page.locator('label[for="comments-enabled"]').click();
+    }
     await page.getByRole("button", { name: "PUBLISH POLL" }).click();
     await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
 
@@ -267,6 +280,7 @@ test.describe("public voting flow", () => {
       page.getByText("SELECT AN OPTION TO UNLOCK VOTE"),
     ).toBeVisible();
     expect(await page.content()).not.toContain("astro-island");
+    await expect(page.locator("[data-comment-composer]")).toHaveCount(0);
 
     const voterCookie = (await context.cookies()).find(
       ({ name }) => name === "oddspark.voter",
@@ -274,6 +288,94 @@ test.describe("public voting flow", () => {
     expect(voterCookie).toMatchObject({
       httpOnly: true,
       sameSite: "Lax",
+    });
+  });
+
+  test("renders the enabled Comment composer in canonical order with accessible final-50 counting", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(
+      page,
+      context,
+      baseURL,
+      "What should ship with context?",
+      true,
+    );
+    await page.goto(created.path);
+
+    const composer = page.getByRole("group", {
+      name: "ADD A COMMENT (OPTIONAL)",
+    });
+    const comment = page.getByRole("textbox", {
+      name: "COMMENT",
+      exact: true,
+    });
+    const displayName = page.getByRole("textbox", {
+      name: "DISPLAY NAME (OPTIONAL)",
+      exact: true,
+    });
+    const counter = page.locator("[data-comment-counter]");
+
+    await expect(composer).toBeVisible();
+    await expect(comment).toHaveAttribute("maxlength", "500");
+    await expect(comment).toHaveAttribute("aria-describedby", "comment-counter");
+    await expect(displayName).toHaveAttribute("maxlength", "80");
+    await expect(counter).toHaveAttribute("aria-live", "polite");
+    await expect(counter).toHaveAttribute("aria-atomic", "true");
+
+    expect(
+      await page.locator("[data-vote-form]").evaluate((form) => {
+        const options = form.querySelector("fieldset.poll-options");
+        const commentComposer = form.querySelector("[data-comment-composer]");
+        const action = form.querySelector(".vote-action");
+        const follows = (earlier, later) =>
+          Boolean(
+            earlier &&
+              later &&
+              earlier.compareDocumentPosition(later) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+        return {
+          optionsBeforeComposer: follows(options, commentComposer),
+          composerBeforeAction: follows(commentComposer, action),
+        };
+      }),
+    ).toEqual({ optionsBeforeComposer: true, composerBeforeAction: true });
+
+    await comment.fill("x".repeat(449));
+    await expect(counter).toBeHidden();
+    await comment.fill("x".repeat(450));
+    await expect(counter).toBeVisible();
+    await expect(counter).toHaveText("50 characters left");
+    await comment.fill("x".repeat(499));
+    await expect(counter).toHaveText("1 character left");
+    await comment.fill("x".repeat(500));
+    await expect(counter).toHaveText("0 characters left");
+
+    await comment.fill("The context behind my choice stays with the ballot.");
+    await displayName.fill("E2E Voter");
+    await comment.focus();
+    await expect(comment).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(displayName).toBeFocused();
+
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.screenshot({
+      path: `${commentProofDir}/composer-375-dark.png`,
+      fullPage: true,
+      mask: [page.locator("[data-share-url-text]")],
+      maskColor: "#4b5563",
+    });
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({
+      path: `${commentProofDir}/composer-1280-light.png`,
+      fullPage: true,
+      mask: [page.locator("[data-share-url-text]")],
+      maskColor: "#4b5563",
     });
   });
 
@@ -883,6 +985,144 @@ test.describe("public voting flow", () => {
       ),
     ).toEqual([{ n: 1 }]);
     await noJsContext.close();
+  });
+
+  test("preserves Comment fields through a native no-JavaScript 422 and retry", async ({
+    browser,
+    page,
+    context,
+    baseURL,
+  }) => {
+    const question = "No JS Comment retry?";
+    const created = await publishPoll(
+      page,
+      context,
+      baseURL,
+      question,
+      true,
+    );
+    const noJsContext = await browser.newContext({ javaScriptEnabled: false });
+    const noJsPage = await noJsContext.newPage();
+    await noJsPage.goto(`${requireBaseUrl(baseURL)}${created.path}`);
+
+    const comment = noJsPage.getByRole("textbox", {
+      name: "COMMENT",
+      exact: true,
+    });
+    const displayName = noJsPage.getByRole("textbox", {
+      name: "DISPLAY NAME (OPTIONAL)",
+      exact: true,
+    });
+    const safeComment = "<b>Context & a reason</b>";
+    await comment.fill(safeComment);
+    await displayName.fill("No-JS Voter");
+    const originalSubmissionId =
+      (await noJsPage
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(originalSubmissionId);
+
+    const [rejected] = await Promise.all([
+      noJsPage.waitForResponse(
+        (candidate) =>
+          candidate.url().endsWith(created.path) &&
+          candidate.request().method() === "POST",
+      ),
+      noJsPage.getByRole("button", { name: "VOTE" }).click(),
+    ]);
+    expect(rejected.status()).toBe(422);
+    await expect(noJsPage).toHaveTitle(`Nothing selected — ${question}`);
+    await expect(noJsPage.locator("[data-vote-outcome]")).toBeFocused();
+    await expect(comment).toHaveValue(safeComment);
+    await expect(displayName).toHaveValue("No-JS Voter");
+    await expect(noJsPage.locator("[data-comment-composer] b")).toHaveCount(0);
+    const retrySubmissionId =
+      (await noJsPage
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(retrySubmissionId);
+    expect(retrySubmissionId).not.toBe(originalSubmissionId);
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${created.pollId}'`,
+      ),
+    ).toEqual([{ n: 0 }]);
+
+    await noJsPage.locator("label.poll-option", { hasText: "Alpha" }).click();
+    await noJsPage.getByRole("button", { name: "VOTE" }).click();
+    await expect(noJsPage).toHaveTitle(`Counted — ${question}`);
+    expect(
+      d1Query(
+        `SELECT vc.body, vc.display_name FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${created.pollId}'`,
+      ),
+    ).toEqual([{ body: safeComment, display_name: "No-JS Voter" }]);
+    await noJsContext.close();
+  });
+
+  test("keeps Comment fields read-only in flight and editable after recovery", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(
+      page,
+      context,
+      baseURL,
+      "Recover my Comment?",
+      true,
+    );
+    await page.goto(created.path);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+    const comment = page.getByRole("textbox", {
+      name: "COMMENT",
+      exact: true,
+    });
+    const displayName = page.getByRole("textbox", {
+      name: "DISPLAY NAME (OPTIONAL)",
+      exact: true,
+    });
+    await comment.fill("Keep this exact context.");
+    await displayName.fill("Patient Voter");
+
+    let releaseProbe;
+    const heldProbe = new Promise((resolve) => {
+      releaseProbe = resolve;
+    });
+    await page.route("**/favicon.svg", async (route) => {
+      await heldProbe;
+      await route.continue();
+    });
+    await page.getByRole("button", { name: "VOTE" }).click();
+
+    await expect(page.getByRole("button", { name: "COUNTING…" })).toBeDisabled();
+    await expect(comment).toHaveJSProperty("readOnly", true);
+    await expect(displayName).toHaveJSProperty("readOnly", true);
+    await expect(comment).toHaveValue("Keep this exact context.");
+    await expect(displayName).toHaveValue("Patient Voter");
+    await expect(page.locator("[data-comment-composer]")).toHaveCSS(
+      "pointer-events",
+      "none",
+    );
+
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new PageTransitionEvent("pageshow", { persisted: true }),
+      );
+    });
+    await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
+    await expect(comment).toHaveJSProperty("readOnly", false);
+    await expect(displayName).toHaveJSProperty("readOnly", false);
+    await expect(comment).toHaveValue("Keep this exact context.");
+    await expect(displayName).toHaveValue("Patient Voter");
+
+    const probeSettled = page.waitForResponse(
+      (candidate) =>
+        candidate.url().endsWith("/favicon.svg") &&
+        candidate.request().method() === "HEAD",
+    );
+    releaseProbe?.();
+    await probeSettled;
+    await page.unroute("**/favicon.svg");
   });
 
   test("locks one in-flight submission without dimming or disabling its options", async ({

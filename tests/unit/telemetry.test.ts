@@ -48,6 +48,8 @@ describe("telemetry adapter", () => {
     expect(isForbiddenTelemetryKey("tokens")).toBe(true);
     expect(isForbiddenTelemetryKey("voterDigest")).toBe(true);
     expect(isForbiddenTelemetryKey("comment")).toBe(true);
+    expect(isForbiddenTelemetryKey("displayName")).toBe(true);
+    expect(isForbiddenTelemetryKey("display_name")).toBe(true);
     expect(isForbiddenTelemetryKey("ballot")).toBe(true);
     expect(isForbiddenTelemetryKey("voterCode")).toBe(true);
     expect(isForbiddenTelemetryKey("ip")).toBe(true);
@@ -86,6 +88,9 @@ describe("telemetry adapter", () => {
       cfConnectingIp: "203.0.113.8",
       digest: "a".repeat(64),
       ipDigest: "b".repeat(64),
+      // Story 4.1: Comment content and attribution are Vote data, not telemetry.
+      comment: "Private context for the group",
+      displayName: "Private Voter Name",
       // Story 2.3: Turnstile challenge material must never reach telemetry.
       "cf-turnstile-response": "turnstile-token-value",
       turnstileToken: "turnstile-token-value",
@@ -103,6 +108,10 @@ describe("telemetry adapter", () => {
     expect(raw).not.toContain("203.0.113.8");
     expect(raw).not.toContain("a".repeat(64));
     expect(raw).not.toContain("b".repeat(64));
+    expect(raw).not.toContain("Private context for the group");
+    expect(raw).not.toContain("Private Voter Name");
+    expect(raw).not.toContain('"comment"');
+    expect(raw).not.toContain("displayName");
     expect(raw).not.toContain('"ip"');
     expect(raw).not.toContain("ipAddress");
     expect(raw).not.toContain("digest");

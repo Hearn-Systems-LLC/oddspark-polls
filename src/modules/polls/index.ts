@@ -66,6 +66,7 @@ export type CreatePollDraft = {
   voterCodes: string;
   captcha: string;
   vpnBlocking: string;
+  commentsEnabled?: string;
   // No-JS duplicate-POST dedupe (D4, decision 2026-07-29): the form renders
   // with a pre-minted poll UUID; a retried publish carrying the same ID
   // collides on the poll PRIMARY KEY instead of minting a second Poll.
@@ -97,6 +98,7 @@ export type ValidatedCreatePoll = {
   voterCodesEnabled: boolean;
   captchaEnabled: boolean;
   vpnBlockingEnabled: boolean;
+  commentsEnabled: boolean;
 };
 
 // Voice-and-Tone catalog for creation failures. The three epic-specified
@@ -375,6 +377,7 @@ export function validateCreatePoll(
       voterCodesEnabled: draft.voterCodes === "true",
       captchaEnabled: draft.captcha === "true",
       vpnBlockingEnabled: draft.vpnBlocking === "true",
+      commentsEnabled: draft.commentsEnabled === "true",
     },
   };
 }
@@ -395,6 +398,7 @@ export type PollPersistenceRows = {
     voterCodesEnabled: boolean;
     captchaEnabled: boolean;
     vpnBlockingEnabled: boolean;
+    commentsEnabled: boolean;
     multiSelectEnabled: boolean;
     minSelections: number | null;
     maxSelections: number | null;
@@ -455,6 +459,7 @@ export type ExistingPollSnapshot = {
   voterCodesEnabled: boolean;
   captchaEnabled: boolean;
   vpnBlockingEnabled: boolean;
+  commentsEnabled: boolean;
   options: { label: string; position: number }[];
   canonicalReference: string;
   canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
@@ -525,6 +530,7 @@ function matchesExistingPoll(
     validated.voterCodesEnabled === existing.voterCodesEnabled &&
     validated.captchaEnabled === existing.captchaEnabled &&
     validated.vpnBlockingEnabled === existing.vpnBlockingEnabled &&
+    validated.commentsEnabled === existing.commentsEnabled &&
     optionCount === existing.options.length &&
     validated.options.every(
       (option, index) =>
@@ -593,6 +599,7 @@ function draftContentForCompare(
     voterCodesEnabled: draft.voterCodes === "true",
     captchaEnabled: draft.captcha === "true",
     vpnBlockingEnabled: draft.vpnBlocking === "true",
+    commentsEnabled: draft.commentsEnabled === "true",
   };
 }
 
@@ -721,6 +728,7 @@ export async function createPoll(
       voterCodesEnabled: validated.value.voterCodesEnabled,
       captchaEnabled: validated.value.captchaEnabled,
       vpnBlockingEnabled: validated.value.vpnBlockingEnabled,
+      commentsEnabled: validated.value.commentsEnabled,
       multiSelectEnabled: validated.value.multiSelect,
       minSelections: validated.value.minSelections,
       maxSelections: validated.value.maxSelections,

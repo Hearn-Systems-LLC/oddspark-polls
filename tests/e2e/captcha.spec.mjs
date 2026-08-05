@@ -20,7 +20,9 @@ if (!hasBetterAuthSecret()) {
 }
 
 const proofDir = "test-results/story-2-3-captcha-proof";
+const commentProofDir = "test-results/story-4-1-comment-proof";
 mkdirSync(proofDir, { recursive: true });
+mkdirSync(commentProofDir, { recursive: true });
 
 const CAPTCHA_HEADING = "The human check didn't pass.";
 const FORCE_INTERACTIVE_SITE_KEY = "3x00000000000000000000FF";
@@ -110,7 +112,12 @@ test.describe("CAPTCHA on the Vote Action", () => {
     }
   }
 
-  async function publishPoll(page, context, baseURL, { captcha = true } = {}) {
+  async function publishPoll(
+    page,
+    context,
+    baseURL,
+    { captcha = true, comments = false } = {},
+  ) {
     await signIn(context, baseURL);
     const reference = `cap-${randomUUID().slice(0, 8)}`;
     await page.goto("/creator/new");
@@ -118,6 +125,9 @@ test.describe("CAPTCHA on the Vote Action", () => {
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
     await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill(reference);
+    if (comments) {
+      await page.locator('label[for="comments-enabled"]').click();
+    }
     await setToggle(page, "Session Checks", false);
     await setToggle(page, "CAPTCHA", captcha);
     await page.getByRole("button", { name: "PUBLISH POLL" }).click();
@@ -125,9 +135,12 @@ test.describe("CAPTCHA on the Vote Action", () => {
     const pollId = /\/creator\/polls\/([^?]+)/.exec(page.url())?.[1] ?? "";
     assertUuid(pollId);
     const row = d1Query(
-      `SELECT captcha_enabled FROM poll WHERE id = '${pollId}'`,
+      `SELECT captcha_enabled, comments_enabled FROM poll WHERE id = '${pollId}'`,
     );
-    expect(row[0]?.captcha_enabled).toBe(captcha ? 1 : 0);
+    expect(row[0]).toEqual({
+      captcha_enabled: captcha ? 1 : 0,
+      comments_enabled: comments ? 1 : 0,
+    });
     await context.clearCookies();
     return { path: `/${reference}`, pollId, reference };
   }
@@ -150,7 +163,10 @@ test.describe("CAPTCHA on the Vote Action", () => {
     baseURL,
   }) => {
     observePage(page);
-    const poll = await publishPoll(page, context, baseURL, { captcha: true });
+    const poll = await publishPoll(page, context, baseURL, {
+      captcha: true,
+      comments: true,
+    });
     await page.goto(poll.path);
 
     // Empty container has zero height until the vendor script renders; assert
@@ -168,7 +184,41 @@ test.describe("CAPTCHA on the Vote Action", () => {
     expect(adjacency).toMatch(/turnstile/i);
     expect(adjacency.toLowerCase()).toContain("button");
 
+    expect(
+      await page.locator("[data-vote-form]").evaluate((form) => {
+        const options = form.querySelector("fieldset.poll-options");
+        const composer = form.querySelector("[data-comment-composer]");
+        const turnstile = form.querySelector("[data-turnstile]");
+        const button = form.querySelector('button[type="submit"]');
+        const follows = (earlier, later) =>
+          Boolean(
+            earlier &&
+              later &&
+              earlier.compareDocumentPosition(later) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+        return {
+          optionsBeforeComposer: follows(options, composer),
+          composerBeforeTurnstile: follows(composer, turnstile),
+          turnstileBeforeButton: follows(turnstile, button),
+        };
+      }),
+    ).toEqual({
+      optionsBeforeComposer: true,
+      composerBeforeTurnstile: true,
+      turnstileBeforeButton: true,
+    });
+
     await page.locator('label.poll-option', { hasText: "Alpha" }).click();
+    await page
+      .getByRole("textbox", { name: "COMMENT", exact: true })
+      .fill("Keep this through the human-check retry.");
+    await page
+      .getByRole("textbox", {
+        name: "DISPLAY NAME (OPTIONAL)",
+        exact: true,
+      })
+      .fill("CAPTCHA Voter");
     // Force a missing-token submission: strip any response field the dummy
     // client may have written, then native submit without waiting for widget.
     await page.evaluate(() => {
@@ -186,13 +236,34 @@ test.describe("CAPTCHA on the Vote Action", () => {
     await expect(page.locator('[data-outcome-code="captcha_failed"]')).toContainText(
       CAPTCHA_HEADING,
     );
+    await expect(page.locator('[data-outcome-code="captcha_failed"]')).toBeFocused();
     await expect(
       page.locator('input[name="option_id"]:checked'),
     ).toHaveCount(1);
+    await expect(
+      page.getByRole("textbox", { name: "COMMENT", exact: true }),
+    ).toHaveValue("Keep this through the human-check retry.");
+    await expect(
+      page.getByRole("textbox", {
+        name: "DISPLAY NAME (OPTIONAL)",
+        exact: true,
+      }),
+    ).toHaveValue("CAPTCHA Voter");
     await expect(page.locator("[data-turnstile]")).toHaveCount(1);
     await expect(page.locator('button[type="submit"]')).toBeEnabled();
+    expect(
+      d1Query(
+        `SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${poll.pollId}'`,
+      ),
+    ).toEqual([{ n: 0 }]);
     await page.screenshot({
       path: `${proofDir}/375-dark-failure-retry.png`,
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.screenshot({
+      path: `${commentProofDir}/captcha-retry-375-dark.png`,
       fullPage: true,
     });
   });

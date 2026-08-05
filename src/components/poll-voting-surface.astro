@@ -1,5 +1,6 @@
 ---
 import ButtonPrimary from "./button-primary.astro";
+import CommentComposer from "./comment-composer.astro";
 import PollOption from "./poll-option.astro";
 import PublicRepositoryLink from "./public-repository-link.astro";
 import ResultsTally from "./results-tally.astro";
@@ -52,6 +53,9 @@ const {
   effectiveMinSelections,
   effectiveMaxSelections,
   boundsHint,
+  commentBody,
+  commentDisplayName,
+  commentFieldErrors,
 } = delivery;
 const selectedCount = selected.size;
 
@@ -196,6 +200,13 @@ const tallyOwnsBadge = readOnly;
             <PollOption id={`option-${option.id}`} name="option_id" value={option.id} label={option.label} checked={selected.has(option.id)} type={multiSelect ? "checkbox" : "radio"} />
           ))}
         </fieldset>
+        {poll.commentsEnabled && (
+          <CommentComposer
+            body={commentBody}
+            displayName={commentDisplayName}
+            fieldErrors={commentFieldErrors}
+          />
+        )}
         <TrustBadge toggles={pollToggles} />
         <div class="vote-action">
           {!multiSelect && <p class="vote-hint" data-vote-hint hidden>SELECT AN OPTION TO UNLOCK VOTE</p>}
@@ -247,6 +258,7 @@ const tallyOwnsBadge = readOnly;
   .poll-options { margin: 0; padding: 0; border: 0; }
   .poll-options > li { list-style: none; }
   [data-vote-form][data-vote-inflight="true"] .poll-options { pointer-events: none; }
+  [data-vote-form][data-vote-inflight="true"] :global([data-comment-composer]) { pointer-events: none; opacity: 0.8; }
   [data-vote-form][data-vote-inflight="true"] :global(.vote-button) { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
   [data-vote-form][data-max-reached="true"] :global(label.poll-option:has(.poll-option-input:not(:checked))) { cursor: default; }
   [data-vote-form][data-max-reached="true"] :global(label.poll-option:has(.poll-option-input:not(:checked)):hover) { background: transparent; }

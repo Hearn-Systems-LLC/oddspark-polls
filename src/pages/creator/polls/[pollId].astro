@@ -137,6 +137,7 @@ const persistedDraft = (
     owned.minSelections != null ? String(owned.minSelections) : "",
   maxSelections:
     owned.maxSelections != null ? String(owned.maxSelections) : "",
+  commentsEnabled: owned.commentsEnabled ? "true" : "false",
 });
 
 if (Astro.request.method === "POST") {
@@ -158,6 +159,7 @@ if (Astro.request.method === "POST") {
     multiSelect: parsedForm.multiSelect,
     minSelections: parsedForm.minSelections,
     maxSelections: parsedForm.maxSelections,
+    commentsEnabled: parsedForm.commentsEnabled,
   };
 
   if (intent === "reset-demo") {
@@ -669,6 +671,7 @@ const formValues: PollDefinitionDraft = draftValues ?? {
     poll?.minSelections != null ? String(poll.minSelections) : "",
   maxSelections:
     poll?.maxSelections != null ? String(poll.maxSelections) : "",
+  commentsEnabled: poll?.commentsEnabled ? "true" : "false",
 };
 
 while (formValues.options.length < 2) {

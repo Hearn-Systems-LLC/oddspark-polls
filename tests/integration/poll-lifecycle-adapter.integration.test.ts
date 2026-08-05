@@ -90,6 +90,7 @@ function pollRows(
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -438,6 +439,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
         multiSelect: false,
         minSelections: null,
         maxSelections: null,
+        commentsEnabled: false,
       },
       options: [
         {
@@ -513,6 +515,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
       multiSelect: false,
       minSelections: null,
       maxSelections: null,
+      commentsEnabled: false,
     };
     const firstOptions = [
       { id: "first-1" as PollOptionId, label: "One", position: 0 },
@@ -606,6 +609,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
           multiSelect: false,
           minSelections: null,
           maxSelections: null,
+          commentsEnabled: false,
         },
         options: [
           { id: "edited-1" as PollOptionId, label: "New A", position: 0 },

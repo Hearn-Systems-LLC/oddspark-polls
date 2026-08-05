@@ -1,0 +1,97 @@
+---
+import { COMMENT_CAPS } from "../modules/comments/index";
+
+interface Props {
+  body: string;
+  displayName: string;
+  fieldErrors?: Record<string, string>;
+}
+
+const { body, displayName, fieldErrors = {} } = Astro.props;
+const visibleBody = body.replace(/\r\n?/g, "\n");
+const remaining = Math.max(0, COMMENT_CAPS.body - visibleBody.length);
+const counterCopy = `${remaining} ${remaining === 1 ? "character" : "characters"} left`;
+---
+
+<fieldset class="comment-composer" data-comment-composer>
+  <legend class="group-label">ADD A COMMENT (OPTIONAL)</legend>
+  <label for="vote-comment">COMMENT</label>
+  <textarea
+    id="vote-comment"
+    name="comment"
+    rows="4"
+    maxlength={COMMENT_CAPS.body}
+    aria-invalid={fieldErrors.comment ? "true" : undefined}
+    aria-describedby={fieldErrors.comment ? "comment-error comment-counter" : "comment-counter"}
+    data-comment-body
+  >{body}</textarea>
+  <p
+    class="comment-counter"
+    id="comment-counter"
+    data-comment-counter
+    aria-live="polite"
+    aria-atomic="true"
+    hidden={remaining > 50}
+  >{counterCopy}</p>
+  {fieldErrors.comment && <p class="field-error" id="comment-error">{fieldErrors.comment}</p>}
+
+  <label for="vote-display-name">DISPLAY NAME (OPTIONAL)</label>
+  <input
+    id="vote-display-name"
+    name="display_name"
+    type="text"
+    value={displayName}
+    maxlength={COMMENT_CAPS.displayName}
+    aria-invalid={fieldErrors.displayName ? "true" : undefined}
+    aria-describedby={fieldErrors.displayName ? "display-name-error" : undefined}
+    data-comment-display-name
+  />
+  {fieldErrors.displayName && <p class="field-error" id="display-name-error">{fieldErrors.displayName}</p>}
+</fieldset>
+
+<style>
+  .comment-composer {
+    display: grid;
+    gap: var(--space-2);
+    margin: var(--space-6) 0 0;
+    padding: var(--space-6) 0 0;
+    border: 0;
+    border-top: var(--space-hairline) solid var(--color-rule);
+  }
+  .group-label,
+  label {
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+  label:not(:first-of-type) { margin-top: var(--space-3); }
+  textarea,
+  input {
+    width: 100%;
+    padding: var(--space-2) 0;
+    border: 0;
+    border-bottom: var(--input-border-bottom);
+    border-radius: var(--rounded-default);
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+  }
+  textarea {
+    resize: vertical;
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
+  }
+  textarea:focus,
+  input:focus { outline: none; border-bottom: var(--input-border-bottom-focus); }
+  textarea:focus-visible,
+  input:focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
+  [aria-invalid="true"] { border-bottom: var(--input-border-bottom-error); }
+  .comment-counter,
+  .field-error { margin: 0; font-size: var(--type-caption-size); line-height: var(--type-caption-lh); }
+  .comment-counter { color: var(--color-dim); text-align: right; }
+  .comment-counter[hidden] { display: none; }
+  .field-error { color: var(--color-alarm); }
+</style>

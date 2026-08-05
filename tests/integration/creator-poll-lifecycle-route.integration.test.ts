@@ -11,6 +11,7 @@ import * as d1Adapter from "../../src/adapters/d1/index";
 import { onRequest } from "../../src/middleware";
 import { moderatePollDiscovery } from "../../src/modules/discovery/index";
 import type { PollId } from "../../src/shared/domain/index";
+import CreatorNew from "../../src/pages/creator/new.astro";
 import CreatorPollDetail from "../../src/pages/creator/polls/[pollId].astro";
 
 type AuthTestEnv = Cloudflare.Env & {
@@ -127,6 +128,20 @@ async function runRealRoute(
   )) as Response;
 }
 
+async function runRealCreateRoute(
+  context: MiddlewareContext,
+): Promise<Response> {
+  const container = await AstroContainer.create();
+  return (await onRequest(
+    context,
+    (() =>
+      container.renderToResponse(CreatorNew, {
+        request: context.request,
+        locals: context.locals,
+      })) as never,
+  )) as Response;
+}
+
 async function csrfFor(cookie: string): Promise<string> {
   const context = makeContext(
     new Request("https://polls.example.test/creator/new", {
@@ -207,6 +222,45 @@ function securityInput(html: string, id: string): string {
   const tag = new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(html)?.[0];
   if (!tag) throw new Error(`Missing Security Toggle input: ${id}`);
   return tag;
+}
+
+function definitionInput(html: string, id: string): string {
+  const tag = new RegExp(`<input[^>]*id="${id}"[^>]*>`).exec(html)?.[0];
+  if (!tag) throw new Error(`Missing Poll Definition input: ${id}`);
+  return tag;
+}
+
+function definitionBody(
+  csrfToken: string,
+  commentsEnabled: boolean,
+): URLSearchParams {
+  const body = new URLSearchParams({
+    csrf_token: csrfToken,
+    intent: "update-definition",
+    question: "Route truth?",
+    description: "Original description",
+    multiSelect: "false",
+    commentsEnabled: commentsEnabled ? "true" : "false",
+  });
+  body.append("option", "Alpha");
+  body.append("option", "Beta");
+  return body;
+}
+
+async function commentsRow(pollId: string): Promise<{
+  comments_enabled: number;
+  representation_version: number;
+}> {
+  const row = await testEnv.DB.prepare(
+    "SELECT comments_enabled, representation_version FROM poll WHERE id = ?1",
+  )
+    .bind(pollId)
+    .first<{
+      comments_enabled: number;
+      representation_version: number;
+    }>();
+  if (!row) throw new Error(`Missing Poll: ${pollId}`);
+  return row;
 }
 
 async function securityRow(pollId: string): Promise<{
@@ -391,6 +445,122 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
     expect(html).toContain("Original description");
     expect(html).toContain('value="Alpha"');
     expect(html).toContain('value="Beta"');
+  });
+
+  it("persists the Comment opt-in through create and renders that stored definition", async () => {
+    const { cookie } = await createAuthenticatedCookie();
+    const csrfToken = await csrfFor(cookie);
+    const pollId = crypto.randomUUID();
+    const body = new URLSearchParams({
+      csrf_token: csrfToken,
+      intent: "publish",
+      poll_id: pollId,
+      question: "Context with the Vote?",
+      visibility: "live",
+      listing: "unlisted",
+      multiSelect: "false",
+      commentsEnabled: "true",
+      sessionChecks: "true",
+    });
+    body.append("option", "Alpha");
+    body.append("option", "Beta");
+
+    const response = await runRealCreateRoute(
+      makeContext(
+        new Request("https://polls.example.test/creator/new", {
+          method: "POST",
+          headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded",
+            origin: "https://polls.example.test",
+            "sec-fetch-site": "same-origin",
+          },
+          body,
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      `/creator/polls/${pollId}?created`,
+    );
+    expect(await commentsRow(pollId)).toEqual({
+      comments_enabled: 1,
+      representation_version: 1,
+    });
+
+    const detail = await runRealRoute(
+      makeContext(
+        new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+          headers: { cookie },
+        }),
+      ),
+      pollId,
+    );
+    const html = await detail.text();
+    expect(detail.status).toBe(200);
+    expect(definitionInput(html, "comments-enabled")).toMatch(
+      /\schecked(?:[=\s/>])/,
+    );
+    expect(definitionInput(html, "comments-disabled")).not.toMatch(
+      /\schecked(?:[=\s/>])/,
+    );
+  });
+
+  it("round-trips Comment opt-in edits in both directions before the first Vote", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const csrfToken = await csrfFor(cookie);
+
+    for (const [enabled, expectedVersion] of [
+      [true, 2],
+      [false, 3],
+    ] as const) {
+      const response = await runRealRoute(
+        makeContext(
+          new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+            method: "POST",
+            headers: {
+              cookie,
+              "content-type": "application/x-www-form-urlencoded",
+              origin: "https://polls.example.test",
+              "sec-fetch-site": "same-origin",
+            },
+            body: definitionBody(csrfToken, enabled),
+          }),
+        ),
+        pollId,
+      );
+
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        `/creator/polls/${pollId}?outcome=poll-updated`,
+      );
+      expect(await commentsRow(pollId)).toEqual({
+        comments_enabled: enabled ? 1 : 0,
+        representation_version: expectedVersion,
+      });
+
+      const detail = await runRealRoute(
+        makeContext(
+          new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+            headers: { cookie },
+          }),
+        ),
+        pollId,
+      );
+      const html = await detail.text();
+      expect(detail.status).toBe(200);
+      const enabledInput = definitionInput(html, "comments-enabled");
+      const disabledInput = definitionInput(html, "comments-disabled");
+      if (enabled) {
+        expect(enabledInput).toMatch(/\schecked(?:[=\s/>])/);
+        expect(disabledInput).not.toMatch(/\schecked(?:[=\s/>])/);
+      } else {
+        expect(enabledInput).not.toMatch(/\schecked(?:[=\s/>])/);
+        expect(disabledInput).toMatch(/\schecked(?:[=\s/>])/);
+      }
+    }
   });
 
   it("rejects malformed lifecycle fields in the real page without mutating", async () => {

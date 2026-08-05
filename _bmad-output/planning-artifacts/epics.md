@@ -44,7 +44,7 @@ FR-23: Opt-in public discovery — every new Poll starts Unlisted; Creator moves
 FR-24: Vote-attached Comments — one optional Comment (with optional display name) per Vote; visible wherever the Tally is visible; Creator can delete any Comment on their Poll and disable Comments per Poll; Comment submission covered by the same Security Toggles as its Vote.
 FR-25: Landing page — root URL explains the platform and how it's built, links the repository, pins the Demo Poll, and offers clear entries to Discover and creating a Poll (sign-in).
 FR-26: Demo Poll — one designated Poll pinned to the landing page, votable by any visitor; runs with CAPTCHA + Session Checks on, IP Checks off; Creator can reset its Votes from the creator surface.
-FR-27: Public repository — public, presentable repo with README (what/why/how, stack, how to run) and architecture notes; no secrets or personal data in history.
+FR-27: Public repository — public, presentable repo with README (what/why/how, stack, how to run) and architecture notes; repository history contains no credentials, tokens, runtime or user data, or unrelated or accidental personal data; intentional public GitHub commit attribution is permitted.
 FR-28: Share a Poll — create-confirmation, voting, and results surfaces render an explicit text-labelled Share Action beside the canonical URL; native share sheet when available, copy-link fallback; results never gated behind sharing; no vendor social buttons; the shared URL is canonical and never changes.
 
 ### NonFunctional Requirements
@@ -229,7 +229,7 @@ So that every later story builds on a deployable, tested, secure floor instead o
 
 **Given** the public repository,
 **When** a visitor reads it,
-**Then** a real README covers what the product is, the stack, and how to run it, and no secrets or personal data exist anywhere in the history (FR-27 baseline).
+**Then** a real README covers what the product is, the stack, and how to run it, and repository history contains no credentials, tokens, runtime or user data, or unrelated or accidental personal data; intentional public GitHub commit attribution is permitted (FR-27 baseline).
 
 **Given** any application operation,
 **When** it completes,
@@ -824,7 +824,7 @@ So that the code itself completes the portfolio argument (FR-27, SM-6).
 
 **Given** the full repository history,
 **When** audited,
-**Then** no secrets, tokens, or personal data exist in any commit (FR-27).
+**Then** no credentials, tokens, runtime or user data, or unrelated or accidental personal data exist in any commit, **And** intentional public GitHub commit attribution is permitted (FR-27).
 
 ## Epic 4: Comments & Export
 

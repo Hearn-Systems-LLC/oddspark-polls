@@ -1,6 +1,7 @@
 ---
 import ButtonPrimary from "./button-primary.astro";
 import PollOption from "./poll-option.astro";
+import PublicRepositoryLink from "./public-repository-link.astro";
 import ResultsTally from "./results-tally.astro";
 import ShareAction from "./share-action.astro";
 import TrustBadge from "./trust-badge.astro";
@@ -225,6 +226,7 @@ const tallyOwnsBadge = readOnly;
   <section class="share-block" aria-label="Share this Poll">
     <ShareAction canonicalUrl={canonicalUrl} />
   </section>
+  {!embedded && <PublicRepositoryLink />}
 </section>
 
 <script src="../scripts/vote-form.ts"></script>
@@ -276,5 +278,6 @@ const tallyOwnsBadge = readOnly;
     .poll-shell[data-post-vote="true"] :global(.chart-form-pie) { grid-column: 2; grid-row: 5; }
     .poll-shell[data-post-vote="true"] :global(.results-tally-badge) { grid-column: 2; grid-row: 6; }
     .poll-shell[data-post-vote="true"] > .share-block { grid-column: 1 / -1; grid-row: 7; }
+    .poll-shell[data-post-vote="true"] > :global([data-public-repository-footer]) { grid-column: 1 / -1; grid-row: 8; }
   }
 </style>

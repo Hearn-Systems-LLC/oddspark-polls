@@ -22,7 +22,7 @@ Make Oddspark useful and credible to a stranger arriving without a shared Poll l
 - Discovery state is independent of result visibility and Poll integrity. Administrator delisting removes enumeration only; it cannot change ownership, link reachability, lifecycle, visibility, representation, or Vote data. Moderation authority is an explicit server-owned capability, never inferred from Poll ownership.
 - The landing page must explain the product in plain language before presenting its technical build account, link the public repository, and provide direct entries to Discover and sign-in/create.
 - The designated Demo Poll is the real voting experience embedded on the landing page, not a screenshot or reduced imitation. It uses CAPTCHA and Session Checks, leaves IP Checks off to avoid shared-address false positives, shows live results as authorized, and supports a creator-only reset that returns it through the normal empty state.
-- The public repository must have a README covering what the product is, why it exists, its stack, and local operation, plus enough architecture context for technical evaluation. No secret, token, or personal data may exist anywhere in repository history.
+- The public repository must have a README covering what the product is, why it exists, its stack, and local operation, plus enough architecture context for technical evaluation. Its full history must contain no credentials, tokens, runtime or user data, or unrelated or accidental personal data. Intentional public GitHub commit attribution is permitted.
 - Public surfaces must meet the portfolio craft bar: polished responsive presentation, keyboard operability, sensible contrast, text alternatives for images, and honest failure and empty states.
 
 ## Technical Decisions
@@ -30,9 +30,9 @@ Make Oddspark useful and credible to a stranger arriving without a shared Poll l
 - Browser surfaces are server-rendered Astro with functional HTML and working POST-redirect-GET flows without JavaScript; isolated vanilla TypeScript enhancement is added only where interaction requires it.
 - Hexagonal boundaries remain mandatory: delivery routes map HTTP, application commands coordinate use cases, domain modules own policy without framework or provider imports, and adapters implement persistence or platform ports.
 - D1 is the sole transactional source of truth. Discovery owns the `unlisted | listed | delisted` state machine and all legal writes to it. Actual listing transitions advance a separate catalog revision; they do not advance the Poll representation version.
-- Administrator delist and clear operations must recheck the live internal role and atomically commit the state change with a private, monotonically ordered moderation action. Repeated delist is a no-op; clearing restores the creator's prior Listed or Unlisted choice, falling back to Unlisted when legacy history is unusable.
+- Administrator moderation rechecks the live internal role and atomically records both the ordered moderation fact and discovery-state change. Clearing a hold restores the creator's prior listing choice, with Unlisted as the privacy-safe fallback.
 - Discovery cards are an allowlisted projection in a cache namespace separate from result responses. Result authorization and result caching must never be reused as catalog authorization.
-- The Demo Poll is designated by explicit configuration under a stable canonical reference. Reset is a narrowly sanctioned aggregate replacement coordinated by Demo policy and a purpose-built D1 adapter; it preserves stable option identities and refuses when current or historical Discovery moderation facts exist.
+- The Demo Poll is designated explicitly under a stable canonical reference. Reset is the sole sanctioned aggregate-replacement path and must preserve identity and transaction guarantees without creating a parallel demo data model.
 - Canonical Poll references share the root namespace, so reserved application routes must remain collision-safe. The fixed moderation surface resolves one Poll at a time and must not become an all-Poll administrative browser.
 
 ## UX & Interaction Patterns

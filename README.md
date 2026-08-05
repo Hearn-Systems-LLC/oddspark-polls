@@ -1,8 +1,63 @@
 # oddspark-polls
 
-Trustworthy casual polls at [polls.oddspark.dev](https://polls.oddspark.dev) — multiple-choice, ranked, image, and meeting polls with vote security and no subscription wall.
+Oddspark Polls is a trustworthy casual-poll product: create a question, share
+one durable link, and watch an honest count without a subscription wall. It
+exists because quick group decisions should not require an enterprise survey
+tool or a ballot box that is easy to stuff.
+
+Try the live production Worker at
+[oddspark-polls.hearnsystems.workers.dev](https://oddspark-polls.hearnsystems.workers.dev).
+`polls.oddspark.dev` is the product identity and planned custom domain; it is
+not bound yet.
 
 This is a **public demonstration build**: the product is real, the repo is presentable, and nothing secret belongs in history.
+
+## Current scope
+
+Infrastructure does not count as shipped product behavior. In particular, the
+configured R2 binding prepares image storage; it does not mean Image Polls are
+available yet.
+
+| Status | Capabilities |
+| --- | --- |
+| Shipped | Multiple-Choice Polls, including bounded multi-select; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Planned / backlog | Comments; CSV and XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
+
+## Product tour
+
+1. Start at `/` to read the product account and cast a real Vote in the live
+   Demo.
+2. Browse open Listed Polls at `/discover`, or sign in at `/sign-in` and create
+   one at `/creator/new`.
+3. Manage created Polls from `/creator` and their creator detail pages.
+4. Open the published canonical `/{reference}` link as a signed-out Voter,
+   choose an option, and submit.
+5. Follow the same Poll to `/{reference}/results`; its visibility policy decides
+   whether the Tally is live, opens after close, or remains creator-only. The
+   canonical URL and Share action stay visible wherever sharing is lawful.
+
+Provider callbacks and operator-only endpoints are intentionally outside this
+primary evaluator path.
+
+## Architecture
+
+The authoritative [Architecture Spine](_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md)
+contains the complete decisions and capability map. The evaluator-sized map is:
+
+- One Astro Worker is a hexagonal modular monolith: routes are inbound
+  adapters, capability modules own policy, and Cloudflare/auth integrations are
+  outbound adapters (AD-1).
+- Browser journeys begin as server-rendered functional HTML, with isolated
+  progressive enhancement only where interaction needs it (AD-2).
+- D1 owns facts, each fact has one legal owner/write path, and projections do
+  not become competing truth (AD-6, AD-19).
+- Vote acceptance is one constrained transaction; duplicate identities become
+  secret-keyed, Poll-scoped digests rather than stored raw identifiers (AD-7,
+  AD-8).
+- Local, staging, and production share code but never state, and production is
+  promoted only after the staging gate (AD-14).
+- Telemetry remains voter-blind, and result authorization happens before any
+  projection or caching decision (AD-15, AD-21).
 
 ## Stack
 
@@ -11,8 +66,8 @@ This is a **public demonstration build**: the product is real, the repo is prese
 | Runtime | Cloudflare Workers (`nodejs_compat`) |
 | Framework | Astro 7 (SSR via `@astrojs/cloudflare`) |
 | Database | Cloudflare D1 (forward-only SQL migrations) |
-| Object storage | Cloudflare R2 (poll images; later stories) |
-| Auth | Better Auth + Google/GitHub OAuth (Story 1.2) |
+| Object storage | Cloudflare R2 (configured media infrastructure; Image Polls planned) |
+| Auth | Better Auth + Google/GitHub OAuth |
 | Abuse floor | Cloudflare Workers Rate Limiting (30 vote submissions/source IP/Poll/minute; shared IPs share the budget) |
 | Tests | Vitest (unit + workerd integration) · Playwright e2e |
 | Package manager | pnpm 11.17.0 · Node 24.18.0 |
@@ -158,21 +213,48 @@ nvm use
 corepack enable
 pnpm install
 
+# Initialize ignored local runtime values through masked prompts. Never put
+# credentials in command arguments, repository files, or chat.
+./scripts/provision-auth-secrets.zsh local initialize
+
 # Apply local D1 migrations
 pnpm migrate:local
 
 # Dev server
 pnpm dev
 
-# Tests
-pnpm test              # unit + integration
-pnpm test:e2e          # Playwright (starts dev server)
+# Focused and full tests
+pnpm test:unit
+pnpm test
+pnpm test:e2e          # Playwright starts its own dev server
 
-# Production build
-pnpm build
+# Build flavors
+pnpm build             # local-flavored artifact
+pnpm build:production  # shipping production-flavored artifact
 ```
 
-## Deploy gate (AR-3)
+## Local verification gate
+
+Run the same test/build sequence as the repository gate, in this exact order,
+then perform the final worktree whitespace check used for story handoff:
+
+```bash
+pnpm migrations:guard
+pnpm test
+pnpm check
+pnpm test:e2e
+pnpm types
+git diff --exit-code worker-configuration.d.ts
+pnpm build:production
+git diff --check
+```
+
+`pnpm types` regenerates the binding declaration from `wrangler.jsonc`; the
+following diff check proves the committed declaration is current. The final
+`git diff --check` is a local handoff check and is not a separate GitHub Actions
+job.
+
+## Release and deploy gate (AR-3)
 
 Order is fixed:
 
@@ -187,19 +269,10 @@ Order is fixed:
 8. Production deploy
 9. Production smoke with the same exact Demo and liveness assertions
 
-GitHub Actions: `.github/workflows/deploy.yml`.
-
-Manual:
-
-```bash
-pnpm test && pnpm build
-pnpm preflight:demo staging
-pnpm migrate:staging && pnpm deploy:staging
-SMOKE_URL=https://oddspark-polls-staging.hearnsystems.workers.dev pnpm smoke:staging
-pnpm preflight:demo production
-pnpm migrate:production && pnpm deploy:production
-SMOKE_URL=https://oddspark-polls.hearnsystems.workers.dev pnpm smoke:staging
-```
+GitHub Actions owns this sequence in `.github/workflows/deploy.yml`. Remote
+preflight, migrations, deploys, and smoke checks require environment authority
+and are outside ordinary local verification; do not run them as a substitute
+for the local gate or without release authorization.
 
 The smoke check ends with `/api/health`, an unauthenticated binding-liveness
 probe: it returns 200 when every required binding is present (including
@@ -260,15 +333,17 @@ runbook, configuration, CI output, or commit history.
 
 ## Project layout
 
-Hexagonal structural seed:
-
-- `src/pages` — inbound HTTP / SSR pages
-- `src/middleware.ts` — request context, CSRF boundary, telemetry
-- `src/components` — token-bound UI primitives
-- `src/modules/*` — domain modules (identity, polls, voting, …)
-- `src/adapters/*` — outbound adapters (d1, r2, telemetry, …)
-- `db/migrations` — D1 SQL
-- `tests/{unit,integration,e2e}`
+- `src/pages` — inbound HTTP adapters and server-rendered routes
+- `src/middleware.ts` — request context, telemetry, session, CSRF, and creator guard chain
+- `src/components` — token-bound server-rendered UI
+- `src/scripts` — isolated progressive enhancement
+- `src/lib` — delivery composition and cross-route helpers
+- `src/layouts` / `src/styles` — document shells and design-token expression
+- `src/modules/*` — provider-free capability policy and application seams
+- `src/shared/*` — provider-free domain values and application contracts shared across capabilities
+- `src/adapters/*` — D1, cache, auth, digest, Turnstile, rate-limit, and telemetry adapters
+- `db/migrations` — forward-only D1 SQL
+- `tests/{unit,integration,e2e}` — Node, workerd, and browser proof
 
 ## License / demonstration
 

@@ -1927,4 +1927,94 @@ test.describe("public voting flow", () => {
       "Counted.",
     );
   });
+
+  test("keeps the public repository footer after Share in both supported silhouettes", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(
+      page,
+      context,
+      baseURL,
+      "Which evidence should lead?",
+    );
+    const failedResponses = [];
+    const failedRequests = [];
+    page.on("response", (response) => {
+      if (response.status() >= 400) {
+        failedResponses.push(response.status());
+      }
+    });
+    page.on("requestfailed", (request) => {
+      failedRequests.push(request.failure()?.errorText ?? "request failed");
+    });
+
+    const proofDir =
+      "test-results/story-3-6-presentable-repository-proof";
+    const inspectFooter = async () => {
+      const repository = page.getByRole("link", {
+        name: "View the public repository",
+      });
+      await expect(repository).toHaveAttribute(
+        "href",
+        "https://github.com/Hearn-Systems-LLC/oddspark-polls",
+      );
+      await expect(repository).not.toHaveAttribute("target", /.+/);
+      await repository.focus();
+      await expect(repository).toBeFocused();
+      await expect(repository).toHaveCSS("outline-width", "2px");
+      await expect(repository).toHaveCSS("outline-offset", "2px");
+      expect((await repository.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expect(
+        await page.evaluate(() => {
+          const share = document.querySelector(".share-block");
+          const footer = document.querySelector(
+            "[data-public-repository-footer]",
+          );
+          return Boolean(
+            share &&
+              footer &&
+              share.compareDocumentPosition(footer) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+        }),
+      ).toBe(true);
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+    };
+
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(created.path);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Which evidence should lead?",
+    );
+    await inspectFooter();
+    await page.screenshot({
+      path: `${proofDir}/voting-375-dark.png`,
+      fullPage: true,
+      mask: [page.locator("[data-share-url-text]")],
+      maskColor: "#4b5563",
+    });
+
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.reload();
+    await inspectFooter();
+    await page.screenshot({
+      path: `${proofDir}/voting-1280-light.png`,
+      fullPage: true,
+      mask: [page.locator("[data-share-url-text]")],
+      maskColor: "#4b5563",
+    });
+
+    expect(failedResponses).toEqual([]);
+    expect(failedRequests).toEqual([]);
+  });
 });

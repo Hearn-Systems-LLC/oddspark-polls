@@ -1,0 +1,63 @@
+---
+interface Props {
+  surface?: "landing" | "poll-footer";
+}
+
+const { surface = "poll-footer" } = Astro.props;
+const repositoryUrl =
+  "https://github.com/Hearn-Systems-LLC/oddspark-polls";
+const label =
+  surface === "landing" ? "View repository" : "View the public repository";
+---
+
+{
+  surface === "landing" ? (
+    <a
+      class="public-repository-link is-landing label-caps"
+      data-public-repository-link
+      href={repositoryUrl}
+    >
+      {label}
+    </a>
+  ) : (
+    <footer class="public-repository-footer" data-public-repository-footer>
+      <a
+        class="public-repository-link label-caps"
+        data-public-repository-link
+        href={repositoryUrl}
+      >
+        {label}
+      </a>
+    </footer>
+  )
+}
+
+<style>
+  .public-repository-footer {
+    margin-top: var(--space-10);
+    padding-top: var(--space-6);
+    border-top: var(--space-hairline) solid var(--color-rule);
+  }
+
+  .public-repository-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--color-entropy);
+    text-decoration: none;
+  }
+
+  .public-repository-link.is-landing {
+    min-height: 48px;
+    margin-top: var(--space-4);
+  }
+
+  .public-repository-link:hover {
+    color: var(--color-text);
+  }
+
+  .public-repository-link:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+</style>

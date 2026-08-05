@@ -3,7 +3,12 @@
   "type": "module",
   "version": "0.1.0",
   "private": true,
-  "description": "Trustworthy casual polls at polls.oddspark.dev",
+  "description": "Trustworthy casual polls with vote security and no subscription wall",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hearn-Systems-LLC/oddspark-polls.git"
+  },
+  "homepage": "https://github.com/Hearn-Systems-LLC/oddspark-polls",
   "packageManager": "pnpm@11.17.0",
   "engines": {
     "node": "24.18.0"

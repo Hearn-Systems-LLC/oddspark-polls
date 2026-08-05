@@ -164,6 +164,10 @@ test.describe("Landing page", () => {
     const discover = page.getByRole("link", { name: "Discover Polls" });
     await expect(repository).toHaveAttribute("href", REPOSITORY_URL);
     await expect(repository).not.toHaveAttribute("target", /.+/);
+    await expect(page.locator("[data-public-repository-link]")).toHaveCount(1);
+    await expect(
+      page.locator("[data-demo-region] [data-public-repository-footer]"),
+    ).toHaveCount(0);
     await expect(create).toHaveAttribute("href", "/creator/new");
     await expect(discover).toHaveAttribute("href", "/discover");
 
@@ -187,6 +191,20 @@ test.describe("Landing page", () => {
     await repository.click();
     await expect(page).toHaveURL(REPOSITORY_URL);
     assertClean();
+  });
+
+  test("keeps the Poll repository footer off auth and operator surfaces", async ({
+    page,
+  }) => {
+    for (const path of [
+      "/sign-in",
+      "/creator",
+      "/creator/new",
+      "/creator/moderation",
+    ]) {
+      await page.goto(path);
+      await expect(page.locator("[data-public-repository-footer]")).toHaveCount(0);
+    }
   });
 
   test("persists the mode override and keeps focus in reading order", async ({

@@ -1,4 +1,6 @@
 ---
+import PublicRepositoryLink from "./public-repository-link.astro";
+
 interface Props { solarHex: string }
 const { solarHex } = Astro.props;
 ---
@@ -12,7 +14,7 @@ const { solarHex } = Astro.props;
 <section class="landing-block" data-landing-build-account aria-labelledby="landing-build-label">
   <h2 class="label-caps landing-label" id="landing-build-label">How it's built</h2>
   <p class="landing-build-copy" data-landing-build-copy>Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public — see the repository.</p>
-  <a class="label-caps landing-text-link" href="https://github.com/Hearn-Systems-LLC/oddspark-polls">View repository</a>
+  <PublicRepositoryLink surface="landing" />
   <p
     class="label-caps"
     data-smoke-marker="oddspark-token-solar"
@@ -30,8 +32,6 @@ const { solarHex } = Astro.props;
   .landing-statement { margin: 0; color: var(--color-text); font-family: var(--font-human); font-size: var(--type-display-mobile-size); font-weight: 400; line-height: var(--type-display-mobile-lh); letter-spacing: var(--type-display-ls); }
   .landing-label { margin: 0 0 var(--space-4); }
   .landing-build-copy { margin: 0; color: var(--color-text); font-family: var(--font-machine); font-size: var(--type-body-lg-size); line-height: var(--type-body-lg-lh); }
-  .landing-text-link { display: inline-flex; align-items: center; margin-top: var(--space-4); padding-block: var(--space-4); color: var(--color-entropy); text-decoration: none; }
-  .landing-text-link:hover { color: var(--color-text); }
   [data-smoke-marker="oddspark-token-solar"] { margin: var(--space-4) 0 0; }
   @media (min-width: 640px) { .landing-statement { font-size: var(--type-display-size); line-height: var(--type-display-lh); } }
 </style>

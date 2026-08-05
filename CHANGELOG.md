@@ -15,6 +15,12 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Evaluator-first repository guide with a truthful shipped/planned capability
+  matrix, live-product tour, exact local verification gate, and direct map to
+  the authoritative architecture spine.
+- Public Poll footers on canonical voting and non-404 Results surfaces link to
+  the public source from the same server-rendered presentation seam used by the
+  landing page; the embedded Demo and private/operator surfaces stay unchanged.
 - The landing page now embeds the configured live Demo Poll with its ordinary
   ballot, CAPTCHA-backed Vote path, live Tally, trust claims, canonical Share
   link, and accessible no-JavaScript/read-only states. The owner can reset a

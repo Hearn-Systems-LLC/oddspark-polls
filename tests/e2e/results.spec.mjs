@@ -415,6 +415,9 @@ test.describe("direct results route", () => {
     await expect(main.locator("[data-share-url-text]")).toContainText(
       `/${poll.reference}`,
     );
+    await expect(
+      main.getByRole("link", { name: "View the public repository" }),
+    ).toBeVisible();
     await expect(main.getByRole("radio")).toHaveCount(0);
 
     // Deadline comparison opens the Tally with no write: closed_at stays
@@ -531,6 +534,7 @@ test.describe("direct results route", () => {
     expect(anonymous.status()).toBe(200);
     const anonymousMain = mainHtmlOf(await anonymous.text());
     expect(anonymousMain).toContain("These results go to the Creator only.");
+    expect(anonymousMain).toContain("data-public-repository-footer");
     expectNoAggregateResultFacts(anonymousMain);
     expect(anonymousMain).not.toMatch(/sign in/iu);
 
@@ -549,6 +553,9 @@ test.describe("direct results route", () => {
     await page.goto(poll.path);
     await expect(
       page.getByRole("img", { name: "Alpha, 67 percent, 2 votes, leading" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "View the public repository" }),
     ).toBeVisible();
     await context.clearCookies();
   });
@@ -697,6 +704,7 @@ test.describe("direct results route", () => {
       "This Poll doesn't exist.",
     );
     await expect(page.locator("h1.not-found")).toBeFocused();
+    await expect(page.locator("[data-public-repository-footer]")).toHaveCount(0);
   });
 
   test("redirects a case-variant custom link to the canonical results URL with the query preserved", async ({
@@ -1051,6 +1059,20 @@ test.describe("direct results route", () => {
   }) => {
     const owner = await seedOwner();
     const proofDir = "test-results/results-proof";
+    const storyProofDir =
+      "test-results/story-3-6-presentable-repository-proof";
+    const failedResponses = [];
+    const failedRequests = [];
+    page.on("response", (response) => {
+      if (response.status() >= 400) failedResponses.push(response.status());
+    });
+    page.on("requestfailed", (request) => {
+      const errorText = request.failure()?.errorText ?? "request failed";
+      // Moving between proof Polls intentionally closes the open live-results
+      // request. Everything else remains a proof failure.
+      if (errorText !== "net::ERR_ABORTED") failedRequests.push(errorText);
+    });
+    const canonicalUrl = page.locator("[data-share-url-text]");
 
     // Direct results with a unique leader — 375px, dark.
     const leader = seedPoll({
@@ -1067,6 +1089,41 @@ test.describe("direct results route", () => {
         name: "The ramen place with no sign, 67 percent, 2 votes, leading",
       }),
     ).toBeVisible();
+    const mobileRepository = page.getByRole("link", {
+      name: "View the public repository",
+    });
+    await mobileRepository.focus();
+    await expect(mobileRepository).toBeFocused();
+    await expect(mobileRepository).toHaveCSS("outline-width", "2px");
+    await expect(mobileRepository).toHaveCSS("outline-offset", "2px");
+    expect((await mobileRepository.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(
+      await page.evaluate(() => {
+        const share = document.querySelector(".share-block");
+        const footer = document.querySelector(
+          "[data-public-repository-footer]",
+        );
+        return Boolean(
+          share &&
+            footer &&
+            share.compareDocumentPosition(footer) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+      }),
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(0);
+    await page.screenshot({
+      path: `${storyProofDir}/results-375-dark.png`,
+      fullPage: true,
+      mask: [canonicalUrl],
+      maskColor: "#4b5563",
+    });
     await page.screenshot({
       path: `${proofDir}/direct-leader-375-dark.png`,
       fullPage: true,
@@ -1094,6 +1151,22 @@ test.describe("direct results route", () => {
         name: "The ramen place with no sign, 67 percent, 2 votes, leading",
       }),
     ).toBeVisible();
+    const desktopRepository = page.getByRole("link", {
+      name: "View the public repository",
+    });
+    await expect(desktopRepository).toHaveAttribute(
+      "href",
+      "https://github.com/Hearn-Systems-LLC/oddspark-polls",
+    );
+    await expect(desktopRepository).not.toHaveAttribute("target", /.+/);
+    await desktopRepository.focus();
+    await expect(desktopRepository).toBeFocused();
+    await page.screenshot({
+      path: `${storyProofDir}/results-1280-light.png`,
+      fullPage: true,
+      mask: [canonicalUrl],
+      maskColor: "#4b5563",
+    });
     await page.screenshot({
       path: `${proofDir}/direct-leader-1280-light.png`,
       fullPage: true,
@@ -1152,6 +1225,8 @@ test.describe("direct results route", () => {
       path: `${proofDir}/post-vote-375-dark.png`,
       fullPage: true,
     });
+    expect(failedResponses).toEqual([]);
+    expect(failedRequests).toEqual([]);
   });
 
   test("sets requestContext.pollId for Results operations and keeps result facts out of telemetry", async ({

@@ -7,7 +7,7 @@ epic: "3 — Public Face: Discovery, Landing & Demo"
 
 # Story 3.6: Presentable Repository
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -76,6 +76,10 @@ Verbatim from `_bmad-output/planning-artifacts/epics.md` § Story 3.6 (lines 812
   - [x] Run a Markdown/relative-link check and the value-redacted all-refs history audit separately from the application gate. A green application suite cannot substitute for AC #2.
   - [x] Keep this story's Dev Agent Record, File List, Change Log, history-audit summary, and `sprint-status.yaml` current. No `TODO`, skipped/only test, placeholder, undocumented deferral, secret/candidate value, or prohibited runtime/user identifier may remain; intentional public GitHub commit attribution is permitted, while unrelated or accidental personal data remains prohibited.
   - [x] Preserve the two unrelated untracked Epic 1/Epic 2 retrospective files already in the worktree; stage only explicit Story 3.6/status/product paths. Do not commit, push, enable remote controls, rewrite history, deploy, or merge unless separately authorized.
+
+### Review Findings
+
+- [x] [Review][Patch] Internal engineering details mixed into user-facing CHANGELOG [CHANGELOG.md:24]
 
 ## Dev Notes
 

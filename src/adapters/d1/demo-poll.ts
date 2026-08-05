@@ -29,6 +29,7 @@ type DemoRow = {
   voter_codes_enabled: number;
   captcha_enabled: number;
   vpn_blocking_enabled: number;
+  comments_enabled: number;
   deadline_ms: number | null;
   closed_at_ms: number | null;
   representation_version: number;
@@ -54,7 +55,8 @@ export function createDemoPollPersistence(
                 p.min_selections, p.max_selections,
                 p.session_checks_enabled, p.ip_checks_enabled,
                 p.voter_codes_enabled, p.captcha_enabled,
-                p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms,
+                p.vpn_blocking_enabled, p.comments_enabled,
+                p.deadline_ms, p.closed_at_ms,
                 p.representation_version,
                 (SELECT COUNT(*) FROM vote v WHERE v.poll_id = p.id) AS voter_count,
                 (SELECT COUNT(*) FROM moderation_action ma WHERE ma.poll_id = p.id)
@@ -88,6 +90,7 @@ export function createDemoPollPersistence(
       voterCodesEnabled: row.voter_codes_enabled === 1,
       captchaEnabled: row.captcha_enabled === 1,
       vpnBlockingEnabled: row.vpn_blocking_enabled === 1,
+      commentsEnabled: row.comments_enabled === 1,
       deadlineMs: row.deadline_ms,
       closedAtMs: row.closed_at_ms,
       representationVersion: row.representation_version,
@@ -126,6 +129,7 @@ export function createDemoPollPersistence(
       AND p.voter_codes_enabled = 0
       AND p.captcha_enabled = 1
       AND p.vpn_blocking_enabled = 0
+      AND p.comments_enabled = 0
       AND p.deadline_ms IS NULL
       AND p.closed_at_ms IS NULL
       AND p.discovery_state IN ('unlisted', 'listed')
@@ -142,14 +146,14 @@ export function createDemoPollPersistence(
           id, owner_user_id, poll_type, question, description,
           result_visibility, discovery_state, session_checks_enabled,
           ip_checks_enabled, voter_codes_enabled, captcha_enabled,
-          vpn_blocking_enabled, multi_select_enabled, min_selections,
+          vpn_blocking_enabled, comments_enabled, multi_select_enabled, min_selections,
           max_selections, deadline_ms, closed_at_ms, representation_version,
           created_at_ms, updated_at_ms
         )
         SELECT ?4, p.owner_user_id, p.poll_type, p.question, p.description,
                p.result_visibility, p.discovery_state, p.session_checks_enabled,
                p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled,
-               p.vpn_blocking_enabled, p.multi_select_enabled, p.min_selections,
+               p.vpn_blocking_enabled, 0, p.multi_select_enabled, p.min_selections,
                p.max_selections, p.deadline_ms, NULL,
                p.representation_version + 1, p.created_at_ms, ?5
         FROM poll p

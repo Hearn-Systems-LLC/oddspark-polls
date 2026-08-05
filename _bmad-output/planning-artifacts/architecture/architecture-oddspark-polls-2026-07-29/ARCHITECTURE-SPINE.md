@@ -18,6 +18,7 @@ binds:
 sources:
   - 'User direction on public creation, voting, discovery, and sharing, 2026-07-29'
   - 'Story 3.3 Administrator delisting decisions, ratified 2026-08-04'
+  - 'Story 4.1 Comment With Your Vote implementation, ratified 2026-08-04'
   - '../../prds/prd-oddspark-polls-2026-07-28/prd.md'
   - '../../prds/prd-oddspark-polls-2026-07-28/addendum.md'
   - '../../ux-designs/ux-oddspark-polls-2026-07-28/DESIGN.md'
@@ -148,16 +149,22 @@ flowchart LR
 - **Rule:** Normalize the payload and check `submission_id` first: an exact
   committed replay returns its stored outcome without revalidating a consumed
   challenge token. For a new submission, validate external challenges before
-  mutation, then commit the Vote,
-  type-specific facts, optional Comment, duplicate claims, conditional Voter
-  Code redemption, and incremented `representation_version` in one D1 `batch()` guarded
-  by unique or conditional SQL constraints. A D1 trigger on Vote insertion
+  mutation, then commit the Vote, type-specific facts, optional typed Comment
+  contribution, duplicate claims, conditional Voter Code redemption, and
+  incremented `representation_version` in one D1 `batch()` guarded by unique or
+  conditional SQL constraints. `vote_comment` is a one-to-zero-or-one child of
+  `vote`: its unique foreign key cascades on Vote deletion, so no standalone,
+  duplicate, or orphan Comment can commit. A `BEFORE INSERT` guard rechecks
+  `poll.comments_enabled` inside the Vote batch so a concurrent Creator disable
+  rolls back the Vote and Comment together. A D1 trigger on Vote insertion
   aborts unless the referenced Poll is still effectively open at transaction
   time; foreign keys make a concurrent delete abort the Vote. Every form carries
   a unique `submission_id` independent of Security Toggles. Store the normalized
   payload hash and accepted outcome under unique `(poll_id, submission_id)`;
-  an exact replay returns that outcome, while a reused ID with a different
-  payload returns `IDEMPOTENCY_CONFLICT`. Model code use as an insert into
+  the no-Comment serialization remains byte-for-byte compatible with the legacy
+  payload, while a canonical Comment and display name extend new payload hashes.
+  An exact replay returns its outcome, while a reused ID with a different
+  ballot, Comment, or display name returns `IDEMPOTENCY_CONFLICT`. Model code use as an insert into
   `voter_code_redemptions` keyed uniquely by `code_id` with foreign keys to the
   code and Vote, so an invalid or already redeemed code aborts the entire batch
   rather than succeeding with a zero-row update.
@@ -274,7 +281,7 @@ sequenceDiagram
   depending on application code
 - **Rule:** Workers Logs record structured request ID, operation, stable result
   or error code, duration, and provider outcome. They never record tokens, voter
-  digests, Comments, ballot content, or Voter Codes. D1 Time Travel is the
+  digests, Comment bodies, display names, ballot content, or Voter Codes. D1 Time Travel is the
   database recovery floor—7 days on Workers Free or 30 days on Workers Paid.
   After a restore, reconcile R2 from D1 ownership records. Moderation emits
   exactly one fixed, method-qualified `GET /creator/moderation` or
@@ -305,9 +312,13 @@ sequenceDiagram
 - **Rule:** A created Poll is immediately open; there is no draft state. After
   the first accepted Vote, question, options, and Poll Type are immutable,
   while description remains editable. Security Toggles may be enabled but not
-  disabled. A Comment is plain text, belongs to exactly one Vote, is accepted in
-  AD-7's transaction under the same Security Toggles, follows result visibility,
-  and may be deleted only by the Poll owner or an administrator.
+  disabled. Before that first Vote, the Creator may opt the Poll into Comments
+  through the same definition-edit boundary. A Comment is trimmed plain text of
+  at most 500 UTF-16 code units, with an optional trimmed display name of at
+  most 80; a blank Comment discards any name. It belongs to exactly one Vote,
+  is accepted in AD-7's transaction under the same Security Toggles, follows
+  result visibility, and may be deleted only by the Poll owner or an
+  administrator.
 
 ### AD-18 — The monthly infrastructure ceiling binds topology
 
@@ -334,8 +345,11 @@ sequenceDiagram
   `unlisted | listed`. The Discovery D1 adapter commits the guarded role check,
   ordered action, state change, and catalog-revision trigger as one transaction.
   Only the owning module's application commands may write its tables. `CastVote`
-  is the ordinary cross-module transaction coordinator and persists normalized
-  contributions returned by Poll Type, Security, and Comment policy ports.
+  is the ordinary cross-module transaction coordinator. The provider-free
+  `modules/comments` capability canonicalizes Comment/display-name input and
+  returns a typed `vote_comment` contribution; only the D1 voting adapter maps
+  that contribution into storage alongside normalized contributions returned
+  by Poll Type and Security policy ports.
   `ResetDemoPoll` is the only additional cross-capability coordinator. The
   provider-free `polls/demo-poll` policy owns designation, fixed-template
   validation, and reset eligibility; the D1 Demo replacement adapter owns the
@@ -488,7 +502,7 @@ src/
     voting/              # security composition and CastVote
     results/             # Tally and Manifest projections
     discovery/           # listed-poll eligibility and catalog queries
-    comments/            # vote-attached comment policy
+    comments/            # provider-free Comment normalization and typed Vote contribution
   shared/
     domain/              # provider-free value types and errors
     application/         # command/query primitives and outbound ports
@@ -553,7 +567,7 @@ erDiagram
 | Poll lifecycle, type, options, Deadline, result visibility | Polls | Poll commands |
 | Designated Demo aggregate replacement | Polls + Voting coordination | `ResetDemoPoll` through the D1 Demo replacement adapter; no Discovery fact may exist |
 | Listing state and ordered moderation actions | Discovery | Owner listing commands or guarded `delist` / `clear_delisted` transaction |
-| Votes, selections, availability, claims, code redemptions, Comments | Voting | `CastVote`, `CreateMeetingResponse`, `ReviseMeetingResponse`, moderation commands |
+| Votes, selections, availability, claims, code redemptions, Comments | Voting | `CastVote` maps typed `modules/comments` contributions into the Vote-owned `vote_comment` row; later moderation commands may delete Comments |
 | Media records and cleanup outbox | Media | Media adoption and deletion commands |
 | Tallies, Manifests, exports | Results | Read-only projections; no mutation path |
 
@@ -582,7 +596,7 @@ flowchart LR
 | FR-12–FR-14 | `polls/types/meeting`, Meeting availability repository | AD-3, AD-6, AD-9, AD-20 |
 | FR-15–FR-19 | `voting/security`, D1 claims/codes, provider adapters | AD-7, AD-8, AD-16, AD-22 |
 | FR-20–FR-22 | `results`, export adapters, result endpoints | AD-6, AD-9, AD-10, AD-21 |
-| FR-24 | `comments`, Vote transaction | AD-6, AD-7, AD-17 |
+| FR-24 | `modules/comments`, `voting` / `CastVote`, D1 `vote_comment`, creator definition and voter delivery surfaces | AD-6, AD-7, AD-15, AD-17, AD-19, AD-21, AD-22, AD-24 |
 | FR-25–FR-27 | Astro landing/demo pages, shared presentation-only public-repository entry, public repository | AD-1, AD-2, AD-10, AD-14 |
 | FR-26, CAP-DEMO-POLL | `polls/demo-poll` owns designation; `ResetDemoPoll`; D1 Demo replacement adapter; landing and creator Poll detail routes | AD-1, AD-6, AD-7, AD-14, AD-19, AD-22, AD-24 |
 | UX live motion and trust surfaces | server result projection plus `scripts/results-live.ts` | AD-2, AD-8, AD-10 |

@@ -24,9 +24,11 @@ import type {
   ResultsTallyProjection,
   VersionedResultsTallyProjection,
 } from "../../modules/results/index";
+import type { VoteCommentContribution } from "../../modules/comments/index";
 import {
   AlreadyVotedError,
   asVoterClaimDigest,
+  CommentsDisabledError,
   isVoterClaimCheckKind,
   PollClosedError,
   PollDefinitionChangedError,
@@ -161,6 +163,7 @@ export type PollPage = {
   voterCodesEnabled: boolean;
   captchaEnabled: boolean;
   vpnBlockingEnabled: boolean;
+  commentsEnabled: boolean;
   deadlineMs: number | null;
   closedAtMs: number | null;
   options: { id: PollOptionId; label: string; position: number }[];
@@ -200,6 +203,7 @@ type PollRow = {
   voter_codes_enabled: number;
   captcha_enabled: number;
   vpn_blocking_enabled: number;
+  comments_enabled: number;
   deadline_ms: number | null;
   closed_at_ms: number | null;
 };
@@ -234,6 +238,7 @@ function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
     voterCodesEnabled: row.voter_codes_enabled === 1,
     captchaEnabled: row.captcha_enabled === 1,
     vpnBlockingEnabled: row.vpn_blocking_enabled === 1,
+    commentsEnabled: row.comments_enabled === 1,
     deadlineMs: row.deadline_ms,
     closedAtMs: row.closed_at_ms,
     options,
@@ -260,7 +265,7 @@ export function createPollPersistence(db: D1Database) {
         await db.batch([
           db
             .prepare(
-              "INSERT INTO poll (id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)",
+              "INSERT INTO poll (id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, comments_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?19)",
             )
             .bind(
               poll.id,
@@ -275,6 +280,7 @@ export function createPollPersistence(db: D1Database) {
               poll.voterCodesEnabled ? 1 : 0,
               poll.captchaEnabled ? 1 : 0,
               poll.vpnBlockingEnabled ? 1 : 0,
+              poll.commentsEnabled ? 1 : 0,
               poll.multiSelectEnabled ? 1 : 0,
               poll.minSelections,
               poll.maxSelections,
@@ -333,7 +339,7 @@ export function createPollPersistence(db: D1Database) {
     async findPollByReference(reference: string): Promise<PollPage | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.discovery_state, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.discovery_state, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.comments_enabled, p.deadline_ms, p.closed_at_ms, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
         )
         .bind(reference)
         .first<PollRow>();
@@ -370,7 +376,7 @@ export function createPollPersistence(db: D1Database) {
     ): Promise<OwnedPoll | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.discovery_state, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
+          "SELECT p.id, p.question, p.description, p.poll_type, p.result_visibility, p.discovery_state, p.multi_select_enabled, p.min_selections, p.max_selections, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, p.comments_enabled, p.deadline_ms, p.closed_at_ms, p.created_at_ms, r.reference AS canonical_reference, r.kind AS canonical_reference_kind FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE p.id = ?1 AND p.owner_user_id = ?2",
         )
         .bind(pollId, ownerUserId)
         .first<
@@ -454,6 +460,7 @@ export function createPollPersistence(db: D1Database) {
                   p.multi_select_enabled, p.min_selections, p.max_selections,
                   p.session_checks_enabled, p.ip_checks_enabled,
                   p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled,
+                  p.comments_enabled,
                   p.deadline_ms, p.closed_at_ms, p.representation_version,
                   (
                     SELECT COUNT(*)
@@ -483,6 +490,7 @@ export function createPollPersistence(db: D1Database) {
           voter_codes_enabled: number;
           captcha_enabled: number;
           vpn_blocking_enabled: number;
+          comments_enabled: number;
           deadline_ms: number | null;
           closed_at_ms: number | null;
           representation_version: number;
@@ -510,6 +518,7 @@ export function createPollPersistence(db: D1Database) {
         voterCodesEnabled: row.voter_codes_enabled === 1,
         captchaEnabled: row.captcha_enabled === 1,
         vpnBlockingEnabled: row.vpn_blocking_enabled === 1,
+        commentsEnabled: row.comments_enabled === 1,
         options: rows.results.flatMap((option) =>
           option.option_id !== null &&
           option.option_label !== null &&
@@ -717,7 +726,8 @@ export function createPollPersistence(db: D1Database) {
                  multi_select_enabled = ?6,
                  min_selections = ?7,
                  max_selections = ?8,
-                 updated_at_ms = ?9,
+                 comments_enabled = ?9,
+                 updated_at_ms = ?10,
                  representation_version = representation_version + 1
              WHERE id = ?1
                AND owner_user_id = ?2
@@ -734,6 +744,7 @@ export function createPollPersistence(db: D1Database) {
             input.definition.multiSelect ? 1 : 0,
             input.definition.minSelections,
             input.definition.maxSelections,
+            input.definition.commentsEnabled ? 1 : 0,
             version.updatedAtMs,
           ),
       ];
@@ -875,7 +886,7 @@ export function createVotePersistence(db: D1Database) {
       // D1. A malformed claim anywhere in the batch must cause zero
       // prepare/bind/batch calls, including when it follows valid facts.
       const contributions: Array<
-        VoteSelectionContribution | VoterClaimContribution
+        VoteSelectionContribution | VoterClaimContribution | VoteCommentContribution
       > = batch.contributions.map((contribution) => {
         if (contribution.kind === "vote_selection") {
           return contribution;
@@ -893,6 +904,26 @@ export function createVotePersistence(db: D1Database) {
             checkKind: contribution.checkKind,
             digest,
           };
+        }
+        if (contribution.kind === "vote_comment") {
+          if (
+            contribution.id.trim().length === 0 ||
+            contribution.voteId !== batch.vote.id ||
+            contribution.createdAtMs !== batch.vote.createdAtMs ||
+            contribution.body.length < 1 ||
+            contribution.body.length > 500 ||
+            contribution.body !== contribution.body.trim() ||
+            contribution.body.includes("\r") ||
+            contribution.body.includes("\0") ||
+            (contribution.displayName !== null &&
+              (contribution.displayName.length < 1 ||
+                contribution.displayName.length > 80 ||
+                contribution.displayName !== contribution.displayName.trim() ||
+                /[\0\r\n]/.test(contribution.displayName)))
+          ) {
+            throw new Error("invalid vote comment contribution");
+          }
+          return contribution;
         }
         throw new Error(
           `Unsupported vote contribution kind: ${contribution.kind}`,
@@ -921,6 +952,22 @@ export function createVotePersistence(db: D1Database) {
                 "INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (?1, ?2)",
               )
               .bind(contribution.voteId, contribution.pollOptionId),
+          );
+          continue;
+        }
+        if (contribution.kind === "vote_comment") {
+          statements.push(
+            db
+              .prepare(
+                "INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+              )
+              .bind(
+                contribution.id,
+                contribution.voteId,
+                contribution.body,
+                contribution.displayName,
+                contribution.createdAtMs,
+              ),
           );
           continue;
         }
@@ -1003,6 +1050,9 @@ export function createVotePersistence(db: D1Database) {
         if (error instanceof Error && /poll_closed/.test(error.message)) {
           throw new PollClosedError();
         }
+        if (error instanceof Error && /comments_disabled/.test(error.message)) {
+          throw new CommentsDisabledError();
+        }
         if (
           error instanceof Error &&
           /FOREIGN KEY constraint failed/i.test(error.message)
@@ -1068,7 +1118,7 @@ export function createVotePersistence(db: D1Database) {
     async findPoll(pollId: PollId): Promise<VotingPollSnapshot | null> {
       const row = await db
         .prepare(
-          "SELECT id, poll_type, session_checks_enabled, ip_checks_enabled, captcha_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
+          "SELECT id, poll_type, session_checks_enabled, ip_checks_enabled, captcha_enabled, comments_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
         )
         .bind(pollId)
         .first<{
@@ -1077,6 +1127,7 @@ export function createVotePersistence(db: D1Database) {
           session_checks_enabled: number;
           ip_checks_enabled: number;
           captcha_enabled: number;
+          comments_enabled: number;
           multi_select_enabled: number;
           min_selections: number | null;
           max_selections: number | null;
@@ -1093,6 +1144,7 @@ export function createVotePersistence(db: D1Database) {
         sessionChecksEnabled: row.session_checks_enabled === 1,
         ipChecksEnabled: row.ip_checks_enabled === 1,
         captchaEnabled: row.captcha_enabled === 1,
+        commentsEnabled: row.comments_enabled === 1,
         multiSelectEnabled: row.multi_select_enabled === 1,
         minSelections: row.min_selections,
         maxSelections: row.max_selections,

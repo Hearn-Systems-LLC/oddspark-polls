@@ -58,6 +58,7 @@ export type PollLifecycleSnapshot = {
   voterCodesEnabled: boolean;
   captchaEnabled: boolean;
   vpnBlockingEnabled: boolean;
+  commentsEnabled: boolean;
   options: { id: PollOptionId; label: string; position: number }[];
   deadlineMs: number | null;
   closedAtMs: number | null;
@@ -209,7 +210,13 @@ function definitionsEqual(
     effectiveMax(current.maxSelections, current.options.length) ===
       effectiveMax(next.maxSelections, optionCount);
   const descriptionEqual = current.description === next.description;
-  const definitionChanged = !(questionEqual && optionsEqual && multiEqual);
+  const commentsEqual = current.commentsEnabled === next.commentsEnabled;
+  const definitionChanged = !(
+    questionEqual &&
+    optionsEqual &&
+    multiEqual &&
+    commentsEqual
+  );
   const equal = !definitionChanged && descriptionEqual;
   return {
     equal,

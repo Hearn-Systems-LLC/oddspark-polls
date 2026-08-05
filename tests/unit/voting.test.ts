@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AlreadyVotedError,
   asVoterClaimDigest,
+  CommentsDisabledError,
   PollClosedError,
   PollGoneError,
   SubmissionReplayError,
@@ -55,6 +56,7 @@ function poll(
     sessionChecksEnabled: true,
     ipChecksEnabled: false,
     captchaEnabled: false,
+    commentsEnabled: false,
     multiSelectEnabled: false,
     minSelections: null,
     maxSelections: null,
@@ -128,6 +130,20 @@ describe("normalizeVotePayload", () => {
     );
   });
 
+  it("keeps the legacy no-Comment payload byte-for-byte and extends only Comment votes", () => {
+    expect(normalizeVotePayload(POLL_ID, [OPTION_A])).toBe(
+      '{"pollId":"poll-1","selectedOptionIds":["option-a"]}',
+    );
+    expect(
+      normalizeVotePayload(POLL_ID, [OPTION_A], {
+        body: "Context",
+        displayName: "Jo",
+      }),
+    ).toBe(
+      '{"pollId":"poll-1","selectedOptionIds":["option-a"],"comment":{"body":"Context","displayName":"Jo"}}',
+    );
+  });
+
   it("is invariant under every permutation of a ballot", () => {
     fc.assert(
       fc.property(
@@ -161,6 +177,115 @@ describe("normalizeVotePayload", () => {
 });
 
 describe("castVote", () => {
+  it("commits one typed Comment in the same Vote batch", async () => {
+    const commandDeps = deps({
+      findPoll: async () => poll({ commentsEnabled: true }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      comment: { body: "  Context  ", displayName: "  Jo  " },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(commandDeps.persisted).toHaveLength(1);
+    expect(commandDeps.persisted[0]?.contributions).toContainEqual({
+      kind: "vote_comment",
+      id: "vote-1",
+      voteId: "vote-1",
+      body: "Context",
+      displayName: "Jo",
+      createdAtMs: NOW,
+    });
+  });
+
+  it("rejects forged Comment fields when the Poll has Comments disabled", async () => {
+    const commandDeps = deps({ findPoll: async () => poll({ commentsEnabled: false }) });
+    const result = await castVote(commandDeps, {
+      ...input,
+      comment: { body: "Forged", displayName: "Jo" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "comments_disabled",
+        reasonCodes: { comment: "comments_disabled" },
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it("prefers an authoritative disabled outcome over stale Comment validation", async () => {
+    const commandDeps = deps({
+      findPoll: async () => poll({ commentsEnabled: false }),
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      comment: { body: "x".repeat(501), displayName: "Jo" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "comments_disabled",
+        reasonCodes: { comment: "comments_disabled" },
+      },
+    });
+    expect(commandDeps.persisted).toHaveLength(0);
+  });
+
+  it("maps an in-transaction Comment disable to the safe disabled outcome", async () => {
+    const commandDeps = deps({
+      findPoll: async () => poll({ commentsEnabled: true }),
+      persistVote: async () => {
+        throw new CommentsDisabledError();
+      },
+    });
+    const result = await castVote(commandDeps, {
+      ...input,
+      comment: { body: "Late context", displayName: "Jo" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "comments_disabled",
+        fieldErrors: { comment: "Comments aren't enabled for this Poll." },
+        reasonCodes: { comment: "comments_disabled" },
+      },
+    });
+  });
+
+  it("uses canonical Comment content to adjudicate exact and divergent replays", async () => {
+    const canonical = { body: "Context", displayName: "Jo" };
+    const storedPayload = normalizeVotePayload(POLL_ID, [OPTION_A], canonical);
+    const commandDeps = deps({
+      findPoll: async () => {
+        throw new Error("replay must not load Poll");
+      },
+      findVoteBySubmission: async () => ({
+        voteId: "stored-vote",
+        payloadHash: `hash:${storedPayload}`,
+        createdAtMs: NOW - 1,
+      }),
+    });
+
+    await expect(
+      castVote(commandDeps, {
+        ...input,
+        comment: { body: " Context ", displayName: " Jo " },
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { existing: true } });
+    await expect(
+      castVote(commandDeps, {
+        ...input,
+        comment: { body: "Changed", displayName: "Jo" },
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "idempotency_conflict" },
+    });
+  });
   it("passes every required multi-select fact to strategy validation", async () => {
     const validateSubmission = vi.fn(() => ({
       ok: true as const,

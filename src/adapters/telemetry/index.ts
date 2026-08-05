@@ -48,6 +48,8 @@ const FORBIDDEN_KEYS = [
   "voter_digest",
   "comment",
   "comments",
+  "displayName",
+  "display_name",
   "ballot",
   "ballotContent",
   "voterCode",

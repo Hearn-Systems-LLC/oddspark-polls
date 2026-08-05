@@ -18,6 +18,14 @@ import {
 } from "../../shared/domain/index";
 import { MULTIPLE_CHOICE_VOTE_COPY } from "../polls/types/multiple-choice";
 import {
+  COMMENT_COPY,
+  makeVoteCommentContribution,
+  normalizeComment,
+  type CanonicalComment,
+  type CommentDraft,
+  type VoteCommentContribution,
+} from "../comments/index";
+import {
   asVoterClaimDigest,
   type VoterClaimCheckKind,
   type VoterClaimDigest,
@@ -113,6 +121,13 @@ export class PollDefinitionChangedError extends Error {
   }
 }
 
+export class CommentsDisabledError extends Error {
+  constructor() {
+    super("comments_disabled");
+    this.name = "CommentsDisabledError";
+  }
+}
+
 export type VotingPollSnapshot = {
   id: PollId;
   pollType: PollType;
@@ -125,6 +140,7 @@ export type VotingPollSnapshot = {
   ipChecksEnabled: boolean;
   /** Authoritative CAPTCHA policy from the fresh Poll snapshot (Story 2.3). */
   captchaEnabled: boolean;
+  commentsEnabled: boolean;
   multiSelectEnabled: boolean;
   minSelections: number | null;
   maxSelections: number | null;
@@ -179,6 +195,7 @@ export type VoteExtensionContribution = {
 export type VotePersistenceContribution =
   | VoteSelectionContribution
   | VoterClaimContribution
+  | VoteCommentContribution
   | VoteExtensionContribution;
 
 export type VotePersistenceBatch = {
@@ -243,6 +260,7 @@ export type CastVoteInput = {
   pollId: PollId;
   submissionId: string;
   selectedOptionIds: readonly string[];
+  comment?: CommentDraft;
   browserToken: string | null;
   /**
    * Prepared IP claim digest from the inbound delivery boundary, or null when
@@ -273,11 +291,17 @@ export type VoteApplicationError = ApplicationError & {
 export function normalizeVotePayload(
   pollId: PollId,
   selectedOptionIds: readonly string[],
+  comment: CanonicalComment | null = null,
 ): string {
-  return JSON.stringify({
+  const legacy = {
     pollId,
     selectedOptionIds: [...selectedOptionIds].sort(),
-  });
+  };
+  // Do not add even a null property on the no-Comment path: hashes accepted
+  // before Story 4.1 must remain byte-for-byte replay-compatible.
+  return JSON.stringify(
+    comment === null ? legacy : { ...legacy, comment },
+  );
 }
 
 function acceptedReplay(
@@ -329,9 +353,62 @@ export async function castVote(
   deps: CastVoteDeps,
   input: CastVoteInput,
 ): Promise<Result<CastVoteOutcome>> {
+  let comment: CanonicalComment | null;
+  try {
+    const normalizedComment = normalizeComment(
+      input.comment ?? { body: "", displayName: "" },
+    );
+    if (!normalizedComment.ok) {
+      // An invalid payload cannot be an exact replay of an accepted Vote.
+      // Still adjudicate a reused submission ID as a permanent conflict so
+      // the original winner remains authoritative (and downstream security
+      // work stays skipped by the delivery preflight).
+      try {
+        const stored = await deps.findVoteBySubmission(
+          input.pollId,
+          input.submissionId,
+        );
+        if (stored) {
+          return failure(
+            "idempotency_conflict",
+            VOTE_COPY.idempotencyConflict,
+          );
+        }
+      } catch {
+        return failure("vote_failed", VOTE_COPY.retry);
+      }
+      let currentPoll: VotingPollSnapshot | null;
+      try {
+        currentPoll = await deps.findPoll(input.pollId);
+      } catch {
+        return failure("vote_failed", VOTE_COPY.retry);
+      }
+      if (!currentPoll) {
+        return failure("poll_deleted", VOTE_COPY.pollDeleted);
+      }
+      if (!currentPoll.commentsEnabled) {
+        return failure("comments_disabled", COMMENT_COPY.disabled, {
+          fieldErrors: { comment: COMMENT_COPY.disabled },
+          reasonCodes: { comment: "comments_disabled" },
+        });
+      }
+      return failure(
+        normalizedComment.error.code,
+        normalizedComment.error.message,
+        {
+          fieldErrors: normalizedComment.error.fieldErrors,
+          reasonCodes: normalizedComment.error.reasonCodes,
+        },
+      );
+    }
+    comment = normalizedComment.value;
+  } catch {
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
   const normalizedPayload = normalizeVotePayload(
     input.pollId,
     input.selectedOptionIds,
+    comment,
   );
 
   let payloadHash: string;
@@ -358,6 +435,12 @@ export async function castVote(
   }
   if (!poll) {
     return failure("poll_deleted", VOTE_COPY.pollDeleted);
+  }
+  if (comment !== null && !poll.commentsEnabled) {
+    return failure("comments_disabled", COMMENT_COPY.disabled, {
+      fieldErrors: { comment: COMMENT_COPY.disabled },
+      reasonCodes: { comment: "comments_disabled" },
+    });
   }
 
   let nowMs: number;
@@ -491,6 +574,21 @@ export async function castVote(
       pollOptionId,
     }),
   );
+  if (comment !== null) {
+    let commentId: string;
+    try {
+      commentId = deps.generateId();
+    } catch {
+      return failure("vote_failed", VOTE_COPY.retry);
+    }
+    contributions.push(
+      makeVoteCommentContribution(comment, {
+        id: commentId,
+        voteId,
+        createdAtMs: nowMs,
+      }),
+    );
+  }
   // Stable claim order: Session first, IP second (dual-collision precedence).
   if (sessionDigest !== null) {
     contributions.push({
@@ -586,6 +684,12 @@ export async function castVote(
         "poll_definition_changed",
         VOTE_COPY.pollDefinitionChanged,
       );
+    }
+    if (cause instanceof CommentsDisabledError) {
+      return failure("comments_disabled", COMMENT_COPY.disabled, {
+        fieldErrors: { comment: COMMENT_COPY.disabled },
+        reasonCodes: { comment: "comments_disabled" },
+      });
     }
     if (cause instanceof PollGoneError) {
       // Option FK failures historically mapped to PollGone. Re-read the Poll

@@ -25,6 +25,7 @@ export const DEFINITION_COPY = {
   boundsMaxTooHigh: `Max can't be more than the option count ({count}).`,
   boundsWithoutMultiSelect: "Bounds only apply when multi-select is on.",
   rowsTooMany: "That's too many rows. Clear the blank ones first.",
+  commentsInvalid: "Choose whether Comments are enabled or disabled.",
 } as const;
 
 export type PollDefinitionDraft = {
@@ -34,6 +35,8 @@ export type PollDefinitionDraft = {
   multiSelect: string;
   minSelections: string;
   maxSelections: string;
+  /** Opt-in; omitted legacy callers and forms remain disabled. */
+  commentsEnabled?: string;
 };
 
 export type ValidatedPollDefinition = {
@@ -43,6 +46,7 @@ export type ValidatedPollDefinition = {
   multiSelect: boolean;
   minSelections: number | null;
   maxSelections: number | null;
+  commentsEnabled: boolean;
 };
 
 // Voice copy says "characters" — count Unicode code points, not UTF-16.
@@ -114,6 +118,17 @@ export function validatePollDefinition(
   }
 
   const multiSelect = draft.multiSelect === "true";
+  if (
+    draft.commentsEnabled !== undefined &&
+    draft.commentsEnabled !== "true" &&
+    draft.commentsEnabled !== "false"
+  ) {
+    fail(
+      "commentsEnabled",
+      "comments_invalid",
+      DEFINITION_COPY.commentsInvalid,
+    );
+  }
   const rawMinSelections = draft.minSelections.trim();
   const rawMaxSelections = draft.maxSelections.trim();
   let minSelections: number | null = null;
@@ -240,6 +255,7 @@ export function validatePollDefinition(
       multiSelect: facts.value.multiSelect,
       minSelections: facts.value.minSelections,
       maxSelections: facts.value.maxSelections,
+      commentsEnabled: draft.commentsEnabled === "true",
     },
   };
 }

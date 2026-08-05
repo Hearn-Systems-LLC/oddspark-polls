@@ -15,6 +15,10 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Opt-in Comments with Votes: before the first Vote, a Creator can enable one
+  optional plain-text Comment and display name on each ballot. Accepted
+  Comments commit atomically with their Vote, safe retryable failures preserve
+  the form values, and disabled Polls expose no Comment composer.
 - Evaluator-first repository guide with a truthful shipped/planned capability
   matrix, live-product tour, exact local verification gate, and direct map to
   the authoritative architecture spine.

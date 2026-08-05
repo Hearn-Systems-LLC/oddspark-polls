@@ -56,6 +56,7 @@ function rows(overrides: Partial<PollPersistenceRows> = {}): PollPersistenceRows
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,
       maxSelections: null,
@@ -310,6 +311,7 @@ describe("createPollPersistence reads", () => {
       voterCodesEnabled: false,
       captchaEnabled: false,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       deadlineMs: null,
       closedAtMs: null,
       options: [

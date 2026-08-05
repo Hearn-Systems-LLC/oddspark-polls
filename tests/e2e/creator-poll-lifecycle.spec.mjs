@@ -104,11 +104,20 @@ test.describe("creator poll lifecycle", () => {
     return seeded;
   }
 
-  async function publishPoll(page, question, optionA = "A", optionB = "B") {
+  async function publishPoll(
+    page,
+    question,
+    optionA = "A",
+    optionB = "B",
+    { commentsEnabled = false } = {},
+  ) {
     await page.goto("/creator/new");
     await page.getByLabel("QUESTION").fill(question);
     await page.getByRole("textbox", { name: "OPTION 1" }).fill(optionA);
     await page.getByRole("textbox", { name: "OPTION 2" }).fill(optionB);
+    if (commentsEnabled) {
+      await page.locator('label[for="comments-enabled"]').click();
+    }
     await page.getByRole("button", { name: "PUBLISH POLL" }).click();
     await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
     const match = /\/creator\/polls\/([^?]+)/.exec(page.url());
@@ -170,6 +179,70 @@ test.describe("creator poll lifecycle", () => {
     for (const userId of seededUserIds) {
       cleanupCreator(userId);
     }
+  });
+
+  test("round-trips the creator Comment opt-in through create and definition edits", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await signIn(context, baseURL);
+    await page.goto("/creator/new");
+    const newCommentsGroup = page.getByRole("group", {
+      name: "COMMENTS WITH VOTES",
+    });
+    await expect(
+      newCommentsGroup.locator('input[name="commentsEnabled"][value="false"]'),
+    ).toBeChecked();
+
+    const pollId = await publishPoll(
+      page,
+      "Comment configuration round trip",
+      "Alpha",
+      "Beta",
+      { commentsEnabled: true },
+    );
+    const reference = pollReference(pollId);
+    expect(reference).toBeTruthy();
+    expect(
+      d1Query(`SELECT comments_enabled FROM poll WHERE id = '${pollId}'`),
+    ).toEqual([{ comments_enabled: 1 }]);
+
+    const editCommentsGroup = page.getByRole("group", {
+      name: "COMMENTS WITH VOTES",
+    });
+    await expect(
+      editCommentsGroup.locator('input[name="commentsEnabled"][value="true"]'),
+    ).toBeChecked();
+    await page.goto(`/${reference}`);
+    await expect(
+      page.getByRole("group", { name: "ADD A COMMENT (OPTIONAL)" }),
+    ).toBeVisible();
+
+    await page.goto(`/creator/polls/${pollId}`);
+    await page.locator('label[for="comments-disabled"]').click();
+    await page.getByRole("button", { name: "SAVE CHANGES" }).first().click();
+    await expect(page).toHaveURL(
+      new RegExp(`/creator/polls/${pollId}\\?outcome=poll-updated`),
+    );
+    expect(
+      d1Query(`SELECT comments_enabled FROM poll WHERE id = '${pollId}'`),
+    ).toEqual([{ comments_enabled: 0 }]);
+    await page.goto(`/${reference}`);
+    await expect(page.locator("[data-comment-composer]")).toHaveCount(0);
+    await expect(page.getByText("ADD A COMMENT (OPTIONAL)")).toHaveCount(0);
+
+    await page.goto(`/creator/polls/${pollId}`);
+    await page.locator('label[for="comments-enabled"]').click();
+    await page.getByRole("button", { name: "SAVE CHANGES" }).first().click();
+    await expect(page).toHaveURL(
+      new RegExp(`/creator/polls/${pollId}\\?outcome=poll-updated`),
+    );
+    expect(
+      d1Query(`SELECT comments_enabled FROM poll WHERE id = '${pollId}'`),
+    ).toEqual([{ comments_enabled: 1 }]);
+    await page.goto(`/${reference}`);
+    await expect(page.locator("[data-comment-composer]")).toBeVisible();
   });
 
   test("edits definition before Votes and locks after the first Vote", async ({

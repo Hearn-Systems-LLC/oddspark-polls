@@ -25,6 +25,7 @@ import {
   POLL_CAPS,
 } from "../modules/polls/index";
 import { multipleChoiceStrategy } from "../modules/polls/types/multiple-choice";
+import { COMMENT_CAPS } from "../modules/comments/index";
 import {
   queryResults,
   RESULTS_COPY,
@@ -54,6 +55,25 @@ import {
 import type { RequestContext } from "./request-context";
 
 export const VOTE_FLASH_COOKIE_NAME = "oddspark.vote_flash";
+
+class UnreadableVoteFormError extends Error {}
+
+function singletonText(formData: FormData, name: string): string {
+  const values = formData.getAll(name);
+  if (
+    values.length > 1 ||
+    values.some((value) => typeof value !== "string")
+  ) {
+    throw new UnreadableVoteFormError();
+  }
+  return typeof values[0] === "string" ? values[0] : "";
+}
+
+function boundedInvalidEcho(value: string, limit: number): string {
+  // Preserve ordinary invalid input for correction, but never reflect an
+  // attacker-sized multipart value into a correspondingly large HTML page.
+  return value.length <= limit * 2 + 2 ? value : "x".repeat(limit + 1);
+}
 
 export type DeliveryCookieEffect =
   | {
@@ -127,6 +147,9 @@ export type PollDeliveryState = {
   effectiveMinSelections: number;
   effectiveMaxSelections: number;
   boundsHint: string;
+  commentBody: string;
+  commentDisplayName: string;
+  commentFieldErrors: Record<string, string>;
 };
 
 export type PollDeliveryResult = {
@@ -283,6 +306,9 @@ export async function deliverPollVotingSurface(
   let outcome: VoteOutcomeView | null = null;
   let readOnly = false;
   let actionDisabled = false;
+  let commentBody = "";
+  let commentDisplayName = "";
+  let commentFieldErrors: Record<string, string> = {};
 
   const issueVoterCookie = (): void => {
     voterToken = createVoterToken();
@@ -308,6 +334,14 @@ export async function deliverPollVotingSurface(
       const formData = await input.request.formData();
       const text = (entry: FormDataEntryValue | null): string => typeof entry === "string" ? entry : "";
       selectedOptionIds = formData.getAll("option_id").map(text);
+      commentBody = boundedInvalidEcho(
+        singletonText(formData, "comment"),
+        COMMENT_CAPS.body,
+      );
+      commentDisplayName = boundedInvalidEcho(
+        singletonText(formData, "display_name"),
+        COMMENT_CAPS.displayName,
+      );
       const parsed = formSchema.safeParse({
         submissionId: text(formData.get("submission_id")),
         selectedOptionIds,
@@ -369,7 +403,15 @@ export async function deliverPollVotingSurface(
               generateId: () => crypto.randomUUID(),
               nowMs: () => Date.now(),
             },
-            { pollId: poll.pollId, submissionId: submittedId, selectedOptionIds, browserToken: voterToken, ipDigest: ipClaimDigest, humanChallenge },
+            {
+              pollId: poll.pollId,
+              submissionId: submittedId,
+              selectedOptionIds,
+              comment: { body: commentBody, displayName: commentDisplayName },
+              browserToken: voterToken,
+              ipDigest: ipClaimDigest,
+              humanChallenge,
+            },
           );
           if (result.ok) {
             cookies.push({
@@ -380,10 +422,6 @@ export async function deliverPollVotingSurface(
             });
             response = immediate(null, 303, { location: input.successRedirect });
             return { state: null, status: 303, headers, cookies, response, unavailable };
-          }
-          if (result.error.code === "ip_check_unavailable") {
-            response = immediate("Voting is unavailable.", 500);
-            return { state: null, status: 500, headers, cookies, response, unavailable };
           }
           if (result.error.code === "poll_deleted") {
             const refreshed = input.remapReplacementRace
@@ -401,7 +439,21 @@ export async function deliverPollVotingSurface(
           }
           } else {
             outcome = outcomeFromVoteError(result.error);
-            if (result.error.code === "poll_definition_changed" || result.error.code === "captcha_failed") {
+            commentFieldErrors = result.error.fieldErrors ?? {};
+            if (result.error.code === "comments_disabled") {
+              // The D1 trigger is authoritative. Hide stale/forged Comment
+              // values before the refresh so a failed re-read cannot echo
+              // fields which the Creator has already disabled.
+              commentBody = "";
+              commentDisplayName = "";
+              commentFieldErrors = {};
+              poll = { ...poll, commentsEnabled: false };
+            }
+            if (
+              result.error.code === "poll_definition_changed" ||
+              result.error.code === "captcha_failed" ||
+              result.error.code === "comments_disabled"
+            ) {
               const refreshed = await pollPersistence.findPollByReference(input.reference);
               if (refreshed === null || (input.isCompatible && !input.isCompatible(refreshed))) {
                 status = input.operationalUnavailable ? 503 : 404;
@@ -415,14 +467,17 @@ export async function deliverPollVotingSurface(
           }
           if (outcome) {
             readOnly = result.error.code === "already_voted" || result.error.code === "already_voted_ip" || result.error.code === "poll_closed";
-            status = 422;
+            status = result.error.code === "ip_check_unavailable" || result.error.code === "vote_failed" ? 500 : 422;
             markVoteRejection();
           }
         }
       }
-    } catch {
-      response = immediate("Something went wrong.", 500);
-      return { state: null, status: 500, headers, cookies, response, unavailable };
+    } catch (error) {
+      // Once form parsing has started, keep the server-rendered retry surface
+      // so safe ballot and Comment values are not lost on operational faults.
+      outcome = outcomeFromVoteError({ code: "vote_failed", message: VOTE_COPY.retry });
+      status = error instanceof UnreadableVoteFormError ? 422 : 500;
+      markVoteRejection();
     }
 
     if (outcome) {
@@ -554,6 +609,12 @@ export async function deliverPollVotingSurface(
     : selectedCount >= effectiveMaxSelections
       ? `Pick up to ${effectiveMaxSelections}. ${selectedCount} chosen.`
       : "";
+  if (!poll.commentsEnabled) {
+    // Forged disabled fields are neither rendered nor echoed.
+    commentBody = "";
+    commentDisplayName = "";
+    commentFieldErrors = {};
+  }
 
   return {
     state: {
@@ -578,6 +639,9 @@ export async function deliverPollVotingSurface(
       effectiveMinSelections,
       effectiveMaxSelections,
       boundsHint,
+      commentBody,
+      commentDisplayName,
+      commentFieldErrors,
     },
     status,
     headers,

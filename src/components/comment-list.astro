@@ -1,0 +1,110 @@
+---
+import ButtonPrimary from "./button-primary.astro";
+import ButtonSecondary from "./button-secondary.astro";
+import Overlay from "./overlay.astro";
+import {
+  COMMENT_COPY,
+  type CommentView,
+  type OwnerCommentView,
+} from "../modules/comments/index";
+
+interface Props {
+  comments: CommentView[];
+  ownerComments?: OwnerCommentView[] | null;
+  csrfToken?: string;
+  returnTo?: string;
+  mode?: "owner" | "administrator";
+}
+
+const {
+  comments,
+  ownerComments = null,
+  csrfToken = "",
+  returnTo = "",
+  mode = "owner",
+} = Astro.props;
+const rendered = ownerComments ?? comments;
+const canDelete = ownerComments !== null && csrfToken.length > 0 && returnTo.length > 0;
+---
+
+{
+  rendered.length > 0 && (
+    <section class="comment-list" aria-labelledby={`comment-list-heading-${mode}`} data-comment-list>
+      <noscript>
+        <style is:inline>
+          .comment-delete-invoker { display: none !important; }
+        </style>
+      </noscript>
+      <h2 id={`comment-list-heading-${mode}`}>{COMMENT_COPY.heading}</h2>
+      <ol>
+        {rendered.map((comment, index) => {
+          const ownerComment = canDelete ? ownerComments?.[index] : undefined;
+          const overlayId = `comment-delete-${mode}-${index}`;
+          return (
+            <li data-comment-item data-comment-created-at-ms={comment.createdAtMs}>
+              <p class="comment-name" data-comment-name>{comment.displayName ?? COMMENT_COPY.anonymous}</p>
+              <p class="comment-body" data-comment-body>{comment.body}</p>
+              {ownerComment && (
+                <>
+                  <ButtonSecondary
+                    href={`#${overlayId}`}
+                    aria-haspopup="dialog"
+                    aria-controls={overlayId}
+                    aria-expanded="false"
+                    data-overlay-open-for={overlayId}
+                    class="comment-delete-invoker"
+                  >
+                    {COMMENT_COPY.delete}
+                  </ButtonSecondary>
+                  <Overlay
+                    id={overlayId}
+                    titleId={`${overlayId}-title`}
+                    descriptionId={`${overlayId}-description`}
+                    title={COMMENT_COPY.deleteTitle}
+                  >
+                    <p slot="description">{COMMENT_COPY.deleteDescription}</p>
+                    <ButtonSecondary slot="actions" href={returnTo} data-overlay-cancel>
+                      CANCEL
+                    </ButtonSecondary>
+                    <form slot="actions" method="post" action="/creator/comments/delete">
+                      <input type="hidden" name="mode" value={mode} />
+                      <input type="hidden" name="comment_id" value={ownerComment.commentId} />
+                      <input type="hidden" name="csrf_token" value={csrfToken} />
+                      <ButtonPrimary type="submit">DELETE COMMENT</ButtonPrimary>
+                    </form>
+                  </Overlay>
+                  <noscript>
+                    <details class="comment-delete-nojs">
+                      <summary>{COMMENT_COPY.delete}</summary>
+                      <p>{COMMENT_COPY.deleteDescription}</p>
+                      <form method="post" action="/creator/comments/delete">
+                        <input type="hidden" name="mode" value={mode} />
+                        <input type="hidden" name="comment_id" value={ownerComment.commentId} />
+                        <input type="hidden" name="csrf_token" value={csrfToken} />
+                        <ButtonPrimary type="submit">DELETE COMMENT</ButtonPrimary>
+                      </form>
+                    </details>
+                  </noscript>
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  )
+}
+
+<style>
+  .comment-list { margin-top: var(--space-10); padding-top: var(--space-6); border-top: var(--space-hairline) solid var(--color-rule); }
+  .comment-list h2, .comment-name { margin: 0; font-family: var(--font-machine); font-size: var(--type-label-caps-size); line-height: var(--type-label-caps-lh); letter-spacing: var(--type-label-caps-ls); text-transform: uppercase; }
+  .comment-list h2 { color: var(--color-dim); }
+  .comment-list ol { margin: var(--space-4) 0 0; padding: 0; list-style: none; }
+  .comment-list li { padding: var(--space-5) 0; border-top: var(--space-hairline) solid var(--color-rule); }
+  .comment-name { color: var(--color-dim); }
+  .comment-body { margin: var(--space-2) 0 0; color: var(--color-text); font-size: var(--type-body-size); line-height: var(--type-body-lh); overflow-wrap: anywhere; white-space: pre-wrap; }
+  .comment-delete-invoker { margin-top: var(--space-4); }
+  .comment-delete-nojs { margin-top: var(--space-4); }
+  .comment-delete-nojs summary { cursor: pointer; font-family: var(--font-machine); font-weight: 700; }
+  .comment-delete-nojs p { font-size: var(--type-body-size); line-height: var(--type-body-lh); }
+</style>

@@ -20,8 +20,8 @@ available yet.
 
 | Status | Capabilities |
 | --- | --- |
-| Shipped | Multiple-Choice Polls, including bounded multi-select; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
-| Planned / backlog | Comments; CSV and XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
+| Shipped | Multiple-Choice Polls, including bounded multi-select and opt-in Comments with Votes; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Planned / backlog | Comment lists and moderation; CSV and XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
 
 ## Product tour
 
@@ -31,7 +31,8 @@ available yet.
    one at `/creator/new`.
 3. Manage created Polls from `/creator` and their creator detail pages.
 4. Open the published canonical `/{reference}` link as a signed-out Voter,
-   choose an option, and submit.
+   choose an option, optionally attach a Comment and display name when the
+   Creator enabled them, and submit.
 5. Follow the same Poll to `/{reference}/results`; its visibility policy decides
    whether the Tally is live, opens after close, or remains creator-only. The
    canonical URL and Share action stay visible wherever sharing is lawful.
@@ -51,9 +52,9 @@ contains the complete decisions and capability map. The evaluator-sized map is:
   progressive enhancement only where interaction needs it (AD-2).
 - D1 owns facts, each fact has one legal owner/write path, and projections do
   not become competing truth (AD-6, AD-19).
-- Vote acceptance is one constrained transaction; duplicate identities become
-  secret-keyed, Poll-scoped digests rather than stored raw identifiers (AD-7,
-  AD-8).
+- Vote acceptance is one constrained transaction, including an optional typed
+  Comment contribution; duplicate identities become secret-keyed, Poll-scoped
+  digests rather than stored raw identifiers (AD-7, AD-8, AD-19).
 - Local, staging, and production share code but never state, and production is
   promoted only after the staging gate (AD-14).
 - Telemetry remains voter-blind, and result authorization happens before any

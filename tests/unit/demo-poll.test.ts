@@ -69,6 +69,7 @@ describe("Demo Poll designation", () => {
       voterCodesEnabled: false,
       captchaEnabled: true,
       vpnBlockingEnabled: false,
+      commentsEnabled: false,
       initialDiscoveryState: "unlisted",
     });
   });

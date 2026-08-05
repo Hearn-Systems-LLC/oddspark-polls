@@ -39,6 +39,7 @@ function snapshot(
     voterCodesEnabled: false,
     captchaEnabled: false,
     vpnBlockingEnabled: false,
+    commentsEnabled: false,
     options: [
       { id: OPTION_A, label: "Pizza", position: 0 },
       { id: OPTION_B, label: "Tacos", position: 1 },
@@ -100,6 +101,28 @@ describe("validatePollDefinition (shared create/edit)", () => {
         "description_too_long",
       );
     }
+  });
+
+  it("rejects a tampered Comments setting instead of silently disabling it", () => {
+    const result = validatePollDefinition({
+      question: "Where?",
+      description: "",
+      options: ["A", "B"],
+      multiSelect: "false",
+      minSelections: "",
+      maxSelections: "",
+      commentsEnabled: "sometimes",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        fieldErrors: {
+          commentsEnabled: "Choose whether Comments are enabled or disabled.",
+        },
+        reasonCodes: { commentsEnabled: "comments_invalid" },
+      },
+    });
   });
 });
 

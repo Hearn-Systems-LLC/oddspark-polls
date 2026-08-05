@@ -2,8 +2,9 @@
 title: 'Story 3.6: Presentable Repository'
 type: 'feature'
 created: '2026-08-04'
-status: 'in-review'
+status: 'done'
 baseline_revision: 'd1ff258353cfff04979b71c8d8503a54ee7b77b8'
+final_revision: '5a53bfc85f14450817c5bf4dddebcb0898613418'
 review_loop_iteration: 0
 followup_review_recommended: true
 context:
@@ -74,6 +75,7 @@ warnings: [multiple-goals, oversized]
 ## Spec Change Log
 
 - 2026-08-04: Implemented all execution tasks, completed the value-hidden history audit and exact local gate, and advanced the artifact to independent review.
+- 2026-08-04: Applied eight review patches, reran the full local gate, and finalized the auto-run artifact with follow-up review recommended.
 
 ## Review Triage Log
 
@@ -119,7 +121,7 @@ The product baseline is Story 3.5 at `a002caba`; current `origin/main` is `cf789
 
 ## Auto Run Result
 
-Status: in review; implementation is complete and review-driven evidence hardening is applied.
+Status: done; implementation and review-driven evidence hardening are complete.
 
 Resolved condition: on 2026-08-04 the owner formally permitted intentional public GitHub commit attribution under FR-27. Credentials, tokens, runtime/user data, and unrelated or accidental personal data remain prohibited. The authoritative PRD, Epic 3 Story 3.6, implementation brief, and this intent contract now agree; no history rewrite is required solely for intentional attribution.
 

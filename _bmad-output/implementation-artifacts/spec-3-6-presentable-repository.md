@@ -2,13 +2,15 @@
 title: 'Story 3.6: Presentable Repository'
 type: 'feature'
 created: '2026-08-04'
-status: 'draft'
+status: 'review'
+baseline_revision: 'd1ff258353cfff04979b71c8d8503a54ee7b77b8'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/3-6-presentable-repository.md'
+  - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md'
-warnings: [multiple-goals]
+warnings: [multiple-goals, oversized]
 ---
 
 <intent-contract>
@@ -56,13 +58,13 @@ warnings: [multiple-goals]
 
 **Execution:**
 - [x] `_bmad-output/planning-artifacts/prds/prd-oddspark-polls-2026-07-28/prd.md`, `_bmad-output/planning-artifacts/epics.md`, and `_bmad-output/implementation-artifacts/3-6-presentable-repository.md` -- record the owner-approved policy permitting intentional public GitHub commit attribution while retaining all prohibited-data classes -- make AC #2 coherent before code changes.
-- [ ] `README.md` and `package.json` -- add the evaluator sequence, shipped/planned matrix, live Worker, route tour, fresh-clone setup, exact local gate, architecture link, and correct repository metadata while retaining operational truth.
-- [ ] `src/components/public-repository-link.astro`, `src/components/landing-intro.astro`, `src/components/poll-voting-surface.astro`, and `src/pages/[reference]/results.astro` -- centralize and render the accessible repository entry on only the required public surfaces.
-- [ ] `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/{DESIGN,EXPERIENCE}.md` and `_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md` -- document the footer and reconcile structural/middleware seams.
-- [ ] `_bmad-output/implementation-artifacts/deferred-work.md` and `CHANGELOG.md` -- resolve only proven items, classify every remaining item by owner and `nice`/`3+`, and record user-visible changes.
-- [ ] `tests/unit/public-repository-contract.test.mjs`, `tests/unit/landing-page.test.mjs`, and `tests/e2e/{landing,vote,results}.spec.mjs` -- prove stable documentation/link contracts and all footer states without external CI dependency.
-- [ ] `test-results/story-3-6-presentable-repository-proof/*.png` -- capture focused 375px dark and 1280px light voting/Results evidence with clean console/network observations and no sensitive state.
-- [ ] `_bmad-output/implementation-artifacts/3-6-presentable-repository.md` -- record the reproducible remote boundary, redacted detector identity/result, metadata/content classification, external reachability, full local gate, File List, and honest `PENDING`/`NO-GO` status.
+- [x] `README.md` and `package.json` -- add the evaluator sequence, shipped/planned matrix, live Worker, route tour, fresh-clone setup, exact local gate, architecture link, and correct repository metadata while retaining operational truth.
+- [x] `src/components/public-repository-link.astro`, `src/components/landing-intro.astro`, `src/components/poll-voting-surface.astro`, and `src/pages/[reference]/results.astro` -- centralize and render the accessible repository entry on only the required public surfaces.
+- [x] `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/{DESIGN,EXPERIENCE}.md` and `_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md` -- document the footer and reconcile structural/middleware seams.
+- [x] `_bmad-output/implementation-artifacts/deferred-work.md` and `CHANGELOG.md` -- resolve only proven items, classify every remaining item by owner and `nice`/`3+`, and record user-visible changes.
+- [x] `tests/unit/public-repository-contract.test.mjs`, `tests/unit/landing-page.test.mjs`, and `tests/e2e/{landing,vote,results}.spec.mjs` -- prove stable documentation/link contracts and all footer states without external CI dependency.
+- [x] `test-results/story-3-6-presentable-repository-proof/*.png` -- capture focused 375px dark and 1280px light voting/Results evidence with clean console/network observations and no sensitive state.
+- [x] `_bmad-output/implementation-artifacts/3-6-presentable-repository.md` -- record the reproducible remote boundary, redacted detector identity/result, metadata/content classification, external reachability, full local gate, File List, and honest `PENDING`/`NO-GO` status.
 
 **Acceptance Criteria:**
 - Given a technical evaluator visits the public repository, when they read and run the documented tour, then current product scope, architecture, local setup, and exact verification path are truthful and executable.
@@ -71,11 +73,15 @@ warnings: [multiple-goals]
 
 ## Spec Change Log
 
+- 2026-08-04: Implemented all execution tasks, completed the value-hidden history audit and exact local gate, and advanced the artifact to independent review.
+
 ## Review Triage Log
 
 ## Design Notes
 
 The shared component owns presentation configuration only. Footer placement stays outside live-tally and Share replacement regions; the voting consumer uses `!embedded`, and Results renders it only inside the existing non-404 branch. This avoids changing Poll policy, authorization, or live reconciliation.
+
+The product baseline is Story 3.5 at `a002caba`; current `origin/main` is `cf7891e` after planning commits. The final history audit must cover authoritative remote heads/tags plus the committed final local Story HEAD, because the story branch is intentionally unpushed. Historical Story 1.1 and readiness-report wording remains a dated record rather than an active requirement.
 
 ## Verification
 
@@ -88,10 +94,19 @@ The shared component owns presentation configuration only. Footer placement stay
 - Render README on GitHub or a faithful renderer; verify scannability, relative links, table fit, copyable commands, and unambiguous current-versus-roadmap claims.
 - Inspect focused voting/Results screenshots in both required modes/viewports and record clean console/network observations.
 
+**Fresh implementation results (Node 24.18.0 / pnpm 11.17.0):**
+- Migration guard: 11/11 files checksummed; Vitest: 85 files / 1,255 tests passed; Playwright: 154/154 passed.
+- TypeScript check, Wrangler type generation, binding drift check, production build, and whitespace check passed.
+- Focused voting/Results browser proof passed 5/5 with inspected 375px dark and 1280px light screenshots; console/network observations were clean.
+- Gitleaks 8.30.1 fully redacted all-history scan passed with zero prohibited findings after one exact generated-manifest-hash false-positive fingerprint; independent path/content/metadata classification found no prohibited data blocker.
+- GitHub repository and production Worker reachability were verified read-only. Native GitHub secret controls remain disabled and separately authorized; no remote state was mutated.
+
 ## Auto Run Result
 
-Status: resolved; planning may resume.
+Status: review; implementation and local/external evidence are complete.
 
 Resolved condition: on 2026-08-04 the owner formally permitted intentional public GitHub commit attribution under FR-27. Credentials, tokens, runtime/user data, and unrelated or accidental personal data remain prohibited. The authoritative PRD, Epic 3 Story 3.6, implementation brief, and this intent contract now agree; no history rewrite is required solely for intentional attribution.
 
 Value-hidden continuity evidence: the authoritative public remote advertised one head and no tags with 84 reachable commits at the blocked planning pass. Attribution metadata remains an audit classification input, not a prohibited finding by itself. No remote mutation, history rewrite, dependency installation, or unredacted secret scan was performed during policy reconciliation.
+
+Implementation result: the permission-restricted mirror plus unpushed Story HEAD contained 89 reachable commits at the implementation scan. Pinned Gitleaks 8.30.1 exited `0` with zero prohibited findings under full redaction and an exact generated-manifest-hash false-positive fingerprint. Separate historical path/content/metadata review found no credential, token, runtime/user-data, or unrelated/accidental-personal-data blocker. The exact local gate passed, browser proof was inspected, and the Story is ready for independent review. No remote mutation, deploy, history rewrite, or security-setting change was performed.

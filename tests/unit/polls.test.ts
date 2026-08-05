@@ -1077,6 +1077,85 @@ describe("multipleChoiceStrategy", () => {
       selectionCount: 0,
     });
   });
+
+  it("projects ID-free export facts with effective-max columns and complete Tally", () => {
+    expect(
+      multipleChoiceStrategy.projectExport({
+        multiSelectEnabled: true,
+        minSelections: 1,
+        maxSelections: 2,
+        options: [
+          { label: "Alpha", position: 0, count: 2 },
+          { label: "Beta\nline", position: 1, count: 1 },
+          { label: "Gamma", position: 2, count: 0 },
+        ],
+        votes: [
+          {
+            alignmentKey: 0,
+            createdAtMs: 10,
+            selections: [{ optionPosition: 1 }, { optionPosition: 0 }],
+          },
+          {
+            alignmentKey: 1,
+            createdAtMs: 11,
+            selections: [{ optionPosition: 0 }],
+          },
+        ],
+        voterCount: 2,
+        selectionCount: 3,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        votes: {
+          columns: ["SELECTION 1", "SELECTION 2"],
+          rows: [
+            { alignmentKey: 0, cells: ["Alpha", "Beta\nline"] },
+            { alignmentKey: 1, cells: ["Alpha", ""] },
+          ],
+        },
+        tally: {
+          columns: ["OPTION", "COUNT"],
+          rows: [
+            ["Alpha", 2],
+            ["Beta\nline", 1],
+            ["Gamma", 0],
+          ],
+        },
+        voterCount: 2,
+        selectionCount: 3,
+      },
+    });
+  });
+
+  it.each([
+    ["trimmed labels", " Alpha"],
+    ["oversized labels", "a".repeat(POLL_CAPS.maxOptionLength + 1)],
+    ["NUL-bearing labels", "\0=CMD()"],
+  ])("rejects persisted export %s", (_label, invalidLabel) => {
+    const result = multipleChoiceStrategy.projectExport({
+      multiSelectEnabled: false,
+      minSelections: null,
+      maxSelections: null,
+      options: [
+        { label: invalidLabel, position: 0, count: 1 },
+        { label: "Beta", position: 1, count: 0 },
+      ],
+      votes: [
+        {
+          alignmentKey: 0,
+          createdAtMs: 10,
+          selections: [{ optionPosition: 0 }],
+        },
+      ],
+      voterCount: 1,
+      selectionCount: 1,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "export_projection_invalid" },
+    });
+  });
 });
 
 describe("createPoll command", () => {

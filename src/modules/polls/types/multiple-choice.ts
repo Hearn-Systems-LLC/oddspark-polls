@@ -5,10 +5,14 @@
 
 import {
   POLL_TYPE_CONTRACT_VERSION,
+  type PollTypeExportProjection,
   type PollTypeStrategy,
   type Result,
 } from "../../../shared/application/index";
 import type { PollOptionId } from "../../../shared/domain/index";
+import { POLL_CAPS } from "../caps";
+
+const codePointLength = (value: string): number => [...value].length;
 
 export type MultipleChoiceCreateInput = {
   optionLabels: string[];
@@ -67,6 +71,24 @@ export type MultipleChoiceResultProjection = {
   selectionCount: number;
 };
 
+export type MultipleChoiceExportFacts = {
+  multiSelectEnabled: boolean;
+  minSelections: number | null;
+  maxSelections: number | null;
+  options: {
+    label: string;
+    position: number;
+    count: number;
+  }[];
+  votes: {
+    alignmentKey: number;
+    createdAtMs: number;
+    selections: { optionPosition: number }[];
+  }[];
+  voterCount: number;
+  selectionCount: number;
+};
+
 // The frozen AD-3 contract types `validateSubmission` against the creation
 // facts generic. Validation actually consumes the persisted facts (option ids
 // exist only after the creation batch assigns them), so the port is narrowed
@@ -80,9 +102,11 @@ export type MultipleChoiceStrategy = Omit<
     MultipleChoiceSubmission,
     MultipleChoiceValidatedSubmission,
     MultipleChoicePersistedFacts,
-    MultipleChoiceResultProjection
+    MultipleChoiceResultProjection,
+    MultipleChoiceExportFacts,
+    PollTypeExportProjection
   >,
-  "validateSubmission" | "projectResults"
+  "validateSubmission" | "projectResults" | "projectExport"
 > & {
   validateSubmission: (
     submission: MultipleChoiceSubmission,
@@ -91,6 +115,9 @@ export type MultipleChoiceStrategy = Omit<
   projectResults: (
     facts: MultipleChoiceProjectionFacts,
   ) => MultipleChoiceResultProjection;
+  projectExport: (
+    facts: MultipleChoiceExportFacts,
+  ) => Result<PollTypeExportProjection>;
 };
 
 export const multipleChoiceStrategy: MultipleChoiceStrategy = {
@@ -212,6 +239,153 @@ export const multipleChoiceStrategy: MultipleChoiceStrategy = {
       })),
       voterCount: facts.votes.length,
       selectionCount,
+    };
+  },
+  projectExport: (facts) => {
+    const malformed = () => ({
+      ok: false as const,
+      error: {
+        code: "export_projection_invalid",
+        message: "Export data is unavailable right now.",
+      },
+    });
+    if (
+      !Number.isSafeInteger(facts.voterCount) ||
+      facts.voterCount < 0 ||
+      !Number.isSafeInteger(facts.selectionCount) ||
+      facts.selectionCount < 0 ||
+      facts.votes.length !== facts.voterCount
+    ) {
+      return malformed();
+    }
+
+    const options = [...facts.options];
+    const labels = options.map(({ label }) => label);
+    if (
+      options.length < 2 ||
+      options.length > POLL_CAPS.maxOptions ||
+      options.some(
+        (option, index) =>
+          option.position !== index ||
+          typeof option.label !== "string" ||
+          option.label.length === 0 ||
+          option.label !== option.label.trim() ||
+          option.label.includes("\0") ||
+          codePointLength(option.label) > POLL_CAPS.maxOptionLength ||
+          !Number.isSafeInteger(option.count) ||
+          option.count < 0 ||
+          option.count > facts.voterCount,
+      ) ||
+      new Set(labels).size !== labels.length
+    ) {
+      return malformed();
+    }
+    const configuredBoundsValid = facts.multiSelectEnabled
+      ? (facts.minSelections === null ||
+          (Number.isSafeInteger(facts.minSelections) &&
+            facts.minSelections >= 1 &&
+            facts.minSelections <= options.length)) &&
+        (facts.maxSelections === null ||
+          (Number.isSafeInteger(facts.maxSelections) &&
+            facts.maxSelections >= 1 &&
+            facts.maxSelections <= options.length)) &&
+        (facts.minSelections === null ||
+          facts.maxSelections === null ||
+          facts.minSelections <= facts.maxSelections)
+      : facts.minSelections === null && facts.maxSelections === null;
+    if (!configuredBoundsValid) {
+      return malformed();
+    }
+
+    const recomputedCounts = new Map(options.map(({ position }) => [position, 0]));
+    const voteRows: PollTypeExportProjection["votes"]["rows"][number][] = [];
+    let selectionCount = 0;
+    for (const [voteIndex, vote] of facts.votes.entries()) {
+      if (
+        !Number.isSafeInteger(vote.alignmentKey) ||
+        vote.alignmentKey !== voteIndex ||
+        !Number.isSafeInteger(vote.createdAtMs) ||
+        vote.createdAtMs < 0 ||
+        (voteIndex > 0 &&
+          vote.createdAtMs < facts.votes[voteIndex - 1]!.createdAtMs)
+      ) {
+        return malformed();
+      }
+      const selected = new Set<number>();
+      const selectedOptions: (typeof options)[number][] = [];
+      for (const selection of vote.selections) {
+        const option = options[selection.optionPosition];
+        if (
+          !Number.isSafeInteger(selection.optionPosition) ||
+          !option ||
+          option.position !== selection.optionPosition ||
+          selected.has(selection.optionPosition)
+        ) {
+          return malformed();
+        }
+        selected.add(selection.optionPosition);
+        selectedOptions.push(option);
+        selectionCount += 1;
+        recomputedCounts.set(
+          selection.optionPosition,
+          (recomputedCounts.get(selection.optionPosition) ?? 0) + 1,
+        );
+      }
+      if (selectedOptions.length === 0) {
+        return malformed();
+      }
+      const effectiveMin = facts.multiSelectEnabled
+        ? (facts.minSelections ?? 1)
+        : 1;
+      const effectiveMax = facts.multiSelectEnabled
+        ? (facts.maxSelections ?? options.length)
+        : 1;
+      if (
+        selectedOptions.length < effectiveMin ||
+        selectedOptions.length > effectiveMax
+      ) {
+        return malformed();
+      }
+      selectedOptions.sort((left, right) => left.position - right.position);
+      voteRows.push({
+        alignmentKey: vote.alignmentKey,
+        cells: Array.from(
+          { length: effectiveMax },
+          (_, index) => selectedOptions[index]?.label ?? "",
+        ),
+      });
+    }
+
+    if (
+      selectionCount !== facts.selectionCount ||
+      options.some(
+        (option) => recomputedCounts.get(option.position) !== option.count,
+      )
+    ) {
+      return malformed();
+    }
+
+    return {
+      ok: true,
+      value: {
+        votes: {
+          columns: Array.from(
+            {
+              length: facts.multiSelectEnabled
+                ? (facts.maxSelections ?? options.length)
+                : 1,
+            },
+            (_, index) => `SELECTION ${index + 1}`,
+          ),
+          rows: voteRows,
+        },
+        tally: {
+          columns: ["OPTION", "COUNT"],
+          rows: options.map((option) => [option.label, option.count]),
+        },
+        voterCount: facts.voterCount,
+        selectionCount: facts.selectionCount,
+      },
     };
   },
 };

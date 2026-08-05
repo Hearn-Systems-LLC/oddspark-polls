@@ -15,6 +15,13 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Direct owner CSV export from each creator Poll detail: one snapshot contains
+  a deterministic raw row per accepted Vote plus every option and aggregate
+  Tally total in disambiguated Tally and Summary sections. The download is
+  private, spreadsheet-formula-safe, available
+  regardless of Poll status or Results visibility, and excludes internal IDs,
+  duplicate-enforcement identities, and provider/session/network data. XLSX
+  remains planned on the same format-neutral dataset.
 - Complete newest-first Comment lists now follow every authorized Tally.
   Readers see plain text and an `ANONYMOUS` fallback; Poll owners and the live
   Administrator can remove one Comment through an accessible confirmation

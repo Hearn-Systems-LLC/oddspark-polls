@@ -36,7 +36,7 @@ const SESSION_COOKIE_PATTERN =
 const CREATOR_SESSION_MARKER_COOKIE = "oddspark.creator_session_seen";
 const CREATOR_SESSION_MARKER_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const MODERATION_NO_STORE = "private, no-store";
+const CREATOR_NO_STORE = "private, no-store";
 
 function isModerationSurfacePath(pathname: string): boolean {
   return (
@@ -252,8 +252,8 @@ const csrfMiddleware = defineMiddleware(async (context, next) => {
       headers: {
         "content-type": "text/plain; charset=utf-8",
         "x-request-id": requestId,
-        ...(isModerationSurfacePath(pathname)
-          ? { "cache-control": MODERATION_NO_STORE }
+        ...(isCreatorSurfacePath(pathname)
+          ? { "cache-control": CREATOR_NO_STORE }
           : {}),
       },
     });
@@ -280,8 +280,8 @@ const creatorGuardMiddleware = defineMiddleware(async (context, next) => {
     status: 303,
     headers: {
       location: `/sign-in?${params.toString()}`,
-      ...(isModerationSurfacePath(url.pathname)
-        ? { "cache-control": MODERATION_NO_STORE }
+      ...(isCreatorSurfacePath(url.pathname)
+        ? { "cache-control": CREATOR_NO_STORE }
         : {}),
     },
   });

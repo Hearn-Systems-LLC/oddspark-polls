@@ -68,6 +68,8 @@ describe("telemetry adapter", () => {
     expect(isForbiddenTelemetryKey("turnstile_token")).toBe(true);
     expect(isForbiddenTelemetryKey("TURNSTILE_SECRET_KEY")).toBe(true);
     expect(isForbiddenTelemetryKey("error-codes")).toBe(true);
+    expect(isForbiddenTelemetryKey("filename")).toBe(true);
+    expect(isForbiddenTelemetryKey("cells")).toBe(true);
     expect(isForbiddenTelemetryKey("requestId")).toBe(false);
     expect(isForbiddenTelemetryKey("operation")).toBe(false);
   });
@@ -230,6 +232,24 @@ describe("telemetry adapter", () => {
     ],
     [
       "GET",
+      "/creator/polls/11111111-1111-4111-8111-111111111111/export.csv",
+      false,
+      "GET /creator/polls/:pollId/export.csv",
+    ],
+    [
+      "HEAD",
+      "/creator/polls/11111111-1111-4111-8111-111111111111/export.csv/",
+      false,
+      "HEAD /creator/polls/:pollId/export.csv",
+    ],
+    [
+      "GET",
+      "/creator/polls/11111111-1111-4111-8111-111111111111/private-cell/nested",
+      false,
+      "GET /creator/polls/:pollId/*",
+    ],
+    [
+      "GET",
       "/creator/polls/11111111-1111-4111-8111-111111111111/",
       false,
       "GET /creator/polls/:pollId",
@@ -246,11 +266,18 @@ describe("telemetry adapter", () => {
 
   it("never includes an internal creator Poll UUID in operation labels", () => {
     const pollId = "11111111-1111-4111-8111-111111111111";
-    for (const method of ["GET", "POST"]) {
+    for (const method of ["GET", "HEAD", "POST"]) {
       expect(
         telemetryOperationForRoute(
           method,
           `/creator/polls/${pollId}`,
+          false,
+        ),
+      ).not.toContain(pollId);
+      expect(
+        telemetryOperationForRoute(
+          method,
+          `/creator/polls/${pollId}/export.csv`,
           false,
         ),
       ).not.toContain(pollId);

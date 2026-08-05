@@ -40,27 +40,50 @@ describe("shared kernel enums", () => {
   });
 
   it("versions the Poll Type contribution contract", () => {
-    expect(POLL_TYPE_CONTRACT_VERSION).toBe(1);
+    expect(POLL_TYPE_CONTRACT_VERSION).toBe(5);
   });
 
-  it("accepts a minimal strategy exposing only the create port (AD-23 compile-time consumer)", () => {
-    // Compile-time contract check: a strategy with only `create` implemented
-    // must satisfy the interface — the remaining ports arrive with Stories
-    // 1.5 and 1.8. A contract change that breaks this must move this test.
+  it("requires every real strategy to expose the versioned export port", () => {
     const minimal: PollTypeStrategy<{ labels: string[] }, { labels: string[] }> =
       {
         type: "multiple_choice",
         contractVersion: POLL_TYPE_CONTRACT_VERSION,
         create: (input) => ({ ok: true, value: { labels: input.labels } }),
+        projectExport: () => ({
+          ok: true,
+          value: {
+            votes: { columns: ["VALUE"], rows: [] },
+            tally: { columns: ["VALUE"], rows: [["zero"]] },
+            voterCount: 0,
+            selectionCount: 0,
+          },
+        }),
       };
     const created = minimal.create({ labels: ["a", "b"] }, { nowMs: 0 });
     expect(created).toEqual({ ok: true, value: { labels: ["a", "b"] } });
   });
 
-  it("types the facts seam across all four ports (AD-23 compile-time consumer)", () => {
+  it("constrains custom export projection generics to the shared shape", () => {
+    // If the `extends PollTypeExportProjection` constraint is removed, this
+    // directive becomes unused and the repository type gate fails.
+    type InvalidExportStrategy = PollTypeStrategy<
+      { labels: string[] },
+      { labels: string[] },
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      unknown,
+      // @ts-expect-error unrelated export shapes are outside the frozen contract
+      { unrelated: true }
+    >;
+    expect(true).toBe(true);
+  });
+
+  it("types the facts seam across all five ports (AD-23 compile-time consumer)", () => {
     // A fully-implemented strategy: `create`'s facts feed validateSubmission,
-    // and persistFacts' vote facts feed projectResults — typed end to end,
-    // never `unknown` (D5, decision 2026-07-29).
+    // persistFacts' vote facts feed projectResults, and export facts feed
+    // projectExport — typed end to end, never `unknown` (D5, 2026-07-29).
     type CreationFacts = { options: string[] };
     type Submission = { selectedOptionIds: string[] };
     type ValidatedSubmission = { selectedOptionIds: [string] };
@@ -71,7 +94,8 @@ describe("shared kernel enums", () => {
       Submission,
       ValidatedSubmission,
       VoteFacts,
-      { tally: number }
+      { tally: number },
+      VoteFacts
     > = {
       type: "multiple_choice",
       contractVersion: POLL_TYPE_CONTRACT_VERSION,
@@ -94,6 +118,21 @@ describe("shared kernel enums", () => {
         })),
       }),
       projectResults: (facts) => ({ tally: facts.selections.length }),
+      projectExport: (facts) => ({
+        ok: true,
+        value: {
+          votes: {
+            columns: ["SELECTION 1"],
+            rows: [{ alignmentKey: 0, cells: ["a"] }],
+          },
+          tally: {
+            columns: ["OPTION", "COUNT"],
+            rows: [["a", facts.selections.length]],
+          },
+          voterCount: 1,
+          selectionCount: facts.selections.length,
+        },
+      }),
     };
 
     const created = full.create({ labels: ["a", "b"] }, { nowMs: 0 });
@@ -121,6 +160,10 @@ describe("shared kernel enums", () => {
     });
     expect(full.projectResults?.(persisted ?? { selections: [] })).toEqual({
       tally: 1,
+    });
+    expect(full.projectExport(persisted ?? { selections: [] })).toMatchObject({
+      ok: true,
+      value: { votes: { columns: ["SELECTION 1"] } },
     });
   });
 });

@@ -59,9 +59,9 @@ export function incrementRepresentationVersion(
 }
 
 // ---------------------------------------------------------------------------
-// Poll Type strategy contract (AD-3), contract version 1.
+// Poll Type strategy contract (AD-3), contract version 5.
 //
-// Every Poll Type implements the same four ports. Story 1.3 exercises only
+// Every Poll Type implements the same five ports. Story 1.3 exercises only
 // `create`; `validateSubmission` and `persistFacts` are exercised from the
 // vote transaction (Story 1.5), `projectResults` from the result surfaces
 // (Story 1.8). The generics keep each type's facts relational and typed —
@@ -71,7 +71,40 @@ export function incrementRepresentationVersion(
 // docs/design/poll-type-contract-check.md (de-risk rule #1).
 // ---------------------------------------------------------------------------
 
-export const POLL_TYPE_CONTRACT_VERSION = 1;
+export const POLL_TYPE_CONTRACT_VERSION = 5;
+
+/** Format-neutral scalar supplied by a Poll Type export projection. */
+export type PollTypeExportCell = string | number;
+
+/** One rectangular, format-neutral table. */
+export type PollTypeExportTable = {
+  columns: readonly string[];
+  rows: readonly (readonly PollTypeExportCell[])[];
+};
+
+/** One Poll Type response row, inseparably bound to its driver-order witness. */
+export type PollTypeExportVoteRow = {
+  alignmentKey: number;
+  cells: readonly PollTypeExportCell[];
+};
+
+export type PollTypeExportVoteTable = {
+  columns: readonly string[];
+  rows: readonly PollTypeExportVoteRow[];
+};
+
+/**
+ * Poll Type-owned portion of the canonical export dataset. Vote rows align by
+ * position with shared facts; persistence identifiers never enter this port.
+ */
+export type PollTypeExportProjection = {
+  /** Rows carry identifier-free witnesses proving fact-driver alignment. */
+  votes: PollTypeExportVoteTable;
+  /** Poll Type-owned Tally only; shared totals belong in Summary. */
+  tally: PollTypeExportTable;
+  voterCount: number;
+  selectionCount: number;
+};
 
 export type PollTypeCreateContext = {
   nowMs: number;
@@ -92,6 +125,8 @@ export interface PollTypeStrategy<
   TValidatedSubmission = unknown,
   TPersistedFacts = unknown,
   TResultProjection = unknown,
+  TExportFacts = unknown,
+  TExportProjection extends PollTypeExportProjection = PollTypeExportProjection,
 > {
   readonly type: PollType;
   readonly contractVersion: typeof POLL_TYPE_CONTRACT_VERSION;
@@ -111,4 +146,8 @@ export interface PollTypeStrategy<
   // Story 1.8: projects persisted facts into the type's result shape
   // (per-option tallies, IRV rounds, availability grid).
   readonly projectResults?: (facts: TPersistedFacts) => TResultProjection;
+  // Story 4.3: supplies type-specific raw response cells and Tally rows to
+  // the one format-neutral Results export dataset. CSV/XLSX never branch on
+  // Poll Type and never receive internal source identifiers.
+  readonly projectExport: (facts: TExportFacts) => Result<TExportProjection>;
 }

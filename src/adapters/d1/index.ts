@@ -6,6 +6,7 @@
 import {
   DuplicatePollIdError,
   ReferenceTakenError,
+  isCanonicalCustomReference,
   type PollPersistenceRows,
   type PollLifecycleSnapshot,
   type ValidatedPollDefinition,
@@ -26,6 +27,7 @@ import type {
   VersionedResultsProjection,
   VersionedResultsTallyProjection,
 } from "../../modules/results/index";
+import type { ExportOwnerEnvelope } from "../../modules/results/export";
 import {
   COMMENT_CAPS,
   isCommentId,
@@ -404,7 +406,7 @@ export function createPollPersistence(db: D1Database) {
       }
       return {
         ...toPollPage(row, await loadOptions(db, row.id)),
-        canonicalReference: row.canonical_reference,
+        canonicalReference: row.canonical_reference as string,
         canonicalReferenceKind: row.canonical_reference_kind,
         createdAtMs: row.created_at_ms,
       };
@@ -1661,6 +1663,52 @@ export function createResultsPersistence(db: D1Database) {
         options: projection.options,
         voterCount: projection.voterCount,
         selectionCount: projection.selectionCount,
+      };
+    },
+  };
+}
+
+export function createOwnerExportPersistence(db: D1Database) {
+  return {
+    async findOwnerEnvelope(
+      pollId: PollId,
+      ownerUserId: UserId,
+    ): Promise<ExportOwnerEnvelope | null> {
+      const row = await db
+        .prepare(
+          `SELECT p.id, p.poll_type, canonical.reference AS canonical_reference,
+                  canonical.kind AS canonical_reference_kind
+           FROM poll p
+           LEFT JOIN poll_reference canonical
+             ON canonical.poll_id = p.id AND canonical.is_canonical = 1
+           WHERE p.id = ?1 AND p.owner_user_id = ?2
+           LIMIT 1`,
+        )
+        .bind(pollId, ownerUserId)
+        .first<{
+          id: PollId;
+          poll_type: PollType;
+          canonical_reference: unknown;
+          canonical_reference_kind: unknown;
+        }>();
+      if (!row) return null;
+      const validReference =
+        (row.canonical_reference_kind === "generated" &&
+          typeof row.canonical_reference === "string" &&
+          /^[A-Za-z0-9_-]{22}$/u.test(row.canonical_reference)) ||
+        (row.canonical_reference_kind === "custom" &&
+          typeof row.canonical_reference === "string" &&
+          isCanonicalCustomReference(row.canonical_reference));
+      if (
+        !POLL_TYPES.includes(row.poll_type) ||
+        !validReference
+      ) {
+        throw new Error("Malformed export owner envelope");
+      }
+      return {
+        pollId: row.id,
+        pollType: row.poll_type,
+        canonicalReference: row.canonical_reference as string,
       };
     },
   };

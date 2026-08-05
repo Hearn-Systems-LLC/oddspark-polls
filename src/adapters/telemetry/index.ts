@@ -48,8 +48,11 @@ const FORBIDDEN_KEYS = [
   "voter_digest",
   "comment",
   "comments",
+  "commentId",
+  "comment_id",
   "displayName",
   "display_name",
+  "reference",
   "ballot",
   "ballotContent",
   "voterCode",
@@ -172,6 +175,17 @@ export function telemetryOperationForRoute(
     segments[1] === "moderation"
   ) {
     return `${method} /creator/moderation`;
+  }
+
+  // Comment moderation is another fixed capability operation. Neither the
+  // submitted Comment ID nor the form's public reference reaches telemetry.
+  if (
+    segments.length === 3 &&
+    segments[0] === "creator" &&
+    segments[1] === "comments" &&
+    segments[2] === "delete"
+  ) {
+    return `${method} /creator/comments/delete`;
   }
 
   if (!hasPollReferenceParam) {

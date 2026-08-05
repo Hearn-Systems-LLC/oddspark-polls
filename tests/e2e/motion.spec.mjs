@@ -238,6 +238,7 @@ test.describe("motion system and chart toggle", () => {
       selectionCount: voterCount,
       tied,
       empty: positiveMax === 0,
+      comments: [],
       status: "open",
     };
   }

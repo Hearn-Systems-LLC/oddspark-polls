@@ -3,8 +3,12 @@ import { env } from "cloudflare:workers";
 import BaseLayout from "../../layouts/base-layout.astro";
 import ButtonPrimary from "../../components/button-primary.astro";
 import ButtonSecondary from "../../components/button-secondary.astro";
+import CommentList from "../../components/comment-list.astro";
 import Input from "../../components/input.astro";
-import { createModerationPersistence } from "../../adapters/d1/index";
+import {
+  createCommentModerationPersistence,
+  createModerationPersistence,
+} from "../../adapters/d1/index";
 import {
   parseModerationForm,
   parseModerationGetQuery,
@@ -19,6 +23,11 @@ import {
   type ModerationTarget,
 } from "../../modules/discovery/index";
 import { hasAdministratorCapability } from "../../modules/identity/index";
+import {
+  COMMENT_COPY,
+  queryCommentsAsAdministrator,
+  type AdministratorCommentView,
+} from "../../modules/comments/index";
 import type { PollId } from "../../shared/domain/index";
 
 const NO_STORE = "private, no-store";
@@ -67,6 +76,7 @@ const actor: AdministratorModerationActor = {
 };
 const csrfToken = requestContext?.csrfToken?.value ?? "";
 const persistence = createModerationPersistence(env.DB);
+const commentPersistence = createCommentModerationPersistence(env.DB);
 const queryTarget = (reference: string) =>
   queryModerationTarget(
     {
@@ -82,7 +92,9 @@ let responseStatus = 200;
 let lookupValue = "";
 let target: ModerationTarget | null = null;
 let pageError: string | null = null;
+let commentError: string | null = null;
 let requestedOutcome: ModerationOutcome | null = null;
+let comments: AdministratorCommentView[] = [];
 
 const applyQueryResult = async (reference: string): Promise<boolean> => {
   const result = await queryTarget(reference);
@@ -92,6 +104,29 @@ const applyQueryResult = async (reference: string): Promise<boolean> => {
     if (requestContext) {
       requestContext.pollId = result.value.pollId;
     }
+    const commentResult = await queryCommentsAsAdministrator(
+      { loadComments: commentPersistence.loadForAdministrator },
+      actor,
+      result.value.pollId,
+    );
+    if (!commentResult.ok) {
+      comments = [];
+      if (commentResult.error.code === "authorization_denied") {
+        target = null;
+        if (requestContext) {
+          requestContext.authorizationDenied = true;
+        }
+        responseStatus = 403;
+        pageError = COMMENT_COPY.accessRequired;
+        return false;
+      } else {
+        // Comment moderation is an independent capability. A read failure
+        // must not disable the already-resolved Discovery delist/clear action.
+        commentError = COMMENT_COPY.loadFailed;
+      }
+      return true;
+    }
+    comments = commentResult.value;
     return true;
   }
 
@@ -221,8 +256,9 @@ const actionLabel =
       <p class="eyebrow">ADMINISTRATOR</p>
       <h1>Moderation</h1>
       <p class="intro">
-        Find one Poll by its link or reference. Delisting changes public
-        discovery only; the Poll and its Votes stay in place.
+        Find one Poll by its link or reference. Review and remove individual
+        Comments here. Delisting changes public discovery only; the Poll and
+        its Votes stay in place.
       </p>
     </header>
 
@@ -300,6 +336,20 @@ const actionLabel =
               {actionLabel}
             </ButtonSecondary>
           </form>
+          {
+            commentError && (
+              <p class="status-line is-error comment-error" role="alert" data-comment-load-error>
+                {commentError}
+              </p>
+            )
+          }
+          <CommentList
+            comments={comments}
+            moderationComments={comments}
+            csrfToken={csrfToken}
+            cancelHref={`/creator/moderation?target=${encodeURIComponent(target.canonicalReference)}`}
+            mode="administrator"
+          />
         </section>
       )
     }
@@ -310,6 +360,7 @@ const actionLabel =
       .querySelector("[data-moderation-error], [data-moderation-outcome], [data-moderation-target] h2")
       ?.focus({ preventScroll: true });
   </script>
+  {comments.length > 0 && <script src="../../scripts/overlay.ts"></script>}
 </BaseLayout>
 
 <style>

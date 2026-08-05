@@ -40,8 +40,24 @@ const MODERATION_NO_STORE = "private, no-store";
 
 function isModerationSurfacePath(pathname: string): boolean {
   return (
-    pathname === "/creator/moderation" || pathname === "/creator/moderation/"
+    pathname === "/creator/moderation" ||
+    pathname === "/creator/moderation/" ||
+    pathname === "/creator/comments/delete" ||
+    pathname === "/creator/comments/delete/"
   );
+}
+
+function creatorReturnAddress(url: URL): string {
+  // A signed-out POST must never redirect back to a mutation endpoint.
+  if (
+    url.pathname === "/creator/comments/delete" ||
+    url.pathname === "/creator/comments/delete/"
+  ) {
+    return "/creator";
+  }
+  return isModerationSurfacePath(url.pathname)
+    ? "/creator/moderation"
+    : `${url.pathname}${url.search}`;
 }
 
 function escapeRegExpLiteral(value: string): string {
@@ -253,9 +269,7 @@ const creatorGuardMiddleware = defineMiddleware(async (context, next) => {
   }
 
   const returnAddress = validateReturnAddress(
-    isModerationSurfacePath(url.pathname)
-      ? "/creator/moderation"
-      : `${url.pathname}${url.search}`,
+    creatorReturnAddress(url),
   );
   const params = new URLSearchParams({ return: returnAddress });
   if (context.locals.requestContext?.sessionExpired) {

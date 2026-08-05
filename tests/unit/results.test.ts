@@ -68,10 +68,15 @@ function tally(
 function ports(
   access: ResultsAccessEnvelope | null,
   projection: ResultsTallyProjection = tally(),
-): ResultsPorts & { projectTally: ReturnType<typeof vi.fn> } {
+): ResultsPorts & { projectResults: ReturnType<typeof vi.fn> } {
   return {
     findAccessEnvelope: vi.fn(async () => access),
-    projectTally: vi.fn(async () => projection),
+    projectResults: vi.fn(async (_pollId, includeOwnerModeration) => ({
+      ...projection,
+      representationVersion: 1,
+      comments: [],
+      ownerComments: includeOwnerModeration ? [] : null,
+    })),
   };
 }
 
@@ -81,15 +86,20 @@ function livePorts(
   projection: ResultsTallyProjection = tally(),
 ): LiveResultsPorts & {
   readRepresentationVersion: ReturnType<typeof vi.fn>;
-  projectVersionedTally: ReturnType<typeof vi.fn>;
+  projectVersionedResults: ReturnType<typeof vi.fn>;
 } {
   return {
     findAccessEnvelope: vi.fn(async () => access),
     readRepresentationVersion: vi.fn(async () => representationVersion),
-    projectVersionedTally: vi.fn(async () =>
+    projectVersionedResults: vi.fn(async () =>
       representationVersion === null
         ? null
-        : { ...projection, representationVersion },
+        : {
+            ...projection,
+            representationVersion,
+            comments: [],
+            ownerComments: null,
+          },
     ),
   };
 }
@@ -110,7 +120,7 @@ describe("queryResults visibility matrix", () => {
       const livePorts = ports(envelope(lifecycle));
       const view = await queryResults(livePorts, "team-lunch", viewer, NOW);
       expect(view.kind).toBe("visible");
-      expect(livePorts.projectTally).toHaveBeenCalledTimes(1);
+      expect(livePorts.projectResults).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -132,7 +142,7 @@ describe("queryResults visibility matrix", () => {
       canonicalReference: "team-lunch",
       deadlineMs: NOW + 60_000,
     });
-    expect(hiddenPorts.projectTally).not.toHaveBeenCalled();
+    expect(hiddenPorts.projectResults).not.toHaveBeenCalled();
   });
 
   it("renders the no-timestamp hidden variant for a manual-close-only After Close Poll", async () => {
@@ -144,7 +154,7 @@ describe("queryResults visibility matrix", () => {
       kind: "after_close_hidden",
       deadlineMs: null,
     });
-    expect(hiddenPorts.projectTally).not.toHaveBeenCalled();
+    expect(hiddenPorts.projectResults).not.toHaveBeenCalled();
   });
 
   it("opens After Close the moment the deadline compares closed, with no write", async () => {
@@ -171,7 +181,7 @@ describe("queryResults visibility matrix", () => {
       NOW,
     );
     expect(beforeDeadline.kind).toBe("after_close_hidden");
-    expect(openPorts.projectTally).not.toHaveBeenCalled();
+    expect(openPorts.projectResults).not.toHaveBeenCalled();
   });
 
   it("exposes effective open status only on an entitled full Results view", async () => {
@@ -202,8 +212,8 @@ describe("queryResults visibility matrix", () => {
       NOW,
     );
     expect(ownerView.kind).toBe("visible");
-    expect(ownerPorts.projectTally).toHaveBeenCalledTimes(1);
-    expect(ownerPorts.projectTally).toHaveBeenCalledWith(POLL_ID);
+    expect(ownerPorts.projectResults).toHaveBeenCalledTimes(1);
+    expect(ownerPorts.projectResults).toHaveBeenCalledWith(POLL_ID, true);
   });
 
   it.each([
@@ -220,14 +230,22 @@ describe("queryResults visibility matrix", () => {
       question: "Where to lunch?",
       canonicalReference: "team-lunch",
     });
-    expect(hiddenPorts.projectTally).not.toHaveBeenCalled();
+    expect(hiddenPorts.projectResults).not.toHaveBeenCalled();
   });
 
   it("answers not_found for an absent Poll and never touches the tally", async () => {
     const missingPorts = ports(null);
     const view = await queryResults(missingPorts, "nope", ANONYMOUS, NOW);
     expect(view).toEqual({ kind: "not_found" });
-    expect(missingPorts.projectTally).not.toHaveBeenCalled();
+    expect(missingPorts.projectResults).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a Poll vanishes after visibility authorization", async () => {
+    const deps = ports(envelope());
+    deps.projectResults.mockResolvedValueOnce(null);
+    await expect(
+      queryResults(deps, "team-lunch", ANONYMOUS, NOW),
+    ).rejects.toThrow("Results projection unavailable");
   });
 });
 
@@ -545,7 +563,7 @@ describe("queryLiveResults authorization and projection", () => {
       canonicalReference: "team-lunch",
     });
     expect(hiddenPorts.readRepresentationVersion).not.toHaveBeenCalled();
-    expect(hiddenPorts.projectVersionedTally).not.toHaveBeenCalled();
+    expect(hiddenPorts.projectVersionedResults).not.toHaveBeenCalled();
     expect(view).not.toHaveProperty("representationVersion");
     expect(view).not.toHaveProperty("validator");
     expect(view).not.toHaveProperty("tally");
@@ -601,7 +619,7 @@ describe("queryLiveResults authorization and projection", () => {
     );
     expect(view).toEqual({ kind: "not_found" });
     expect(missingPorts.readRepresentationVersion).not.toHaveBeenCalled();
-    expect(missingPorts.projectVersionedTally).not.toHaveBeenCalled();
+    expect(missingPorts.projectVersionedResults).not.toHaveBeenCalled();
   });
 
   it("returns the versioned Tally and open status from one full projection", async () => {
@@ -638,7 +656,7 @@ describe("queryLiveResults authorization and projection", () => {
       },
     });
     expect(visiblePorts.readRepresentationVersion).not.toHaveBeenCalled();
-    expect(visiblePorts.projectVersionedTally).toHaveBeenCalledWith(POLL_ID);
+    expect(visiblePorts.projectVersionedResults).toHaveBeenCalledWith(POLL_ID);
   });
 
   it("uses the cheap version read and skips the Tally when the validator matches", async () => {
@@ -657,7 +675,7 @@ describe("queryLiveResults authorization and projection", () => {
       status: "open",
       validator: '"17:open"',
     });
-    expect(visiblePorts.projectVersionedTally).not.toHaveBeenCalled();
+    expect(visiblePorts.projectVersionedResults).not.toHaveBeenCalled();
   });
 
   it("treats now equal to the deadline as closed in the validator", async () => {
@@ -678,7 +696,7 @@ describe("queryLiveResults authorization and projection", () => {
 
   it("mints a full response from the projection snapshot when a Vote lands after the cheap read", async () => {
     const racingPorts = livePorts(envelope(), 17);
-    racingPorts.projectVersionedTally.mockResolvedValueOnce({
+    racingPorts.projectVersionedResults.mockResolvedValueOnce({
       ...tally({
         options: [
           { id: OPTION_A, label: "Pizza", position: 0, count: 1 },
@@ -688,6 +706,8 @@ describe("queryLiveResults authorization and projection", () => {
         selectionCount: 1,
       }),
       representationVersion: 18,
+      comments: [],
+      ownerComments: null,
     });
     await expect(
       queryLiveResults(
@@ -718,13 +738,13 @@ describe("queryLiveResults authorization and projection", () => {
           '"999:open"',
         ),
       ).rejects.toThrow("Invalid representation version");
-      expect(malformedPorts.projectVersionedTally).not.toHaveBeenCalled();
+      expect(malformedPorts.projectVersionedResults).not.toHaveBeenCalled();
     },
   );
 
   it("fails closed when the full projection disappears after authorization", async () => {
     const inconsistentPorts = livePorts(envelope(), 17);
-    inconsistentPorts.projectVersionedTally.mockResolvedValueOnce(null);
+    inconsistentPorts.projectVersionedResults.mockResolvedValueOnce(null);
     await expect(
       queryLiveResults(
         inconsistentPorts,
@@ -738,9 +758,11 @@ describe("queryLiveResults authorization and projection", () => {
 
   it("fails closed when the full projection carries a malformed version", async () => {
     const malformedPorts = livePorts(envelope(), 17);
-    malformedPorts.projectVersionedTally.mockResolvedValueOnce({
+    malformedPorts.projectVersionedResults.mockResolvedValueOnce({
       ...tally(),
       representationVersion: Number.NaN,
+      comments: [],
+      ownerComments: null,
     });
     await expect(
       queryLiveResults(

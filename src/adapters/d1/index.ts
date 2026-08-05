@@ -21,10 +21,21 @@ import type {
 } from "../../modules/discovery/index";
 import type {
   ResultsAccessEnvelope,
+  ResultsProjection,
   ResultsTallyProjection,
+  VersionedResultsProjection,
   VersionedResultsTallyProjection,
 } from "../../modules/results/index";
-import type { VoteCommentContribution } from "../../modules/comments/index";
+import {
+  COMMENT_CAPS,
+  isCommentId,
+  isCommentTimestamp,
+  type AdministratorCommentLoadOutcome,
+  type CommentModerationPersistenceOutcome,
+  type CommentView,
+  type OwnerCommentView,
+  type VoteCommentContribution,
+} from "../../modules/comments/index";
 import {
   AlreadyVotedError,
   asVoterClaimDigest,
@@ -45,6 +56,7 @@ import {
 import type { RepresentationVersionIncrement } from "../../shared/application/index";
 import type {
   DiscoveryState,
+  CommentId,
   PollId,
   PollOptionId,
   PollSecurityToggles,
@@ -1225,6 +1237,126 @@ export function createVotePersistence(db: D1Database) {
 export type PollPersistence = ReturnType<typeof createPollPersistence>;
 export type VotePersistence = ReturnType<typeof createVotePersistence>;
 
+type CommentJsonRecord = {
+  body: unknown;
+  displayName: unknown;
+  createdAtMs: unknown;
+};
+
+type OwnerCommentJsonRecord = CommentJsonRecord & {
+  commentId: unknown;
+};
+
+function parseJsonRecords(value: unknown, label: string): unknown[] {
+  if (typeof value !== "string") {
+    throw new Error(`Malformed ${label} projection`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`Malformed ${label} projection`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`Malformed ${label} projection`);
+  }
+  return parsed;
+}
+
+function isExactRecord(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => key in value);
+}
+
+function mapCommentJson(value: unknown): CommentView {
+  if (
+    !isExactRecord(value, ["body", "displayName", "createdAtMs"])
+  ) {
+    throw new Error("Malformed Comment projection");
+  }
+  const row = value as CommentJsonRecord;
+  if (
+    typeof row.body !== "string" ||
+    row.body.length < 1 ||
+    row.body.length > COMMENT_CAPS.body ||
+    row.body !== row.body.trim() ||
+    /[\0\r]/u.test(row.body) ||
+    (row.displayName !== null &&
+      (typeof row.displayName !== "string" ||
+        row.displayName.length < 1 ||
+        row.displayName.length > COMMENT_CAPS.displayName ||
+        row.displayName !== row.displayName.trim() ||
+        /[\0\r\n]/u.test(row.displayName))) ||
+    !isCommentTimestamp(row.createdAtMs)
+  ) {
+    throw new Error("Malformed Comment projection");
+  }
+  return {
+    body: row.body,
+    displayName: row.displayName,
+    createdAtMs: row.createdAtMs,
+  };
+}
+
+function mapOwnerCommentJson(value: unknown): OwnerCommentView {
+  if (
+    !isExactRecord(value, [
+      "commentId",
+      "body",
+      "displayName",
+      "createdAtMs",
+    ])
+  ) {
+    throw new Error("Malformed owner Comment projection");
+  }
+  const row = value as OwnerCommentJsonRecord;
+  if (
+    !isCommentId(row.commentId)
+  ) {
+    throw new Error("Malformed owner Comment projection");
+  }
+  const comment = mapCommentJson({
+    body: row.body,
+    displayName: row.displayName,
+    createdAtMs: row.createdAtMs,
+  });
+  return { commentId: row.commentId as CommentId, ...comment };
+}
+
+function validateCommentOrder(
+  comments: readonly CommentView[],
+  ownerComments: readonly OwnerCommentView[] | null,
+): void {
+  for (let index = 1; index < comments.length; index += 1) {
+    if (comments[index - 1]!.createdAtMs < comments[index]!.createdAtMs) {
+      throw new Error("Malformed Comment projection order");
+    }
+  }
+  if (ownerComments === null) {
+    return;
+  }
+  if (
+    ownerComments.length !== comments.length ||
+    ownerComments.some((ownerComment, index) => {
+      const comment = comments[index];
+      return (
+        comment === undefined ||
+        ownerComment.body !== comment.body ||
+        ownerComment.displayName !== comment.displayName ||
+        ownerComment.createdAtMs !== comment.createdAtMs
+      );
+    })
+  ) {
+    throw new Error("Malformed owner Comment projection");
+  }
+}
+
 // Results reads (AD-9, AD-21): the access envelope resolves entitlement with
 // no result-shape fields, and the private tally projection runs only after
 // the Results module has authorized a `visible` outcome. The adapter stays
@@ -1303,16 +1435,23 @@ export function createResultsPersistence(db: D1Database) {
       return row.representation_version;
     },
 
-    // The one accepted-fact Tally projection (AD-9, NFR-6): body counts and
-    // representation_version come from this same statement/snapshot, so a
-    // concurrent Vote can never give an older Tally a newer validator.
-    async projectVersionedTally(
+    // The accepted-fact Results projection (AD-9/AD-21): Tally, complete
+    // ordered Comment list, optional owner moderation targets, and version
+    // come from one statement/snapshot. Public/live callers pass false so a
+    // Comment identifier never enters their adapter result.
+    async projectVersionedResults(
       pollId: PollId,
-    ): Promise<VersionedResultsTallyProjection | null> {
+      includeOwnerModeration = false,
+    ): Promise<VersionedResultsProjection | null> {
       const rows = await db
         .prepare(
           `WITH target_votes AS MATERIALIZED (
              SELECT id FROM vote WHERE poll_id = ?1
+           ),
+           target_comments AS MATERIALIZED (
+             SELECT vc.id, vc.body, vc.display_name, vc.created_at_ms
+             FROM target_votes tv
+             JOIN vote_comment vc ON vc.vote_id = tv.id
            ),
            valid_selections AS MATERIALIZED (
              SELECT vs.poll_option_id
@@ -1336,7 +1475,32 @@ export function createResultsPersistence(db: D1Database) {
              COALESCE(oc.option_count, 0) AS option_count,
              totals.voter_count AS voter_count,
              totals.selection_count AS selection_count,
-             p.representation_version AS representation_version
+             p.representation_version AS representation_version,
+             (
+               SELECT json_group_array(json_object(
+                 'body', ordered.body,
+                 'displayName', ordered.display_name,
+                 'createdAtMs', ordered.created_at_ms
+               ))
+               FROM (
+                 SELECT body, display_name, created_at_ms
+                 FROM target_comments
+                 ORDER BY created_at_ms DESC, id DESC
+               ) AS ordered
+             ) AS comments_json,
+             CASE WHEN ?2 = 1 THEN (
+               SELECT json_group_array(json_object(
+                 'commentId', ordered.id,
+                 'body', ordered.body,
+                 'displayName', ordered.display_name,
+                 'createdAtMs', ordered.created_at_ms
+               ))
+               FROM (
+                 SELECT id, body, display_name, created_at_ms
+                 FROM target_comments
+                 ORDER BY created_at_ms DESC, id DESC
+               ) AS ordered
+             ) ELSE NULL END AS owner_comments_json
            FROM poll p
            CROSS JOIN totals
            LEFT JOIN poll_option po ON po.poll_id = p.id
@@ -1344,7 +1508,7 @@ export function createResultsPersistence(db: D1Database) {
            WHERE p.id = ?1
            ORDER BY po.position`,
         )
-        .bind(pollId)
+        .bind(pollId, includeOwnerModeration ? 1 : 0)
         .all<{
           id: PollOptionId | null;
           label: string | null;
@@ -1353,6 +1517,8 @@ export function createResultsPersistence(db: D1Database) {
           voter_count: number;
           selection_count: number;
           representation_version: number;
+          comments_json: string;
+          owner_comments_json: string | null;
         }>();
 
       // Fail closed on malformed rows: a misleading percentage or validator
@@ -1377,6 +1543,15 @@ export function createResultsPersistence(db: D1Database) {
         )
       ) {
         throw new Error("Malformed representation version");
+      }
+      if (
+        rows.results.some(
+          (row) =>
+            row.comments_json !== first.comments_json ||
+            row.owner_comments_json !== first.owner_comments_json,
+        )
+      ) {
+        throw new Error("Malformed Comment projection snapshot");
       }
       if (first.id === null) {
         throw new Error(
@@ -1425,24 +1600,274 @@ export function createResultsPersistence(db: D1Database) {
           "Malformed tally projection: option count exceeds Voters",
         );
       }
+      const comments = parseJsonRecords(
+        first.comments_json,
+        "Comment",
+      ).map(mapCommentJson);
+      const ownerComments = includeOwnerModeration
+        ? parseJsonRecords(
+            first.owner_comments_json,
+            "owner Comment",
+          ).map(mapOwnerCommentJson)
+        : null;
+      validateCommentOrder(comments, ownerComments);
       return {
         representationVersion: first.representation_version,
         options,
         voterCount,
         selectionCount,
+        comments,
+        ownerComments,
       };
+    },
+
+    // Narrow compatibility methods keep adapter consumers which need only a
+    // Tally from widening their contract. They still use the same coherent
+    // SQL statement; the extra purpose-shaped fields are dropped here.
+    async projectVersionedTally(
+      pollId: PollId,
+    ): Promise<VersionedResultsTallyProjection | null> {
+      const projection = await this.projectVersionedResults(pollId, false);
+      if (!projection) {
+        return null;
+      }
+      const {
+        comments: _comments,
+        ownerComments: _ownerComments,
+        ...tally
+      } = projection;
+      return tally;
+    },
+
+    async projectResults(
+      pollId: PollId,
+      includeOwnerModeration: boolean,
+    ): Promise<VersionedResultsProjection | null> {
+      const projection = await this.projectVersionedResults(
+        pollId,
+        includeOwnerModeration,
+      );
+      return projection;
     },
 
     // Full-page Results consumes the exact same SQL projection and simply
     // drops the live-only version after the adapter has validated it.
     async projectTally(pollId: PollId): Promise<ResultsTallyProjection> {
-      const projection = await this.projectVersionedTally(pollId);
+      const projection = await this.projectVersionedResults(pollId, false);
       if (!projection) {
         return { options: [], voterCount: 0, selectionCount: 0 };
       }
-      const { representationVersion: _representationVersion, ...tally } =
-        projection;
-      return tally;
+      return {
+        options: projection.options,
+        voterCount: projection.voterCount,
+        selectionCount: projection.selectionCount,
+      };
+    },
+  };
+}
+
+// Voting-owned Comment moderation adapter (AD-19/AD-24). Both delete paths
+// recheck authority in the same D1 batch that removes only vote_comment and
+// advances the Poll representation version exactly once.
+export function createCommentModerationPersistence(db: D1Database) {
+  const liveAdministrator = async (actorUserId: UserId): Promise<boolean> => {
+    const row = await db
+      .prepare("SELECT role FROM user WHERE id = ?1")
+      .bind(actorUserId)
+      .first<{ role: unknown }>();
+    return row?.role === "administrator";
+  };
+
+  const findTarget = async (
+    actorUserId: UserId,
+    commentId: CommentId,
+    mode: "owner" | "administrator",
+  ): Promise<{ pollId: PollId; canonicalReference: string } | null> => {
+    const authority =
+      mode === "owner"
+        ? "p.owner_user_id = ?2"
+        : "EXISTS (SELECT 1 FROM user u WHERE u.id = ?2 AND u.role = 'administrator')";
+    const row = await db
+      .prepare(
+        `SELECT p.id, canonical.reference AS canonical_reference
+         FROM vote_comment vc
+         JOIN vote v ON v.id = vc.vote_id
+         JOIN poll p ON p.id = v.poll_id
+         JOIN poll_reference canonical
+           ON canonical.poll_id = p.id AND canonical.is_canonical = 1
+         WHERE vc.id = ?1 AND ${authority}
+         LIMIT 1`,
+      )
+      .bind(commentId, actorUserId)
+      .first<{ id: PollId; canonical_reference: unknown }>();
+    if (!row) {
+      return null;
+    }
+    if (
+      typeof row.canonical_reference !== "string" ||
+      row.canonical_reference.length < 1 ||
+      row.canonical_reference.length > 128
+    ) {
+      throw new Error("Malformed Comment moderation canonical reference");
+    }
+    return {
+      pollId: row.id,
+      canonicalReference: row.canonical_reference,
+    };
+  };
+
+  const deleteGuarded = async (
+    input: {
+      actorUserId: UserId;
+      commentId: CommentId;
+      updatedAtMs: number;
+    },
+    mode: "owner" | "administrator",
+  ): Promise<CommentModerationPersistenceOutcome> => {
+    const target = await findTarget(
+      input.actorUserId,
+      input.commentId,
+      mode,
+    );
+    if (target === null) {
+      if (
+        mode === "administrator" &&
+        !(await liveAdministrator(input.actorUserId))
+      ) {
+        return { kind: "authorization_denied" };
+      }
+      return { kind: "not_found" };
+    }
+    const { pollId, canonicalReference } = target;
+
+    const pollAuthority =
+      mode === "owner"
+        ? "poll.owner_user_id = ?3"
+        : "EXISTS (SELECT 1 FROM user u WHERE u.id = ?3 AND u.role = 'administrator')";
+    const commentAuthority =
+      mode === "owner"
+        ? "p.owner_user_id = ?3"
+        : "EXISTS (SELECT 1 FROM user u WHERE u.id = ?3 AND u.role = 'administrator')";
+    const canonicalGuard =
+      "EXISTS (SELECT 1 FROM poll_reference canonical WHERE canonical.poll_id = poll.id AND canonical.is_canonical = 1 AND typeof(canonical.reference) = 'text' AND length(canonical.reference) BETWEEN 1 AND 128)";
+    const [versionResult, deleteResult] = await db.batch([
+      db
+        .prepare(
+          `UPDATE poll
+           SET representation_version = representation_version + 1,
+               updated_at_ms = ?4
+           WHERE id = ?1
+             AND ${pollAuthority}
+             AND ${canonicalGuard}
+             AND EXISTS (
+               SELECT 1
+               FROM vote_comment vc
+               JOIN vote v ON v.id = vc.vote_id
+               WHERE vc.id = ?2 AND v.poll_id = poll.id
+             )`,
+        )
+        .bind(pollId, input.commentId, input.actorUserId, input.updatedAtMs),
+      db
+        .prepare(
+          `DELETE FROM vote_comment
+           WHERE id = ?2
+             AND EXISTS (
+               SELECT 1
+               FROM vote v
+               JOIN poll p ON p.id = v.poll_id
+               WHERE v.id = vote_comment.vote_id
+                 AND p.id = ?1
+                 AND ${commentAuthority}
+                 AND EXISTS (
+                   SELECT 1 FROM poll_reference canonical
+                   WHERE canonical.poll_id = p.id
+                     AND canonical.is_canonical = 1
+                     AND typeof(canonical.reference) = 'text'
+                     AND length(canonical.reference) BETWEEN 1 AND 128
+                 )
+             )`,
+        )
+        .bind(pollId, input.commentId, input.actorUserId),
+    ]);
+
+    const versionChanges = versionResult.meta.changes ?? 0;
+    const deleteChanges = deleteResult.meta.changes ?? 0;
+    if (versionChanges === 1 && deleteChanges === 1) {
+      return {
+        kind: "deleted",
+        pollId,
+        canonicalReference,
+      };
+    }
+    if (versionChanges === 0 && deleteChanges === 0) {
+      if (
+        mode === "administrator" &&
+        !(await liveAdministrator(input.actorUserId))
+      ) {
+        return { kind: "authorization_denied" };
+      }
+      return { kind: "not_found" };
+    }
+    throw new Error("Comment moderation transaction mismatch");
+  };
+
+  return {
+    async loadForAdministrator(
+      actorUserId: UserId,
+      pollId: PollId,
+    ): Promise<AdministratorCommentLoadOutcome> {
+      const row = await db
+        .prepare(
+          `WITH authorized AS (
+             SELECT 1 AS allowed
+             FROM user
+             WHERE id = ?1 AND role = 'administrator'
+           )
+           SELECT
+             EXISTS(SELECT 1 FROM authorized) AS authorized,
+             CASE WHEN EXISTS(SELECT 1 FROM authorized) THEN (
+               SELECT json_group_array(json_object(
+                 'commentId', ordered.id,
+                 'body', ordered.body,
+                 'displayName', ordered.display_name,
+                 'createdAtMs', ordered.created_at_ms
+               ))
+               FROM (
+                 SELECT vc.id, vc.body, vc.display_name, vc.created_at_ms
+                 FROM vote v
+                 JOIN vote_comment vc ON vc.vote_id = v.id
+                 WHERE v.poll_id = ?2
+                 ORDER BY vc.created_at_ms DESC, vc.id DESC
+               ) AS ordered
+             ) ELSE NULL END AS comments_json`,
+        )
+        .bind(actorUserId, pollId)
+        .first<{ authorized: number; comments_json: string | null }>();
+      if (row?.authorized !== 1) {
+        return { kind: "authorization_denied" };
+      }
+      const comments = parseJsonRecords(
+        row.comments_json,
+        "Administrator Comment",
+      ).map(mapOwnerCommentJson);
+      validateCommentOrder(comments, comments);
+      return { kind: "found", comments };
+    },
+
+    deleteForOwner(input: {
+      actorUserId: UserId;
+      commentId: CommentId;
+      updatedAtMs: number;
+    }): Promise<CommentModerationPersistenceOutcome> {
+      return deleteGuarded(input, "owner");
+    },
+
+    deleteForAdministrator(input: {
+      actorUserId: UserId;
+      commentId: CommentId;
+      updatedAtMs: number;
+    }): Promise<CommentModerationPersistenceOutcome> {
+      return deleteGuarded(input, "administrator");
     },
   };
 }

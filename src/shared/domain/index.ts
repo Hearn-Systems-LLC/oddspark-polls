@@ -7,6 +7,7 @@ type Branded<T, B> = T & { readonly [brand]: B };
 
 export type PollId = Branded<string, "PollId">;
 export type PollOptionId = Branded<string, "PollOptionId">;
+export type CommentId = Branded<string, "CommentId">;
 export type UserId = Branded<string, "UserId">;
 
 export const POLL_TYPES = [

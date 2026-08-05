@@ -7,7 +7,7 @@ paradigm: 'Hexagonal modular monolith'
 scope: 'Whole-product architecture governing independently implemented Oddspark Polls epics'
 status: final
 created: '2026-07-29'
-updated: '2026-08-04'
+updated: '2026-08-05'
 binds:
   - 'FR-1..FR-28'
   - 'UJ-1..UJ-7'
@@ -19,6 +19,7 @@ sources:
   - 'User direction on public creation, voting, discovery, and sharing, 2026-07-29'
   - 'Story 3.3 Administrator delisting decisions, ratified 2026-08-04'
   - 'Story 4.1 Comment With Your Vote implementation, ratified 2026-08-04'
+  - 'Story 4.2 Comment List and Moderation implementation, ratified 2026-08-05'
   - '../../prds/prd-oddspark-polls-2026-07-28/prd.md'
   - '../../prds/prd-oddspark-polls-2026-07-28/addendum.md'
   - '../../ux-designs/ux-oddspark-polls-2026-07-28/DESIGN.md'
@@ -284,8 +285,10 @@ sequenceDiagram
   digests, Comment bodies, display names, ballot content, or Voter Codes. D1 Time Travel is the
   database recovery floor—7 days on Workers Free or 30 days on Workers Paid.
   After a restore, reconcile R2 from D1 ownership records. Moderation emits
-  exactly one fixed, method-qualified `GET /creator/moderation` or
-  `POST /creator/moderation` operation. Explicit request-context flags classify
+  exactly one fixed, method-qualified `GET /creator/moderation`,
+  `POST /creator/moderation`, or `POST /creator/comments/delete` operation.
+  Comment text, display names, Comment IDs, and submitted references remain
+  forbidden even on that mutation. Explicit request-context flags classify
   central-boundary `csrf_rejected` separately from capability
   `authorization_denied`; an unflagged 403 is neither. After authorized lookup,
   telemetry may correlate the internal Poll ID, but never logs a submitted
@@ -349,7 +352,12 @@ sequenceDiagram
   `modules/comments` capability canonicalizes Comment/display-name input and
   returns a typed `vote_comment` contribution; only the D1 voting adapter maps
   that contribution into storage alongside normalized contributions returned
-  by Poll Type and Security policy ports.
+  by Poll Type and Security policy ports. The same capability owns the only
+  legal `DeleteCommentAsOwner` and `DeleteCommentAsAdministrator` commands.
+  Their D1 adapter rechecks Poll ownership or the live Administrator role in
+  the atomic batch that deletes only `vote_comment` and increments the Poll's
+  representation version exactly once; denials, stale targets, and failures
+  change neither.
   `ResetDemoPoll` is the only additional cross-capability coordinator. The
   provider-free `polls/demo-poll` policy owns designation, fixed-template
   validation, and reset eligibility; the D1 Demo replacement adapter owns the
@@ -388,6 +396,12 @@ sequenceDiagram
   That attendance count is not Tally authorization; option/round counts,
   percentages, selections, result visibility, Comments, owner identity, and
   internal Poll IDs never enter the public projection or cache.
+  A visible Results read projects its Tally, complete newest-first public
+  Comment list, and representation version from one D1 snapshot. Only the Poll
+  owner receives the aligned moderation projection with Comment IDs. The
+  Administrator's exact-reference operator query is a separate live-role-
+  guarded purpose projection containing Comments but no Tally, Vote, owner, or
+  security facts; it is not a Results visibility entitlement or enumeration.
 
 ### AD-22 — Every browser mutation crosses one CSRF boundary
 

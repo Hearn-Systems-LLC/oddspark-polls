@@ -2,8 +2,8 @@
 title: 'Story 4.2: Comment List & Moderation'
 type: 'feature'
 created: '2026-08-05T00:55:35-04:00'
-status: 'in-review'
-baseline_revision: '78a32724c780187c842732f7f5271be85b3c1830'
+status: 'done'
+baseline_revision: '79cae97988ef3f9e4e48c790dedcf6b1d4bfb6b1'
 review_loop_iteration: 1
 followup_review_recommended: false
 context:
@@ -52,15 +52,15 @@ warnings:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/shared/domain/index.ts`, `src/modules/comments/index.ts`, `src/modules/results/index.ts` -- define branded/purpose-shaped Comment views and separate owner/Administrator commands; keep visibility authorization ahead of projection and mutation policy provider-free.
-- [ ] `src/adapters/d1/index.ts` -- project the complete ordered list with the Tally/version coherently and implement owner/live-role-guarded atomic deletions with safe race classification; do not change schema.
-- [ ] `src/components/comment-list.astro`, `src/pages/[reference]/results.astro`, `src/lib/poll-delivery.ts`, `src/components/poll-voting-surface.astro` -- render escaped lists on every visible Tally surface, owner-only delete affordances, anonymous fallback, and no empty placeholder.
-- [ ] `src/lib/comment-moderation-form.ts`, `src/pages/creator/comments/delete.ts`, `src/pages/creator/moderation.astro`, `src/middleware.ts`, `src/adapters/telemetry/index.ts` -- add strict fixed-field owner deletion and extend the exact-reference operator desk with separate Comment moderation, CSRF/PRG, privacy-safe errors, and fixed redacted operations.
-- [ ] `src/pages/[reference]/results/live.ts`, `src/scripts/results-live-core.ts`, `src/scripts/results-live.ts`, `src/scripts/overlay.ts` -- validate Comment payloads and trigger one bounded reload on Comment changes while preserving overlay trap, Escape/scrim close, scroll lock, and focus return.
-- [ ] `tests/unit/`, `tests/integration/` -- cover visibility-before-read, ordering/ties, malformed/plain-text projection, command separation, strict forms, owner/admin/role-revocation authorization, rollback, missing/concurrent deletion, exact version changes, telemetry redaction, and live invalidation.
-- [ ] `tests/e2e/` -- prove direct/post-vote lists, visibility matrices, owner and Administrator deletion, no-JS and keyboard overlays, live stale removal, hostile text, responsive light/dark screenshots, and a clean console.
-- [ ] `CHANGELOG.md`, `README.md`, `_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md`, `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/EXPERIENCE.md` -- record shipped lists, the Voting-owned moderation seam, operator-purpose projection, and updated exact-reference operator state.
-- [ ] Full diff/gate verification -- before returning to review, confirm every production file named above is present in the baseline diff, no new component or route is orphaned, `sprint-status.yaml` agrees with the spec, and the full documented local gate passes.
+- [x] `src/shared/domain/index.ts`, `src/modules/comments/index.ts`, `src/modules/results/index.ts` -- define branded/purpose-shaped Comment views and separate owner/Administrator commands; keep visibility authorization ahead of projection and mutation policy provider-free.
+- [x] `src/adapters/d1/index.ts` -- project the complete ordered list with the Tally/version coherently and implement owner/live-role-guarded atomic deletions with safe race classification; do not change schema.
+- [x] `src/components/comment-list.astro`, `src/pages/[reference]/results.astro`, `src/lib/poll-delivery.ts`, `src/components/poll-voting-surface.astro` -- render escaped lists on every visible Tally surface, owner-only delete affordances, anonymous fallback, and no empty placeholder.
+- [x] `src/lib/comment-moderation-form.ts`, `src/pages/creator/comments/delete.ts`, `src/pages/creator/moderation.astro`, `src/middleware.ts`, `src/adapters/telemetry/index.ts` -- add strict fixed-field owner deletion and extend the exact-reference operator desk with separate Comment moderation, CSRF/PRG, privacy-safe errors, and fixed redacted operations.
+- [x] `src/pages/[reference]/results/live.ts`, `src/scripts/results-live-core.ts`, `src/scripts/results-live.ts`, `src/scripts/overlay.ts` -- validate Comment payloads and trigger one bounded reload on Comment changes while preserving overlay trap, Escape/scrim close, scroll lock, and focus return.
+- [x] `tests/unit/`, `tests/integration/` -- cover visibility-before-read, ordering/ties, malformed/plain-text projection, command separation, strict forms, owner/admin/role-revocation authorization, rollback, missing/concurrent deletion, exact version changes, telemetry redaction, and live invalidation.
+- [x] `tests/e2e/` -- prove direct/post-vote lists, visibility matrices, owner and Administrator deletion, no-JS and keyboard overlays, live stale removal, hostile text, responsive light/dark screenshots, and a clean console.
+- [x] `CHANGELOG.md`, `README.md`, `_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md`, `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/EXPERIENCE.md` -- record shipped lists, the Voting-owned moderation seam, operator-purpose projection, and updated exact-reference operator state.
+- [x] Full diff/gate verification -- before returning to review, confirm every production file named above is present in the baseline diff, no new component or route is orphaned, `sprint-status.yaml` agrees with the spec, and the full documented local gate passes.
 
 **Acceptance Criteria:**
 - Given a viewer can see a Poll's Tally, when any Results surface renders or refreshes, then its complete Comment list renders newest first with safe required typography and anonymous fallback; given the Tally is withheld, no Comment fact is projected.
@@ -70,6 +70,12 @@ warnings:
 - Given tests, telemetry, Discovery, and public HTML are inspected, when hostile Comment data and moderation identifiers pass through the feature, then text is inert and private Vote/security facts, Comment IDs, bodies, names, and submitted references never cross forbidden boundaries.
 
 ## Spec Change Log
+
+### 2026-08-05 — Complete re-derived implementation
+
+- Implemented and wired every production path named by the code map from baseline `79cae97988ef3f9e4e48c790dedcf6b1d4bfb6b1`.
+- Added unit, workerd integration, and browser proof for the visibility, authority, atomicity, live invalidation, no-JavaScript, accessibility, privacy, and hostile-text contracts.
+- Returned the story and sprint tracker to `review` only after the complete documented local gate passed.
 
 ### 2026-08-05 — Re-derive after incomplete implementation review
 
@@ -126,3 +132,67 @@ Administrator Comment moderation is a purpose-specific exception to ordinary Res
 - `pnpm migrations:guard && pnpm test && pnpm check` -- all schema, unit, workerd integration, and type checks pass.
 - `pnpm test:e2e` -- browser behavior, accessibility, screenshots, live invalidation, and console proof pass.
 - `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check` -- bindings remain stable and the shipping artifact builds cleanly.
+
+## Dev Agent Record
+
+### Completion Notes
+
+- Added purpose-shaped public, owner, and Administrator Comment projections without changing schema or weakening Results visibility.
+- Added Voting-owned owner/Administrator delete commands backed by D1 authority rechecks, Comment-only deletion, and one atomic representation-version increment.
+- Wired direct Results, post-vote Results, exact-reference Administrator moderation, strict CSRF/PRG delivery, fixed telemetry operations, and bounded live reload.
+- Proved the shared overlay and native no-JavaScript floor, hostile-text escaping, responsive light/dark presentation, clean browser console, stale-tab removal, and preserved Vote counts.
+- Full gate evidence: migration guard `12/12`; Vitest `92` files / `1315` tests; Playwright `160/160`; type check, generated binding drift, production build, and `git diff --check` all green.
+
+### Debug Log
+
+- The first focused browser run exposed a test interaction that targeted the hidden radio instead of the product's option row; the test now asserts checked/enabled state immediately.
+- The first full E2E run exposed a motion test's synthetic live payload missing the new required `comments` field. Adding `comments: []` restored the strict public payload contract; the motion file then passed `16/16` and the fresh full suite passed `160/160`.
+
+### File List
+
+- `.gitignore`
+- `CHANGELOG.md`
+- `README.md`
+- `_bmad-output/implementation-artifacts/spec-4-2-comment-list-moderation.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `_bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md`
+- `_bmad-output/planning-artifacts/ux-designs/ux-oddspark-polls-2026-07-28/EXPERIENCE.md`
+- `src/adapters/d1/index.ts`
+- `src/adapters/telemetry/index.ts`
+- `src/components/comment-list.astro`
+- `src/components/overlay.astro`
+- `src/components/poll-voting-surface.astro`
+- `src/lib/comment-moderation-form.ts`
+- `src/lib/poll-delivery.ts`
+- `src/middleware.ts`
+- `src/modules/comments/index.ts`
+- `src/modules/results/index.ts`
+- `src/pages/[reference]/results.astro`
+- `src/pages/[reference]/results/live.ts`
+- `src/pages/creator/comments/delete.ts`
+- `src/pages/creator/moderation.astro`
+- `src/scripts/overlay.ts`
+- `src/scripts/results-live-core.ts`
+- `src/scripts/results-live.ts`
+- `src/shared/domain/index.ts`
+- `test-results/story-4-2-comment-moderation-proof/administrator-desk-1280-dark.png`
+- `test-results/story-4-2-comment-moderation-proof/administrator-desk-1280-light.png`
+- `test-results/story-4-2-comment-moderation-proof/administrator-desk-375-dark.png`
+- `test-results/story-4-2-comment-moderation-proof/administrator-desk-375-light.png`
+- `test-results/story-4-2-comment-moderation-proof/owner-results-1280-dark.png`
+- `test-results/story-4-2-comment-moderation-proof/owner-results-1280-light.png`
+- `test-results/story-4-2-comment-moderation-proof/owner-results-375-dark.png`
+- `test-results/story-4-2-comment-moderation-proof/owner-results-375-light.png`
+- `tests/e2e/comment-list-moderation.spec.mjs`
+- `tests/e2e/motion.spec.mjs`
+- `tests/integration/comment-moderation-persistence.integration.test.ts`
+- `tests/integration/comment-moderation-route.integration.test.ts`
+- `tests/integration/live-results-route.integration.test.ts`
+- `tests/unit/comment-moderation-form.test.ts`
+- `tests/unit/comments-moderation.test.ts`
+- `tests/unit/overlay.test.mjs`
+- `tests/unit/results-comments.test.ts`
+- `tests/unit/results-live-payload.test.ts`
+- `tests/unit/results.test.ts`
+- `tests/unit/telemetry.test.ts`
+- `tests/unit/trust-badge.test.mjs`

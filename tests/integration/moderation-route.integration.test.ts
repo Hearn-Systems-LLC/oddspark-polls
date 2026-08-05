@@ -535,6 +535,42 @@ describe("/creator/moderation strict lookup and command contract", () => {
     expect(context.locals.requestContext?.pollId).toBe(poll.pollId);
   });
 
+  it("keeps Discovery moderation usable when Comment projection fails", async () => {
+    const actor = await createAuthenticatedCookie("administrator");
+    const owner = await insertOwner();
+    const poll = await seedPoll({ ownerUserId: owner.userId });
+    const csrfToken = await csrfFor(actor.cookie);
+    const voteId = crypto.randomUUID();
+    const nowMs = Date.now();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        "UPDATE poll SET comments_enabled = 1 WHERE id = ?1",
+      ).bind(poll.pollId),
+      testEnv.DB.prepare(
+        "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+      ).bind(voteId, poll.pollId, crypto.randomUUID(), "malformed-comment-hash", nowMs),
+      testEnv.DB.prepare(
+        "INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (?1, ?2, ' malformed ', NULL, ?3)",
+      ).bind(crypto.randomUUID(), voteId, nowMs),
+    ]);
+
+    const { response } = await dispatch(
+      postRequest(actor.cookie, csrfToken, "delist", poll.alias),
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toContain(
+      `target=${encodeURIComponent(poll.canonical)}`,
+    );
+    expect(await persistedModeration(poll.pollId)).toEqual({
+      state: "delisted",
+      actions: [{
+        action: "delist",
+        next_state: "delisted",
+        prior_state: "listed",
+      }],
+    });
+  });
+
   it("rejects duplicate, missing, unknown, and oversized query values safely", async () => {
     const actor = await createAuthenticatedCookie("administrator");
     const secret = `query-private-${crypto.randomUUID()}`;

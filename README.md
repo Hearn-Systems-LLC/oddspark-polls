@@ -340,6 +340,7 @@ runbook, configuration, CI output, or commit history.
 - `src/lib` — delivery composition and cross-route helpers
 - `src/layouts` / `src/styles` — document shells and design-token expression
 - `src/modules/*` — provider-free capability policy and application seams
+- `src/shared/*` — provider-free domain values and application contracts shared across capabilities
 - `src/adapters/*` — D1, cache, auth, digest, Turnstile, rate-limit, and telemetry adapters
 - `db/migrations` — forward-only D1 SQL
 - `tests/{unit,integration,e2e}` — Node, workerd, and browser proof

@@ -1999,6 +1999,8 @@ test.describe("public voting flow", () => {
     await page.screenshot({
       path: `${proofDir}/voting-375-dark.png`,
       fullPage: true,
+      mask: [page.locator("[data-share-url-text]")],
+      maskColor: "#4b5563",
     });
 
     await page.emulateMedia({ colorScheme: "light" });
@@ -2008,6 +2010,8 @@ test.describe("public voting flow", () => {
     await page.screenshot({
       path: `${proofDir}/voting-1280-light.png`,
       fullPage: true,
+      mask: [page.locator("[data-share-url-text]")],
+      maskColor: "#4b5563",
     });
 
     expect(failedResponses).toEqual([]);

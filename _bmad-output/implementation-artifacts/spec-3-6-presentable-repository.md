@@ -2,10 +2,10 @@
 title: 'Story 3.6: Presentable Repository'
 type: 'feature'
 created: '2026-08-04'
-status: 'review'
+status: 'in-review'
 baseline_revision: 'd1ff258353cfff04979b71c8d8503a54ee7b77b8'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/3-6-presentable-repository.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
@@ -77,6 +77,22 @@ warnings: [multiple-goals, oversized]
 
 ## Review Triage Log
 
+### 2026-08-04 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 8: (high 0, medium 3, low 5)
+- defer: 0
+- reject: 3: (high 0, medium 0, low 3)
+- addressed_findings:
+  - `[medium]` `[patch]` Made the all-ref audit reproducible, recorded the safe remote ref/tip and post-scan equality, and required every detector/content/metadata layer to repeat after the final review commit.
+  - `[medium]` `[patch]` Redacted generated canonical Poll references from committed browser proof and narrowed the proof allowlist to the four approved filenames.
+  - `[medium]` `[patch]` Added Creator-Only hidden-state, auth/creator/operator exclusion, and Results network-failure coverage around the shared footer.
+  - `[low]` `[patch]` Broadened the tracked scanner-report guard to recognize audit/scan/report directories and generic report basenames within them.
+  - `[low]` `[patch]` Proved the canonical repository URL occurs in exactly one Astro presentation source.
+  - `[low]` `[patch]` Added the omitted `src/shared/*` domain/application seam to the evaluator project map.
+  - `[low]` `[patch]` Corrected the exact `key-screens` trigger explanation for the sole Gitleaks fingerprint.
+  - `[low]` `[patch]` Made the local-gate source contract assert the required command order inside the verification section.
+
 ## Design Notes
 
 The shared component owns presentation configuration only. Footer placement stays outside live-tally and Share replacement regions; the voting consumer uses `!embedded`, and Results renders it only inside the existing non-404 branch. This avoids changing Poll policy, authorization, or live reconciliation.
@@ -95,7 +111,7 @@ The product baseline is Story 3.5 at `a002caba`; current `origin/main` is `cf789
 - Inspect focused voting/Results screenshots in both required modes/viewports and record clean console/network observations.
 
 **Fresh implementation results (Node 24.18.0 / pnpm 11.17.0):**
-- Migration guard: 11/11 files checksummed; Vitest: 85 files / 1,255 tests passed; Playwright: 154/154 passed.
+- Migration guard: 11/11 files checksummed; Vitest: 85 files / 1,255 tests passed; post-review Playwright: 155/155 passed.
 - TypeScript check, Wrangler type generation, binding drift check, production build, and whitespace check passed.
 - Focused voting/Results browser proof passed 5/5 with inspected 375px dark and 1280px light screenshots; console/network observations were clean.
 - Gitleaks 8.30.1 fully redacted all-history scan passed with zero prohibited findings after one exact generated-manifest-hash false-positive fingerprint; independent path/content/metadata classification found no prohibited data blocker.
@@ -103,10 +119,18 @@ The product baseline is Story 3.5 at `a002caba`; current `origin/main` is `cf789
 
 ## Auto Run Result
 
-Status: review; implementation and local/external evidence are complete.
+Status: in review; implementation is complete and review-driven evidence hardening is applied.
 
 Resolved condition: on 2026-08-04 the owner formally permitted intentional public GitHub commit attribution under FR-27. Credentials, tokens, runtime/user data, and unrelated or accidental personal data remain prohibited. The authoritative PRD, Epic 3 Story 3.6, implementation brief, and this intent contract now agree; no history rewrite is required solely for intentional attribution.
 
 Value-hidden continuity evidence: the authoritative public remote advertised one head and no tags with 84 reachable commits at the blocked planning pass. Attribution metadata remains an audit classification input, not a prohibited finding by itself. No remote mutation, history rewrite, dependency installation, or unredacted secret scan was performed during policy reconciliation.
 
-Implementation result: the permission-restricted mirror plus unpushed Story HEAD contained 89 reachable commits at the implementation scan. Pinned Gitleaks 8.30.1 exited `0` with zero prohibited findings under full redaction and an exact generated-manifest-hash false-positive fingerprint. Separate historical path/content/metadata review found no credential, token, runtime/user-data, or unrelated/accidental-personal-data blocker. The exact local gate passed, browser proof was inspected, and the Story is ready for independent review. No remote mutation, deploy, history rewrite, or security-setting change was performed.
+Implementation result: the permission-restricted mirror plus unpushed Story HEAD contained 89 reachable commits at the implementation scan. Pinned Gitleaks 8.30.1 exited `0` with zero prohibited findings under full redaction and an exact generated-manifest-hash false-positive fingerprint. Separate historical path/content/metadata review found no credential, token, runtime/user-data, or unrelated/accidental-personal-data blocker. The exact local gate passed, browser proof was inspected, and the Story reached independent review. Review then redacted generated Poll references from proof, strengthened surface/network/repository contracts, narrowed proof-file tracking, corrected evaluator prose, and recorded the exact terminal audit procedure. No remote mutation, deploy, history rewrite, or security-setting change was performed.
+
+Files changed: evaluator-facing README/package/architecture/UX/deferred-ledger documentation; one shared server-rendered repository-link component and its landing/voting/Results consumers; structural and browser tests; four redacted proof screenshots; one exact Gitleaks fingerprint; and BMad story/status evidence.
+
+Review findings: eight patches applied (three medium, five low), no items deferred, and three low-consequence findings rejected after direct evidence showed an existing After-Close assertion, a completed 91-commit Gitleaks/metadata pass, and no bearer capability URL. The remaining final-HEAD content-classification gap is addressed by repeating every audit layer after the review commits. Follow-up review is recommended because the review changed security evidence, committed binary proof, and multiple E2E contracts.
+
+Verification: the post-review exact gate passed (migrations 11/11, Vitest 85 files/1,255 tests, Playwright 155/155, TypeScript, generated-binding drift, production build, and whitespace checks). Review-focused unit coverage passed 56 files/946 tests; focused E2E coverage passed for excluded surfaces, Creator-Only Results, and both proof journeys after one expected live-request cancellation was explicitly classified. Both required redacted proof silhouettes were inspected. The terminal value-hidden audit remains required after the final review commit.
+
+Residual risk: GitHub-native secret scanning and push protection remain disabled and require separate remote-setting authority. They are defense-in-depth, not an AC substitute. No push, deploy, or remote mutation occurred.

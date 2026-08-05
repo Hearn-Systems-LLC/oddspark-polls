@@ -534,6 +534,7 @@ test.describe("direct results route", () => {
     expect(anonymous.status()).toBe(200);
     const anonymousMain = mainHtmlOf(await anonymous.text());
     expect(anonymousMain).toContain("These results go to the Creator only.");
+    expect(anonymousMain).toContain("data-public-repository-footer");
     expectNoAggregateResultFacts(anonymousMain);
     expect(anonymousMain).not.toMatch(/sign in/iu);
 
@@ -552,6 +553,9 @@ test.describe("direct results route", () => {
     await page.goto(poll.path);
     await expect(
       page.getByRole("img", { name: "Alpha, 67 percent, 2 votes, leading" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "View the public repository" }),
     ).toBeVisible();
     await context.clearCookies();
   });
@@ -1057,6 +1061,18 @@ test.describe("direct results route", () => {
     const proofDir = "test-results/results-proof";
     const storyProofDir =
       "test-results/story-3-6-presentable-repository-proof";
+    const failedResponses = [];
+    const failedRequests = [];
+    page.on("response", (response) => {
+      if (response.status() >= 400) failedResponses.push(response.status());
+    });
+    page.on("requestfailed", (request) => {
+      const errorText = request.failure()?.errorText ?? "request failed";
+      // Moving between proof Polls intentionally closes the open live-results
+      // request. Everything else remains a proof failure.
+      if (errorText !== "net::ERR_ABORTED") failedRequests.push(errorText);
+    });
+    const canonicalUrl = page.locator("[data-share-url-text]");
 
     // Direct results with a unique leader — 375px, dark.
     const leader = seedPoll({
@@ -1105,6 +1121,8 @@ test.describe("direct results route", () => {
     await page.screenshot({
       path: `${storyProofDir}/results-375-dark.png`,
       fullPage: true,
+      mask: [canonicalUrl],
+      maskColor: "#4b5563",
     });
     await page.screenshot({
       path: `${proofDir}/direct-leader-375-dark.png`,
@@ -1146,6 +1164,8 @@ test.describe("direct results route", () => {
     await page.screenshot({
       path: `${storyProofDir}/results-1280-light.png`,
       fullPage: true,
+      mask: [canonicalUrl],
+      maskColor: "#4b5563",
     });
     await page.screenshot({
       path: `${proofDir}/direct-leader-1280-light.png`,
@@ -1205,6 +1225,8 @@ test.describe("direct results route", () => {
       path: `${proofDir}/post-vote-375-dark.png`,
       fullPage: true,
     });
+    expect(failedResponses).toEqual([]);
+    expect(failedRequests).toEqual([]);
   });
 
   test("sets requestContext.pollId for Results operations and keeps result facts out of telemetry", async ({

@@ -39,7 +39,7 @@ describe("public repository contract", () => {
   });
 
   it("documents the tour, fresh-clone run path, and complete local gate", () => {
-    for (const required of [
+    const required = [
       "## Product tour",
       "pnpm install",
       "./scripts/provision-auth-secrets.zsh local initialize",
@@ -53,9 +53,19 @@ describe("public repository contract", () => {
       "git diff --exit-code worker-configuration.d.ts",
       "pnpm build:production",
       "git diff --check",
-    ]) {
-      expect(readme).toContain(required);
+    ];
+    for (const requiredText of required) {
+      expect(readme).toContain(requiredText);
     }
+
+    const gateSection = readme.slice(
+      readme.indexOf("## Local verification gate"),
+      readme.indexOf("## Release and deploy gate"),
+    );
+    const gateCommands = required.slice(5);
+    const gatePositions = gateCommands.map((command) => gateSection.indexOf(command));
+    expect(gatePositions.every((position) => position >= 0)).toBe(true);
+    expect(gatePositions).toEqual([...gatePositions].sort((left, right) => left - right));
   });
 
   it("keeps package and every rendered repository entry on one presentation seam", () => {
@@ -84,6 +94,17 @@ describe("public repository contract", () => {
       "src/components/poll-voting-surface.astro",
       "src/pages/[reference]/results.astro",
     ]);
+
+    const hardCodedAstroSources = execFileSync(
+      "git",
+      ["grep", "-l", "-F", REPOSITORY_URL, "--", "src/**/*.astro"],
+      { encoding: "utf8" },
+    )
+      .trim()
+      .split("\n");
+    expect(hardCodedAstroSources).toEqual([
+      "src/components/public-repository-link.astro",
+    ]);
   });
 
   it("keeps scanner output and temporary audit artifacts out of tracked paths", () => {
@@ -95,7 +116,7 @@ describe("public repository contract", () => {
     expect(trackedPaths).not.toEqual(
       expect.arrayContaining([
         expect.stringMatching(
-          /(?:^|\/)(?:gitleaks|secret[-_.]?scan|history[-_.]?audit)(?:[-_.].*)?\.(?:json|sarif|csv|log|txt)$/iu,
+          /(?:^|\/)(?:\.?gitleaks|secret[-_.]?scan|history[-_.]?audit|security[-_.]?audit|audit|scan|reports?)(?:\/|[-_.].*)[^/]*\.(?:json|sarif|csv|log|txt)$/iu,
         ),
       ]),
     );

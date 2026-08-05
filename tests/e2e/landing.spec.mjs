@@ -193,6 +193,20 @@ test.describe("Landing page", () => {
     assertClean();
   });
 
+  test("keeps the Poll repository footer off auth and operator surfaces", async ({
+    page,
+  }) => {
+    for (const path of [
+      "/sign-in",
+      "/creator",
+      "/creator/new",
+      "/creator/moderation",
+    ]) {
+      await page.goto(path);
+      await expect(page.locator("[data-public-repository-footer]")).toHaveCount(0);
+    }
+  });
+
   test("persists the mode override and keeps focus in reading order", async ({
     page,
   }) => {

@@ -32,7 +32,10 @@ test-results/*
 !test-results/story-3-5-demo-poll-proof/
 !test-results/story-3-5-demo-poll-proof/*.png
 !test-results/story-3-6-presentable-repository-proof/
-!test-results/story-3-6-presentable-repository-proof/*.png
+!test-results/story-3-6-presentable-repository-proof/results-1280-light.png
+!test-results/story-3-6-presentable-repository-proof/results-375-dark.png
+!test-results/story-3-6-presentable-repository-proof/voting-1280-light.png
+!test-results/story-3-6-presentable-repository-proof/voting-375-dark.png
 playwright-report/
 blob-report/
 playwright/.cache/

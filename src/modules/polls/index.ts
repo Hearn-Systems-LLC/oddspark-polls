@@ -252,6 +252,18 @@ function normalizeCustomLink(value: string | undefined): string | null {
   return (value ?? "").trim().toLowerCase() || null;
 }
 
+export function isCustomLinkFormat(value: string): boolean {
+  return /^[a-z0-9-]+$/.test(value);
+}
+
+export function isCanonicalCustomReference(value: string): boolean {
+  return (
+    isCustomLinkFormat(value) &&
+    value.length <= POLL_CAPS.maxCustomLinkLength &&
+    !isReservedSlug(value)
+  );
+}
+
 // Is a root-path URL param a plausible case variant of a custom slug? The
 // public resolver pays a NOCASE scan only when this holds (Story 1.4
 // review). The raw form must be ASCII: stored slugs are [a-z0-9-] and only
@@ -304,7 +316,7 @@ export function validateCreatePoll(
     // as admitted by the format gate, then retain format -> length -> reserved
     // ordering for every other value.
     const customLinkReserved = isReservedSlug(customLink);
-    if (!/^[a-z0-9-]+$/.test(customLink) && !customLinkReserved) {
+    if (!isCustomLinkFormat(customLink) && !customLinkReserved) {
       fail(
         "customLink",
         "custom_link_invalid",

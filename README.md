@@ -20,8 +20,8 @@ available yet.
 
 | Status | Capabilities |
 | --- | --- |
-| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, and owner/administrator Comment moderation; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
-| Planned / backlog | CSV and XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
+| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, and owner CSV export; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Planned / backlog | XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
 
 ## Product tour
 
@@ -30,6 +30,8 @@ available yet.
 2. Browse open Listed Polls at `/discover`, or sign in at `/sign-in` and create
    one at `/creator/new`.
 3. Manage created Polls from `/creator` and their creator detail pages.
+   `EXPORT CSV` downloads accepted Vote rows and the complete server Tally
+   directly; XLSX remains planned.
 4. Open the published canonical `/{reference}` link as a signed-out Voter,
    choose an option, optionally attach a Comment and display name when the
    Creator enabled them, and submit.
@@ -62,6 +64,12 @@ contains the complete decisions and capability map. The evaluator-sized map is:
   Comment list; Voting-owned owner/administrator commands delete only a
   Comment and advance the shared representation version atomically (AD-19,
   AD-21, AD-24).
+- Owner CSV export authorizes a provider-free `ViewerContext` before a
+  type-specific D1 driver reads one snapshot. That driver strips join IDs,
+  the required Poll Type strategy projects response/Tally cells, and Results
+  assembles separate Vote, Tally, and Summary tables. The same format-neutral
+  dataset feeds hardened CSV now and planned XLSX later (AD-3, AD-8, AD-9,
+  AD-21, AD-23).
 - Local, staging, and production share code but never state, and production is
   promoted only after the staging gate (AD-14).
 - Telemetry remains voter-blind, and result authorization happens before any

@@ -1,22 +1,24 @@
 # Poll Type Strategy Contract — Design Check (de-risk rule #1)
 
-Story 1.3 freezes the AD-3 Poll Type contribution contract
-(`src/shared/application/index.ts`, `POLL_TYPE_CONTRACT_VERSION = 1`). Epic 1's
-first de-risk rule requires a written check that the contract fits **all four
-known Poll Types before it freezes** — this document is that check.
+Story 1.3 froze the original AD-3 Poll Type contribution contract. Story 4.3
+deliberately bumps it for a required type-owned export projection
+(`src/shared/application/index.ts`, `POLL_TYPE_CONTRACT_VERSION = 5`). This
+document rechecks that all four known Poll Types still fit.
 
 ## The contract under check
 
 ```ts
 interface PollTypeStrategy<TCreateInput, TCreationFacts, TSubmission,
                            TValidatedSubmission, TPersistedFacts,
-                           TResultProjection> {
+                           TResultProjection, TExportFacts,
+                           TExportProjection extends PollTypeExportProjection> {
   type: PollType;                       // multiple_choice | ranked_choice | image | meeting
-  contractVersion: 1;
+  contractVersion: 5;
   create(input, { nowMs }): Result<TCreationFacts>;
   validateSubmission?(submission, facts): Result<TValidatedSubmission>;   // Story 1.5
   persistFacts?(validated): TPersistedFacts;                              // Story 1.5
   projectResults?(facts: TPersistedFacts): TResultProjection;             // data in 1.7, surface in 1.8
+  projectExport(facts: TExportFacts): Result<TExportProjection>;           // Story 4.3, required
 }
 ```
 
@@ -35,11 +37,14 @@ Load-bearing properties:
    its AR-17 result-surface consumer still joins in Story 1.8. They are
    declared now so their position in the contract is frozen; a contract change
    after freeze requires a version bump plus moving the compile-time consumer
-   test (`tests/unit/shared-kernel.test.ts`). All three are optional members
-   on purpose — a minimal strategy exposing only `create` must satisfy the
-   interface until those stories land. The freeze covers the port shapes and
-   `create`; the consumer test pins both the minimal and the
-   fully-implemented shapes.
+   test (`tests/unit/shared-kernel.test.ts`). The lifecycle ports remain
+   optional until their stories land. Story 4.3 intentionally makes
+   `projectExport` required: every real strategy must compile with an export
+   shape, so later Poll Types cannot fail only at runtime. A type-specific D1
+   driver strips identifiers before the strategy receives row-aligned facts;
+   the projection binds each response row to its identifier-free alignment key
+   so Results can detect row swaps even when timestamps tie. Results owns shared
+   timestamps/Comments and the separate Summary table.
 
 ## Check against the four known types
 
@@ -51,7 +56,8 @@ Load-bearing properties:
   — a widening of that type's own generics, no contract change.
 - `validateSubmission`: selected option IDs vs persisted options + single/multi
   mode. `persistFacts`: vote-selection rows. `projectResults`: per-option
-  counts + voter count. All fit the signatures.
+  counts + voter count. `projectExport`: option-position response cells and
+  complete ordered option/Tally rows. All fit the signatures.
 
 ### 2. Ranked-Choice ballots (Epic 5)
 
@@ -62,7 +68,8 @@ Load-bearing properties:
   Fits because submission shapes are per-type generics.
 - `persistFacts`: ballot + ranked-selection rows (relational, AR-friendly for
   the Ballot Manifest). `projectResults`: IRV rounds from the one pure
-  tabulator (AD-9) — the strategy delegates to it. Fits.
+  tabulator (AD-9) — the strategy delegates to it. `projectExport` supplies
+  canonical ranking cells and final/round Tally rows from that tabulator. Fits.
 
 ### 3. Image polls with media adoption (Epic 6)
 
@@ -73,8 +80,9 @@ Load-bearing properties:
   maps media facts to `media_object` adoption rows in the one batch. The
   strategy itself still never touches R2; the R2 adapter pre-stages temp keys
   before `CreatePoll` runs, and the cleanup outbox (AR-10) reaps unadopted
-  keys. Required alt text is a `create`-level validation. Fits without a
-  contract change.
+  keys. Required alt text is a `create`-level validation. `projectExport`
+  supplies selected labels/alt text as typed cells without exposing R2 keys.
+  Fits without another contract change.
 
 ### 4. Meeting polls — slots, availability, revision (Epic 7)
 
@@ -87,7 +95,8 @@ Load-bearing properties:
   earlier submission. Revision is a *command* concern (a second application
   command holding the revision capability token) — it reuses the same
   `validateSubmission` + `persistFacts` ports on the strategy; the contract
-  does not need a revision port. Fits.
+  does not need a revision port. `projectExport` supplies the current
+  availability grid and its Tally rows. Fits.
 
 ## Sanctioned refinements (no contract bump)
 
@@ -122,13 +131,15 @@ per-type refinements without changing the shared interface:
    while single-Vote `MultipleChoicePersistedFacts` and the shared kernel stay
    unchanged.
 
-All three refinements remain inside `multiple-choice.ts`; contract version 1
-and `tests/unit/shared-kernel.test.ts` therefore remain unchanged.
+All three refinements remain inside `multiple-choice.ts`; they did not require
+the later Story 4.3 contract bump.
 
 ## Verdict
 
-Contract version 1 **freezes**. All four types fit through per-type generics;
+Contract version 5 **freezes**. All four types fit through per-type generics;
 the two stress cases (media adoption in the create batch, meeting revision)
-resolve in the command layer without reshaping the ports. Future widening that
+resolve in the command layer without reshaping the ports, and export-specific
+shape stays type-owned without reopening persistence or format adapters.
+Future widening that
 would break a signature requires bumping `POLL_TYPE_CONTRACT_VERSION` and
 updating the compile-time consumers together (AD-23).

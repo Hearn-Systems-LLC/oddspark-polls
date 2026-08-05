@@ -1005,6 +1005,14 @@ const detailPath = `/creator/polls/${pollId}`;
                   VIEW LIVE RESULTS
                 </ButtonSecondary>
               </p>
+              <p class="export-link-row">
+                <ButtonSecondary
+                  href={`${detailPath}/export.csv`}
+                  data-export-csv
+                >
+                  EXPORT CSV
+                </ButtonSecondary>
+              </p>
             </div>
 
             <Overlay
@@ -1293,7 +1301,8 @@ const detailPath = `/creator/polls/${pollId}`;
     align-items: center;
   }
 
-  .results-link-row {
+  .results-link-row,
+  .export-link-row {
     margin: 0;
   }
 

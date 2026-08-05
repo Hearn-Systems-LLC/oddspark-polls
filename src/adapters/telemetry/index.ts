@@ -91,6 +91,9 @@ const FORBIDDEN_KEYS = [
   "errorCodes",
   "challengeToken",
   "challenge_token",
+  "filename",
+  "cell",
+  "cells",
 ] as const;
 
 export type ForbiddenTelemetryKey = (typeof FORBIDDEN_KEYS)[number];
@@ -157,6 +160,28 @@ export function telemetryOperationForRoute(
   hasPollReferenceParam: boolean,
 ): string {
   const segments = pathname.split("/").filter(Boolean);
+
+  // Nested export route contains an internal Poll UUID. No filename, public
+  // reference, or exported cell may enter the operation label.
+  if (
+    segments.length === 4 &&
+    segments[0] === "creator" &&
+    segments[1] === "polls" &&
+    segments[3] === "export.csv"
+  ) {
+    return `${method} /creator/polls/:pollId/export.csv`;
+  }
+
+  // Any present or future nested creator-Poll capability is normalized even
+  // before it has a dedicated operation name. Neither the internal UUID nor
+  // unmatched tail segments are allowed to become log vocabulary.
+  if (
+    segments.length > 3 &&
+    segments[0] === "creator" &&
+    segments[1] === "polls"
+  ) {
+    return `${method} /creator/polls/:pollId/*`;
+  }
 
   // Creator detail uses an internal Poll UUID in the path — never log it.
   if (

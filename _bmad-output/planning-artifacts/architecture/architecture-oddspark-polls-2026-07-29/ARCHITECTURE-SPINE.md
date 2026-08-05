@@ -20,6 +20,7 @@ sources:
   - 'Story 3.3 Administrator delisting decisions, ratified 2026-08-04'
   - 'Story 4.1 Comment With Your Vote implementation, ratified 2026-08-04'
   - 'Story 4.2 Comment List and Moderation implementation, ratified 2026-08-05'
+  - 'Story 4.3 CSV Export implementation, ratified 2026-08-05'
   - '../../prds/prd-oddspark-polls-2026-07-28/prd.md'
   - '../../prds/prd-oddspark-polls-2026-07-28/addendum.md'
   - '../../ux-designs/ux-oddspark-polls-2026-07-28/DESIGN.md'
@@ -72,8 +73,9 @@ flowchart LR
 - **Binds:** FR-2–FR-14 and poll-type epics
 - **Prevents:** A giant poll-type switch and incompatible lifecycle, security,
   or result contracts
-- **Rule:** Each Poll Type implements the same `create`,
-  `validateSubmission`, `persistFacts`, and `projectResults` ports. Shared
+- **Rule:** Each Poll Type implements the same version-5 `create`,
+  `validateSubmission`, `persistFacts`, `projectResults`, and `projectExport`
+  ports; `projectExport` is required for every real strategy. Shared
   lifecycle, ownership, discovery, security, comments, and result visibility
   wrap these strategies. Accepted ballots and availability are normalized
   relational facts, not opaque JSON payloads. `CreatePoll` validates the shared
@@ -207,6 +209,13 @@ sequenceDiagram
   pure deterministic tabulator shared by the live view, closed result, export,
   and tests. A closed Ballot Manifest exposes only canonically ordered,
   anonymized rankings.
+  Owner exports resolve a provider-free `ViewerContext` before any private
+  read. One type-specific D1 driver reads raw rows and their complete Tally in
+  one statement/snapshot, uses IDs only for joins and bytewise tie ordering,
+  and strips them before the required Poll Type projector. Identifier-free
+  alignment keys let Results detect response-row swaps even when Vote
+  timestamps tie; Results combines the aligned cells with distinct Tally/Summary
+  tables in one format-neutral dataset shared by CSV and XLSX.
 
 ### AD-10 — Live results use versioned conditional polling
 
@@ -386,7 +395,7 @@ sequenceDiagram
 - **Binds:** FR-20, FR-21, Comments, Ballot Manifests, exports, and discovery
 - **Prevents:** Creator-only or after-close data leaking through a projection,
   ETag, cache key, or shared response
-- **Rule:** Every result, Comment, Manifest, and export query accepts a
+- **Rule:** Every result, Comment, and Manifest query accepts a
   `ViewerContext`, authorizes visibility before reading private facts, and then
   builds the permitted projection. Result and Manifest responses are never
   stored in shared caches; creator-only and not-yet-visible responses use
@@ -402,6 +411,13 @@ sequenceDiagram
   Administrator's exact-reference operator query is a separate live-role-
   guarded purpose projection containing Comments but no Tally, Vote, owner, or
   security facts; it is not a Results visibility entitlement or enumeration.
+  Export separately requires the authenticated internal Poll owner before any
+  Vote, Comment, selection, or Tally read; it is intentionally independent of
+  public Results visibility. Its positive allowlist contains only RFC 3339
+  timestamps, current Comment/name values, Poll Type response cells, and the
+  complete Tally. Internal IDs exist only inside the type-specific D1 driver
+  as ordering/join keys and never cross the strategy, canonical dataset, HTTP
+  file, or telemetry boundary.
 
 ### AD-22 — Every browser mutation crosses one CSRF boundary
 
@@ -503,7 +519,7 @@ scaffolding.
 
 ```text
 src/
-  pages/                 # Astro inbound HTTP adapters and server-rendered pages
+  pages/                 # Astro inbound adapters, including owner /creator/polls/:pollId/export.csv
   middleware.ts          # request context → telemetry → session → CSRF → creator guard
   components/            # server-rendered UI bound to DESIGN.md
   scripts/               # isolated progressive-enhancement TypeScript
@@ -514,7 +530,7 @@ src/
     identity/            # creator principal and authorization policy
     polls/               # lifecycle, Demo designation/reset policy, poll types
     voting/              # security composition and CastVote
-    results/             # Tally and Manifest projections
+    results/             # Tally, Manifest, and format-neutral export projections
     discovery/           # listed-poll eligibility and catalog queries
     comments/            # provider-free Comment normalization and typed Vote contribution
   shared/
@@ -523,7 +539,9 @@ src/
   adapters/
     auth/                # Better Auth and OAuth
     cache/               # isolated public Discovery projections
-    d1/                  # repositories, batches, projection SQL
+    csv/                 # generic RFC-style CSV transport hardening
+    d1/                  # generic repositories/batches and type fact drivers
+      export/            # ID-stripping Poll Type-specific export snapshots
       demo-poll.ts       # purpose-shaped Demo aggregate replacement batch
     digest/              # secret-keyed duplicate and admission identities
     r2/                  # temporary/adopted image objects
@@ -609,7 +627,7 @@ flowchart LR
 | FR-11 | `polls/types/image`, R2 media adapter | AD-3, AD-12 |
 | FR-12–FR-14 | `polls/types/meeting`, Meeting availability repository | AD-3, AD-6, AD-9, AD-20 |
 | FR-15–FR-19 | `voting/security`, D1 claims/codes, provider adapters | AD-7, AD-8, AD-16, AD-22 |
-| FR-20–FR-22 | `results`, export adapters, result endpoints | AD-6, AD-9, AD-10, AD-21 |
+| FR-20–FR-22 | `results`, D1/CSV export adapters, result endpoints, `/creator/polls/:pollId/export.csv` | AD-3, AD-6, AD-8, AD-9, AD-10, AD-21, AD-23 |
 | FR-24 | `modules/comments`, `voting` / `CastVote`, D1 `vote_comment`, creator definition and voter delivery surfaces | AD-6, AD-7, AD-15, AD-17, AD-19, AD-21, AD-22, AD-24 |
 | FR-25–FR-27 | Astro landing/demo pages, shared presentation-only public-repository entry, public repository | AD-1, AD-2, AD-10, AD-14 |
 | FR-26, CAP-DEMO-POLL | `polls/demo-poll` owns designation; `ResetDemoPoll`; D1 Demo replacement adapter; landing and creator Poll detail routes | AD-1, AD-6, AD-7, AD-14, AD-19, AD-22, AD-24 |

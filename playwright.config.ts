@@ -6,6 +6,8 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "tests/e2e",
+  // Runner cleanup must never delete committed browser-proof directories.
+  outputDir: ".playwright-output",
   fullyParallel: true,
   // Every E2E worker talks to the same Wrangler local-persistence directory.
   // A per-file serial describe does not prevent other files from writing the

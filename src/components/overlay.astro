@@ -1,6 +1,6 @@
 ---
 /**
- * Reusable confirmation overlay (Story 1.12 completes focus trap / dismiss).
+ * Reusable confirmation overlay (Stories 1.12 and 4.2: focus trap / dismiss).
  * Always render the dialog DOM so JS can open it without a navigation; when
  * `open` is false it is hidden and inert / removed from the a11y tree.
  */
@@ -31,6 +31,7 @@ const {
   aria-labelledby={titleId}
   aria-describedby={descriptionId}
   data-overlay
+  data-overlay-confirmation
   data-overlay-open={open ? "true" : "false"}
   hidden={!open}
   inert={!open ? true : undefined}

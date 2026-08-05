@@ -151,6 +151,7 @@ export function cleanupCreator(userId) {
   d1Execute(
     `DELETE FROM moderation_action WHERE actor_user_id = '${userId}' OR poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
+      `DELETE FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}'));` +
       `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}'));` +
       `DELETE FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
       `DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
@@ -201,6 +202,7 @@ export function deletePoll(pollId) {
   assertUuid(pollId);
   d1Execute(
     `DELETE FROM voter_claim WHERE poll_id = '${pollId}';` +
+      `DELETE FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${pollId}');` +
       `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${pollId}');` +
       `DELETE FROM vote WHERE poll_id = '${pollId}';` +
       `DELETE FROM poll_option WHERE poll_id = '${pollId}';` +

@@ -14,6 +14,11 @@ import {
   type ResultVisibility,
   type UserId,
 } from "../../shared/domain/index";
+import type {
+  CommentResultsProjection,
+  CommentView,
+  OwnerCommentView,
+} from "../comments/index";
 
 // The only identity fact Results may consult: the authenticated internal
 // Oddspark user ID, or anonymous. Never a Google/GitHub identifier (AD-4).
@@ -57,13 +62,26 @@ export type ResultsTallyProjection = {
   selectionCount: number;
 };
 
+export type ResultsProjection = ResultsTallyProjection &
+  CommentResultsProjection;
+
+export type VersionedResultsProjection = ResultsProjection & {
+  representationVersion: number;
+};
+
 export type ResultsPorts = {
   findAccessEnvelope: (
     reference: string,
   ) => Promise<ResultsAccessEnvelope | null>;
-  projectTally: (pollId: PollId) => Promise<ResultsTallyProjection>;
+  projectResults: (
+    pollId: PollId,
+    includeOwnerModeration: boolean,
+  ) => Promise<VersionedResultsProjection | null>;
 };
 
+// Narrow compatibility projection retained for adapter-level Tally tests and
+// callers that do not need Comments. Production Results queries use the
+// coherent Results projection below.
 export type VersionedResultsTallyProjection = ResultsTallyProjection & {
   representationVersion: number;
 };
@@ -74,9 +92,9 @@ export type VersionedResultsTallyProjection = ResultsTallyProjection & {
 // version so the response body and ETag describe one D1 snapshot (AD-24).
 export type LiveResultsPorts = Pick<ResultsPorts, "findAccessEnvelope"> & {
   readRepresentationVersion: (pollId: PollId) => Promise<number | null>;
-  projectVersionedTally: (
+  projectVersionedResults: (
     pollId: PollId,
-  ) => Promise<VersionedResultsTallyProjection | null>;
+  ) => Promise<VersionedResultsProjection | null>;
 };
 
 // Results-owned copy for the hidden shapes and Tally annotations. The voting
@@ -122,6 +140,7 @@ export type ResultsTallyView = {
 // never in the payload.
 export type LiveResultsPayload = ResultsTallyView & {
   status: PollStatus;
+  comments: CommentView[];
 };
 
 export type ResultsView =
@@ -135,6 +154,9 @@ export type ResultsView =
        * configuration threaded from the envelope, never a result fact. */
       securityToggles: PollSecurityToggles;
       tally: ResultsTallyView;
+      comments: CommentView[];
+      ownerComments: OwnerCommentView[] | null;
+      validator: string;
     }
   | {
       kind: "after_close_hidden";
@@ -163,6 +185,7 @@ export type LiveResultsView =
       status: PollStatus;
       validator: string;
       tally: ResultsTallyView;
+      comments: CommentView[];
     }
   | {
       kind: "not_modified";
@@ -294,7 +317,15 @@ export async function queryResults(
         };
   }
 
-  const projection = await ports.projectTally(envelope.pollId);
+  const includeOwnerModeration =
+    viewer.userId !== null && viewer.userId === envelope.ownerUserId;
+  const projection = await ports.projectResults(
+    envelope.pollId,
+    includeOwnerModeration,
+  );
+  if (projection === null) {
+    throw new Error("Results projection unavailable");
+  }
   return {
     kind: "visible",
     pollId: envelope.pollId,
@@ -303,6 +334,9 @@ export async function queryResults(
     status,
     securityToggles: envelope.securityToggles,
     tally: projectTallyView(envelope, projection),
+    comments: projection.comments,
+    ownerComments: projection.ownerComments,
+    validator: composeResultsValidator(projection.representationVersion, status),
   };
 }
 
@@ -353,7 +387,7 @@ export async function queryLiveResults(
     }
   }
 
-  const projection = await ports.projectVersionedTally(envelope.pollId);
+  const projection = await ports.projectVersionedResults(envelope.pollId);
   if (projection === null) {
     throw new Error("Live Results projection unavailable");
   }
@@ -369,5 +403,6 @@ export async function queryLiveResults(
     status,
     validator: snapshotValidator,
     tally: projectTallyView(envelope, projection),
+    comments: projection.comments,
   };
 }

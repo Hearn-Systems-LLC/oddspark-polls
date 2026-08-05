@@ -76,7 +76,7 @@ async function seedPoll(
   const reference = overrides.reference ?? "live-route-ref";
   await testEnv.DB.batch([
     testEnv.DB.prepare(
-      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, 'multiple_choice', 'Choose live', ?3, 1, 0, NULL, NULL, ?4, NULL, 1, 0, 0)",
+      "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, ?2, 'multiple_choice', 'Choose live', ?3, 1, 1, 0, NULL, NULL, ?4, NULL, 1, 0, 0)",
     ).bind(
       pollId,
       OWNER_ID,
@@ -149,13 +149,14 @@ function expectPrivateNoStore(response: Response): void {
 }
 
 async function castAcceptedVote(): Promise<void> {
+  const nowMs = Date.now();
   const batch: VotePersistenceBatch = {
     vote: {
       id: "live-route-vote",
       pollId: POLL_ID,
       submissionId: "live-route-submission",
       payloadHash: "live-route-hash",
-      createdAtMs: Date.now(),
+      createdAtMs: nowMs,
     },
     contributions: [
       {
@@ -164,15 +165,23 @@ async function castAcceptedVote(): Promise<void> {
         pollOptionId: OPTION_A,
       },
       {
+        kind: "vote_comment",
+        id: "live-route-comment",
+        voteId: "live-route-vote",
+        body: "Visible live Comment",
+        displayName: "Live Reader",
+        createdAtMs: nowMs,
+      },
+      {
         kind: "voter_claim",
         pollId: POLL_ID,
         checkKind: "session",
         digest: fixtureDigest("live-route-digest"),
         voteId: "live-route-vote",
-        createdAtMs: Date.now(),
+        createdAtMs: nowMs,
       },
     ],
-    representationVersion: incrementRepresentationVersion(POLL_ID, Date.now()),
+    representationVersion: incrementRepresentationVersion(POLL_ID, nowMs),
   };
   await createVotePersistence(testEnv.DB).insertVote(batch);
 }
@@ -236,6 +245,7 @@ describe("live Results endpoint", () => {
       selectionCount: 0,
       tied: false,
       empty: true,
+      comments: [],
       status: "open",
     });
     expect(getContext.trace.pollId).toBe(POLL_ID);
@@ -277,12 +287,24 @@ describe("live Results endpoint", () => {
         percent: number;
         pieShare: number;
       }[];
+      comments: Array<Record<string, unknown>>;
     };
     expect(payload).toMatchObject({
       voterCount: 1,
       selectionCount: 1,
       empty: false,
       status: "open",
+      comments: [{
+        body: "Visible live Comment",
+        displayName: "Live Reader",
+        createdAtMs: expect.any(Number),
+      }],
+    });
+    expect(JSON.stringify(payload)).not.toContain("live-route-comment");
+    expect(payload.comments[0]).toEqual({
+      body: "Visible live Comment",
+      displayName: "Live Reader",
+      createdAtMs: expect.any(Number),
     });
     expect(payload.options).toEqual(
       expect.arrayContaining([

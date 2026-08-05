@@ -1,5 +1,5 @@
-import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
+import type { APIRoute } from "astro";
 import { createCommentModerationPersistence } from "../../../adapters/d1/index";
 import { parseCommentModerationForm } from "../../../lib/comment-moderation-form";
 import {
@@ -12,14 +12,26 @@ import type { UserId } from "../../../shared/domain/index";
 
 const NO_STORE = "private, no-store";
 
-export const POST: APIRoute = async ({ request, locals }) => {
-  const principal = locals.requestContext?.principal ?? null;
+export const ALL: APIRoute = async ({ request, locals }) => {
+  if (request.method !== "POST") {
+    return new Response("Method not allowed.", {
+      status: 405,
+      headers: { allow: "POST", "cache-control": NO_STORE },
+    });
+  }
+
+  const requestContext = locals.requestContext;
+  const principal = requestContext?.principal ?? locals.principal ?? null;
   if (!principal) {
     return new Response(null, {
       status: 303,
-      headers: { location: "/sign-in?return=%2Fcreator", "cache-control": NO_STORE },
+      headers: {
+        location: "/sign-in?return=%2Fcreator",
+        "cache-control": NO_STORE,
+      },
     });
   }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -40,51 +52,54 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const persistence = createCommentModerationPersistence(env.DB);
   const deps = {
     deleteComment:
-      parsed.value.mode === "administrator"
-        ? persistence.deleteForAdministrator
-        : persistence.deleteForOwner,
+      parsed.value.mode === "owner"
+        ? persistence.deleteForOwner
+        : persistence.deleteForAdministrator,
     nowMs: () => Date.now(),
   };
   const result =
-    parsed.value.mode === "administrator"
-      ? await deleteCommentAsAdministrator(
+    parsed.value.mode === "owner"
+      ? await deleteCommentAsOwner(
+          deps,
+          principal.userId as UserId,
+          parsed.value.commentId,
+        )
+      : await deleteCommentAsAdministrator(
           deps,
           {
             userId: principal.userId as UserId,
             role: principal.role,
           } satisfies CommentModerationActor,
           parsed.value.commentId,
-        )
-      : await deleteCommentAsOwner(
-          deps,
-          principal.userId as UserId,
-          parsed.value.commentId,
         );
 
   if (result.ok) {
-    if (locals.requestContext) {
-      locals.requestContext.pollId = result.value.pollId;
+    if (requestContext) {
+      requestContext.pollId = result.value.pollId;
     }
-    const canonicalReference = encodeURIComponent(
+    const encodedReference = encodeURIComponent(
       result.value.canonicalReference,
     );
     const location =
       parsed.value.mode === "administrator"
-        ? `/creator/moderation?target=${canonicalReference}`
-        : `/${canonicalReference}/results`;
+        ? `/creator/moderation?target=${encodedReference}`
+        : `/${encodedReference}/results`;
     return new Response(null, {
       status: 303,
-      headers: {
-        location,
-        "cache-control": NO_STORE,
-      },
+      headers: { location, "cache-control": NO_STORE },
     });
   }
+
   if (result.error.code === "authorization_denied") {
-    if (locals.requestContext) locals.requestContext.authorizationDenied = true;
+    if (requestContext) {
+      requestContext.authorizationDenied = true;
+    }
     return new Response(COMMENT_COPY.accessRequired, {
       status: 403,
-      headers: { "content-type": "text/plain; charset=utf-8", "cache-control": NO_STORE },
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": NO_STORE,
+      },
     });
   }
   if (result.error.code === "comment_not_found") {
@@ -98,12 +113,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
   return new Response(COMMENT_COPY.failed, {
     status: 500,
-    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": NO_STORE },
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": NO_STORE,
+    },
   });
 };
-
-export const ALL: APIRoute = () =>
-  new Response("Method not allowed.", {
-    status: 405,
-    headers: { allow: "POST", "cache-control": NO_STORE },
-  });

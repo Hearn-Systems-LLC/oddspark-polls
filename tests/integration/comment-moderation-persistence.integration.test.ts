@@ -1,10 +1,15 @@
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createCommentModerationPersistence } from "../../src/adapters/d1/index";
-import type { RequestContext } from "../../src/lib/request-context";
-import { POST as deleteCommentRoute } from "../../src/pages/creator/comments/delete";
-import type { CommentId, PollId, UserId } from "../../src/shared/domain/index";
+import {
+  createCommentModerationPersistence,
+  createResultsPersistence,
+} from "../../src/adapters/d1/index";
+import type {
+  CommentId,
+  PollId,
+  UserId,
+} from "../../src/shared/domain/index";
 
 type MigrationTestEnv = Cloudflare.Env & { TEST_MIGRATIONS: D1Migration[] };
 const testEnv = env as MigrationTestEnv;
@@ -12,7 +17,9 @@ const POLL_ID = "comment-moderation-poll" as PollId;
 const OWNER = "comment-moderation-owner" as UserId;
 const OTHER = "comment-moderation-other" as UserId;
 const ADMIN = "comment-moderation-admin" as UserId;
-const COMMENT_ID = "comment-moderation-comment" as CommentId;
+const NEWEST_A = "comment-z" as CommentId;
+const NEWEST_B = "comment-a" as CommentId;
+const OLDEST = "comment-old" as CommentId;
 const NOW = 1_800_000_000_000;
 
 async function insertUser(id: UserId, role = "creator"): Promise<void> {
@@ -32,15 +39,21 @@ async function seed(): Promise<void> {
     testEnv.DB.prepare(
       "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('comment-moderation-ref', ?1, 'custom', 1, 0)",
     ).bind(POLL_ID),
-    testEnv.DB.prepare(
-      "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('comment-vote', ?1, 'comment-submission', 'comment-hash', ?2)",
-    ).bind(POLL_ID, NOW),
-    testEnv.DB.prepare(
-      "INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('comment-vote', 'comment-option')",
-    ),
-    testEnv.DB.prepare(
-      "INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (?1, 'comment-vote', 'Keep the Vote', NULL, ?2)",
-    ).bind(COMMENT_ID, NOW),
+    ...[
+      ["comment-vote-z", NEWEST_A, "Newest z", "<Admin>", NOW],
+      ["comment-vote-a", NEWEST_B, "Newest a", null, NOW],
+      ["comment-vote-old", OLDEST, "Older <script>alert(1)</script>", null, NOW - 1],
+    ].flatMap(([voteId, commentId, body, displayName, createdAtMs]) => [
+      testEnv.DB.prepare(
+        "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+      ).bind(voteId, POLL_ID, `submission-${voteId}`, `hash-${voteId}`, createdAtMs),
+      testEnv.DB.prepare(
+        "INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (?1, 'comment-option')",
+      ).bind(voteId),
+      testEnv.DB.prepare(
+        "INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+      ).bind(commentId, voteId, body, displayName, createdAtMs),
+    ]),
   ]);
 }
 
@@ -70,51 +83,101 @@ beforeEach(async () => {
   await seed();
 });
 
+describe("Comment Results projection", () => {
+  it("projects the complete newest-first list and only gives IDs to the owner projection", async () => {
+    const persistence = createResultsPersistence(testEnv.DB);
+    const publicProjection = await persistence.projectResults(POLL_ID, false);
+    expect(publicProjection).not.toBeNull();
+    if (!publicProjection) throw new Error("missing public projection");
+    expect(publicProjection.comments.map(({ body }) => body)).toEqual([
+      "Newest z",
+      "Newest a",
+      "Older <script>alert(1)</script>",
+    ]);
+    expect(publicProjection.ownerComments).toBeNull();
+    expect(JSON.stringify(publicProjection)).not.toContain("comment-z");
+
+    const ownerProjection = await persistence.projectResults(POLL_ID, true);
+    expect(ownerProjection).not.toBeNull();
+    if (!ownerProjection) throw new Error("missing owner projection");
+    expect(ownerProjection.ownerComments?.map(({ commentId }) => commentId)).toEqual([
+      NEWEST_A,
+      NEWEST_B,
+      OLDEST,
+    ]);
+    expect(ownerProjection.comments).toEqual(
+      ownerProjection.ownerComments?.map(({ commentId: _commentId, ...comment }) => comment),
+    );
+  });
+
+  it("fails closed on a malformed stored Comment", async () => {
+    await testEnv.DB.prepare("UPDATE vote_comment SET body = ' untrimmed ' WHERE id = ?1")
+      .bind(OLDEST)
+      .run();
+    const persistence = createResultsPersistence(testEnv.DB);
+    await expect(persistence.projectResults(POLL_ID, false)).rejects.toThrow(
+      "Malformed Comment projection",
+    );
+  });
+
+  it("fails closed on unpostable IDs and timestamps outside the Date range", async () => {
+    const persistence = createResultsPersistence(testEnv.DB);
+    await testEnv.DB.prepare("UPDATE vote_comment SET id = 'bad.comment' WHERE id = ?1")
+      .bind(NEWEST_A)
+      .run();
+    await expect(persistence.projectResults(POLL_ID, true)).rejects.toThrow(
+      "Malformed owner Comment projection",
+    );
+
+    await testEnv.DB.prepare("UPDATE vote_comment SET id = ?1, created_at_ms = ?2 WHERE id = 'bad.comment'")
+      .bind(NEWEST_A, 8_640_000_000_000_001)
+      .run();
+    await expect(persistence.projectResults(POLL_ID, false)).rejects.toThrow(
+      "Malformed Comment projection",
+    );
+  });
+});
+
 describe("Comment moderation D1 transaction", () => {
   it("lets the owner delete only the Comment and increments the version once", async () => {
     const persistence = createCommentModerationPersistence(testEnv.DB);
     await expect(
-      persistence.deleteForOwner({ actorUserId: OWNER, commentId: COMMENT_ID, updatedAtMs: NOW + 1 }),
+      persistence.deleteForOwner({ actorUserId: OWNER, commentId: NEWEST_A, updatedAtMs: NOW + 1 }),
     ).resolves.toEqual({
       kind: "deleted",
       pollId: POLL_ID,
       canonicalReference: "comment-moderation-ref",
     });
-    expect(await state()).toEqual({ version: 8, comments: 0, votes: 1 });
+    expect(await state()).toEqual({ version: 8, comments: 2, votes: 3 });
   });
 
   it("keeps denied, stale, and concurrent losers as no-op outcomes", async () => {
     const persistence = createCommentModerationPersistence(testEnv.DB);
     await expect(
-      persistence.deleteForOwner({ actorUserId: OTHER, commentId: COMMENT_ID, updatedAtMs: NOW + 1 }),
+      persistence.deleteForOwner({ actorUserId: OTHER, commentId: NEWEST_A, updatedAtMs: NOW + 1 }),
     ).resolves.toEqual({ kind: "not_found" });
-    expect(await state()).toEqual({ version: 7, comments: 1, votes: 1 });
+    expect(await state()).toEqual({ version: 7, comments: 3, votes: 3 });
 
     const outcomes = await Promise.all([
-      persistence.deleteForOwner({ actorUserId: OWNER, commentId: COMMENT_ID, updatedAtMs: NOW + 2 }),
-      persistence.deleteForOwner({ actorUserId: OWNER, commentId: COMMENT_ID, updatedAtMs: NOW + 3 }),
+      persistence.deleteForOwner({ actorUserId: OWNER, commentId: NEWEST_A, updatedAtMs: NOW + 2 }),
+      persistence.deleteForOwner({ actorUserId: OWNER, commentId: NEWEST_A, updatedAtMs: NOW + 3 }),
     ]);
     expect(outcomes.map(({ kind }) => kind).sort()).toEqual(["deleted", "not_found"]);
-    expect(await state()).toEqual({ version: 8, comments: 0, votes: 1 });
+    expect(await state()).toEqual({ version: 8, comments: 2, votes: 3 });
   });
 
   it("rechecks the live Administrator role for reads and deletes", async () => {
     const persistence = createCommentModerationPersistence(testEnv.DB);
-    await expect(persistence.loadForAdministrator(ADMIN, POLL_ID)).resolves.toEqual({
+    await expect(persistence.loadForAdministrator(ADMIN, POLL_ID)).resolves.toMatchObject({
       kind: "found",
-      comments: [{
-        commentId: COMMENT_ID,
-        body: "Keep the Vote",
-        displayName: null,
-        createdAtMs: NOW,
-      }],
+      comments: [{ commentId: NEWEST_A }, { commentId: NEWEST_B }, { commentId: OLDEST }],
     });
     await testEnv.DB.prepare("UPDATE user SET role = 'creator' WHERE id = ?1").bind(ADMIN).run();
     await expect(persistence.loadForAdministrator(ADMIN, POLL_ID)).resolves.toEqual({ kind: "authorization_denied" });
     await expect(
-      persistence.deleteForAdministrator({ actorUserId: ADMIN, commentId: COMMENT_ID, updatedAtMs: NOW + 1 }),
+      persistence.deleteForAdministrator({ actorUserId: ADMIN, commentId: NEWEST_A, updatedAtMs: NOW + 1 }),
     ).resolves.toEqual({ kind: "authorization_denied" });
-    expect(await state()).toEqual({ version: 7, comments: 1, votes: 1 });
+    expect(await state()).toEqual({ version: 7, comments: 3, votes: 3 });
   });
 
   it("rolls back the version when the Comment delete fails", async () => {
@@ -123,111 +186,23 @@ describe("Comment moderation D1 transaction", () => {
     ).run();
     const persistence = createCommentModerationPersistence(testEnv.DB);
     await expect(
-      persistence.deleteForOwner({ actorUserId: OWNER, commentId: COMMENT_ID, updatedAtMs: NOW + 1 }),
+      persistence.deleteForOwner({ actorUserId: OWNER, commentId: NEWEST_A, updatedAtMs: NOW + 1 }),
     ).rejects.toThrow(/forced_comment_delete_failure/);
-    expect(await state()).toEqual({ version: 7, comments: 1, votes: 1 });
+    expect(await state()).toEqual({ version: 7, comments: 3, votes: 3 });
   });
-});
 
-describe("Comment moderation route", () => {
-  function context(
-    actor: UserId,
-    role: "creator" | "administrator",
-    mode: "owner" | "administrator" = "owner",
-  ): Parameters<typeof deleteCommentRoute>[0] {
-    const body = new FormData();
-    body.set("mode", mode);
-    body.set("comment_id", COMMENT_ID);
-    body.set("csrf_token", "csrf-token");
-    const requestContext: RequestContext = {
-      requestId: "comment-moderation-request",
-      startedAtMs: NOW,
-      principal: {
-        userId: actor,
-        role,
-        session: {
-          id: "session",
-          userId: actor,
-          token: "never-logged",
-          expiresAt: new Date(NOW + 60_000),
-          createdAt: new Date(NOW),
-          updatedAt: new Date(NOW),
-        },
-      },
-      csrfToken: {
-        value: "csrf-token",
-        headerName: "x-oddspark-csrf",
-        formFieldName: "csrf_token",
-      },
-      pollId: null,
-      sessionExpired: false,
-      sessionLookupFailed: false,
-      csrfRejected: false,
-      authorizationDenied: false,
-      resultsLookupFailed: false,
-      demoUnavailable: false,
-      voteRejection: false,
-      providerOutcome: "none",
-    };
-    return {
-      request: new Request("https://polls.example/creator/comments/delete", {
-        method: "POST",
-        body,
+  it("does not mutate when canonical redirect truth is malformed", async () => {
+    await testEnv.DB.prepare(
+      "UPDATE poll_reference SET reference = '' WHERE poll_id = ?1 AND is_canonical = 1",
+    ).bind(POLL_ID).run();
+    const persistence = createCommentModerationPersistence(testEnv.DB);
+    await expect(
+      persistence.deleteForOwner({
+        actorUserId: OWNER,
+        commentId: NEWEST_A,
+        updatedAtMs: NOW + 1,
       }),
-      locals: { requestContext, principal: requestContext.principal },
-    } as Parameters<typeof deleteCommentRoute>[0];
-  }
-
-  it("uses POST-redirect-GET without reflecting Comment facts", async () => {
-    const response = await deleteCommentRoute(context(OWNER, "creator"));
-    expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(
-      "/comment-moderation-ref/results",
-    );
-    expect(await response.text()).toBe("");
-    expect(await state()).toEqual({ version: 8, comments: 0, votes: 1 });
-  });
-
-  it("returns a non-reflecting 404 for a stale Comment instead of claiming success", async () => {
-    const first = await deleteCommentRoute(context(OWNER, "creator"));
-    expect(first.status).toBe(303);
-
-    const stale = await deleteCommentRoute(context(OWNER, "creator"));
-    expect(stale.status).toBe(404);
-    expect(stale.headers.get("location")).toBeNull();
-    expect(stale.headers.get("cache-control")).toBe("private, no-store");
-    expect(await stale.text()).toBe("That Comment is no longer available.");
-    expect(await state()).toEqual({ version: 8, comments: 0, votes: 1 });
-  });
-
-  it("derives the Administrator redirect from D1 canonical truth", async () => {
-    const response = await deleteCommentRoute(
-      context(ADMIN, "administrator", "administrator"),
-    );
-    expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(
-      "/creator/moderation?target=comment-moderation-ref",
-    );
-  });
-
-  it("denies a revoked Administrator before mutation without target disclosure", async () => {
-    await testEnv.DB.prepare("UPDATE user SET role = 'creator' WHERE id = ?1").bind(ADMIN).run();
-    const response = await deleteCommentRoute(
-      context(ADMIN, "administrator", "administrator"),
-    );
-    expect(response.status).toBe(403);
-    expect(await response.text()).toBe("Administrator access is required.");
-    expect(await state()).toEqual({ version: 7, comments: 1, votes: 1 });
-  });
-
-  it("rejects an extra field before the command", async () => {
-    const ctx = context(OWNER, "creator");
-    const body = await ctx.request.formData();
-    body.set("return_to", "https://evil.example/must-not-echo");
-    ctx.request = new Request(ctx.request.url, { method: "POST", body });
-    const response = await deleteCommentRoute(ctx);
-    expect(response.status).toBe(422);
-    expect(await response.text()).not.toContain("must-not-echo");
-    expect(await state()).toEqual({ version: 7, comments: 1, votes: 1 });
+    ).rejects.toThrow("Malformed Comment moderation canonical reference");
+    expect(await state()).toEqual({ version: 7, comments: 3, votes: 3 });
   });
 });

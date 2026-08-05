@@ -54,6 +54,8 @@ interface Props {
   liveEndpoint?: string;
   /** Server render time used until the first successful refresh. */
   initialRenderAtMs?: number;
+  /** Validator for the exact server-rendered representation. */
+  initialValidator?: string;
   /** Embedded editable Demo keeps leadership visible without spending the
    * canonical gold treatment while VOTE remains the page primary. */
   leadership?: "canonical" | "entropy";
@@ -69,6 +71,7 @@ const {
   loading = false,
   liveEndpoint,
   initialRenderAtMs = Date.now(),
+  initialValidator,
   leadership = "canonical",
   class: className = "",
 } = Astro.props;
@@ -80,6 +83,7 @@ const {
   data-loading={loading ? "true" : "false"}
   data-live-endpoint={liveEndpoint}
   data-live-initial-render-at={initialRenderAtMs}
+  data-live-initial-validator={initialValidator}
   data-live-status={status}
   data-leadership={leadership}
 >

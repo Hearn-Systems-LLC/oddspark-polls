@@ -1,14 +1,18 @@
 import { barAccessibleName, barWidthPercent } from "../components/results-bar";
 import { formatVoteTotal } from "../components/live-indicator";
 import type { LiveResultsPayload } from "../modules/results/index";
+import type { CommentView } from "../modules/comments/index";
 import { RESULTS_CHART_FORM_CHANGE_EVENT } from "./chart-form-contract";
 import {
-  RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS,
   createResultsLiveState,
   markResultsLiveFailure,
   markResultsLiveSuccess,
   nextResultsPollDelayMs,
+  isLiveResultsPayload,
+  sameCommentSnapshot,
+  shouldReloadOwnerCommentControls,
   parseResultsValidator,
+  reserveResultsReload,
   shouldAdoptResultsValidator,
   shouldPollResults,
 } from "./results-live-core";
@@ -33,59 +37,6 @@ import {
   prepareResultsSparks,
 } from "./results-spark";
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
-
-const isNonNegativeSafeInteger = (value: unknown): value is number =>
-  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-
-const isPercent = (value: unknown): value is number =>
-  typeof value === "number" &&
-  Number.isFinite(value) &&
-  value >= 0 &&
-  value <= 100;
-
-const isUnitShare = (value: unknown): value is number =>
-  typeof value === "number" &&
-  Number.isFinite(value) &&
-  value >= 0 &&
-  value <= 1;
-
-const isLiveResultsPayload = (value: unknown): value is LiveResultsPayload => {
-  if (!isRecord(value) || !Array.isArray(value.options)) {
-    return false;
-  }
-  if (
-    (value.status !== "open" && value.status !== "closed") ||
-    typeof value.multiSelectEnabled !== "boolean" ||
-    !isNonNegativeSafeInteger(value.voterCount) ||
-    !isNonNegativeSafeInteger(value.selectionCount) ||
-    typeof value.tied !== "boolean" ||
-    typeof value.empty !== "boolean"
-  ) {
-    return false;
-  }
-  const validOptions = value.options.every(
-    (option) =>
-      isRecord(option) &&
-      typeof option.id === "string" &&
-      typeof option.label === "string" &&
-      isNonNegativeSafeInteger(option.position) &&
-      isNonNegativeSafeInteger(option.count) &&
-      isPercent(option.percent) &&
-      isUnitShare(option.pieShare) &&
-      typeof option.leading === "boolean",
-  );
-  return (
-    validOptions &&
-    new Set(
-      value.options.map((option) =>
-        isRecord(option) && typeof option.id === "string" ? option.id : "",
-      ),
-    ).size === value.options.length
-  );
-};
-
 const localRefreshTime = (timestampMs: number): string =>
   new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
@@ -96,23 +47,46 @@ const localRefreshTime = (timestampMs: number): string =>
 // Reload recovery is bounded per tab: the count survives the reload it
 // triggers, so a persistent cause degrades to the stale presentation instead
 // of reloading every poll cycle.
-const RELOAD_COUNT_STORAGE_KEY = "oddspark.results-live.reload-count";
+const RELOAD_COUNT_STORAGE_KEY_PREFIX = "oddspark.results-live.reload-count";
 
-const readReloadCount = (): number => {
+type ReloadRecovery = { token: string; count: number };
+
+const readReloadRecovery = (key: string): ReloadRecovery => {
   try {
-    const raw = window.sessionStorage.getItem(RELOAD_COUNT_STORAGE_KEY);
-    const parsed = raw === null ? 0 : Number(raw);
-    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+    const raw = window.sessionStorage.getItem(key);
+    if (raw === null) return { token: "", count: 0 };
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      Object.keys(parsed).length === 2 &&
+      "token" in parsed &&
+      "count" in parsed &&
+      typeof parsed.token === "string" &&
+      Number.isSafeInteger(parsed.count) &&
+      (parsed.count as number) >= 0
+    ) {
+      return { token: parsed.token, count: parsed.count as number };
+    }
+    return { token: "", count: 0 };
   } catch {
-    return 0;
+    return { token: "", count: 0 };
   }
 };
 
-const writeReloadCount = (count: number): void => {
+const writeReloadRecovery = (key: string, recovery: ReloadRecovery): void => {
   try {
-    window.sessionStorage.setItem(RELOAD_COUNT_STORAGE_KEY, String(count));
+    window.sessionStorage.setItem(key, JSON.stringify(recovery));
   } catch {
     // Storage can be unavailable (private mode); the cap then holds per load.
+  }
+};
+
+const clearReloadRecovery = (key: string): void => {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable; the in-memory state is still reset.
   }
 };
 
@@ -124,6 +98,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   if (!endpoint || root.dataset.liveStatus !== "open") {
     return;
   }
+  const reloadStorageKey = `${RELOAD_COUNT_STORAGE_KEY_PREFIX}:${endpoint}`;
 
   const statusContent = root.querySelector<HTMLElement>(
     "[data-live-status-content]",
@@ -146,6 +121,10 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   const empty = root.querySelector<HTMLElement>("[data-live-empty]");
   const summary = root.querySelector<HTMLElement>("[data-live-summary]");
   const barsContainer = root.querySelector<HTMLElement>("[data-tally-final]");
+  const resultsRegion = root.closest<HTMLElement>("[data-results-region]");
+  const hasOwnerModeration = Boolean(
+    resultsRegion?.querySelector("[data-comment-moderation]"),
+  );
   if (
     !statusContent ||
     !staleContent ||
@@ -164,6 +143,28 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   }
 
   root.dataset.liveEnhanced = "true";
+
+  const renderedComments = (): CommentView[] =>
+    Array.from(
+      resultsRegion?.querySelectorAll<HTMLElement>("[data-comment-item]") ?? [],
+    ).flatMap((item) => {
+      const body = item.querySelector<HTMLElement>("[data-comment-body]");
+      const displayName = item.querySelector<HTMLElement>(
+        "[data-comment-display-name]",
+      );
+      const createdAtMs = Number(item.dataset.commentCreatedAtMs);
+      if (!body || !displayName || !Number.isSafeInteger(createdAtMs)) {
+        return [];
+      }
+      return [{
+        body: body.textContent ?? "",
+        displayName:
+          displayName.dataset.commentAnonymous === "true"
+            ? null
+            : (displayName.textContent ?? ""),
+        createdAtMs,
+      }];
+    });
 
   // Motion arms lazily, in the same task as the first animated reconcile
   // (Story 1.10): the server-rendered state never animates, and neither
@@ -202,17 +203,22 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   let state = createResultsLiveState(
     Number.isFinite(initialRenderAtMs) ? initialRenderAtMs : Date.now(),
   );
-  let validator: string | null = null;
+  const renderedValidator = root.dataset.liveInitialValidator;
+  let validator: string | null =
+    renderedValidator !== undefined && parseResultsValidator(renderedValidator)
+      ? renderedValidator
+      : null;
   let timer: number | null = null;
   let controller: AbortController | null = null;
   let requestGeneration = 0;
   let reloadStarted = false;
-  let reloadCount = readReloadCount();
+  const storedReloadRecovery = readReloadRecovery(reloadStorageKey);
+  let reloadToken = storedReloadRecovery.token;
+  let reloadCount = storedReloadRecovery.count;
   const resetReloadCount = (): void => {
-    if (reloadCount !== 0) {
-      reloadCount = 0;
-      writeReloadCount(0);
-    }
+    reloadToken = "";
+    reloadCount = 0;
+    clearReloadRecovery(reloadStorageKey);
   };
   const announcementQueue: string[] = [];
   let announcementActive = false;
@@ -323,22 +329,30 @@ const enhanceResultsTally = (root: HTMLElement): void => {
     }
   };
 
-  const reloadOnce = (): void => {
+  const reloadOnce = (token = "structural"): void => {
     if (reloadStarted) {
       return;
     }
     reloadStarted = true;
     clearTimer();
     abortRefresh();
-    if (reloadCount >= RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS) {
+    const reservation = reserveResultsReload(
+      { token: reloadToken, count: reloadCount },
+      token,
+    );
+    reloadToken = reservation.recovery.token;
+    reloadCount = reservation.recovery.count;
+    if (!reservation.allowed) {
       // The cause survived repeated reloads — stop polling and present the
       // last known Tally as stale rather than reloading every poll cycle.
       state = markResultsLiveFailure(state);
       showStale();
       return;
     }
-    reloadCount += 1;
-    writeReloadCount(reloadCount);
+    writeReloadRecovery(reloadStorageKey, {
+      token: reloadToken,
+      count: reloadCount,
+    });
     clearAnnouncements();
     window.location.reload();
   };
@@ -753,6 +767,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
         }
         validator = incomingValidator;
         state = markResultsLiveSuccess(state, Date.now(), parsed.status);
+        resetReloadCount();
         if (wasStale) {
           showConnected(parsed.status);
           announce("Updates resumed.");
@@ -765,7 +780,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       // this page, not transient failures — reload into the truthful page
       // state instead of polling forever under a misleading stale notice.
       if (response.status === 204 || response.status === 404) {
-        reloadOnce();
+        reloadOnce(`status:${response.status}`);
         return;
       }
       if (response.status !== 200 || incomingValidator === null) {
@@ -783,7 +798,32 @@ const enhanceResultsTally = (root: HTMLElement): void => {
       // a D1 Time Travel restore) — reload to snap to its reality rather
       // than ignoring healthy responses and staying stale forever.
       if (!shouldAdoptResultsValidator(validator, incomingValidator)) {
-        reloadOnce();
+        reloadOnce(incomingValidator);
+        return;
+      }
+      // Comment nodes deliberately remain server rendered. Any create/delete
+      // changes the shared representation version; a bounded reload replaces
+      // the whole list without exposing moderation IDs in the public JSON.
+      const commentsMatch = sameCommentSnapshot(
+        renderedComments(),
+        payload.comments,
+      );
+      if (!commentsMatch) {
+        reloadOnce(incomingValidator);
+        return;
+      }
+      if (
+        shouldReloadOwnerCommentControls({
+          hasOwnerModeration,
+          previousValidator: validator,
+          incomingValidator,
+          commentsMatch,
+        })
+      ) {
+        // Owner controls carry private Comment IDs in SSR only. Two or more
+        // intervening mutations can replace a Comment with an identical
+        // public projection, so reload without exposing IDs in live JSON.
+        reloadOnce(incomingValidator);
         return;
       }
       if (payload.status === "closed") {

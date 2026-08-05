@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Complete newest-first Comment lists now follow every authorized Tally.
+  Readers see plain text and an `ANONYMOUS` fallback; Poll owners and the live
+  Administrator can remove one Comment through an accessible confirmation
+  without deleting its Vote, while open live surfaces reload when the list
+  changes.
 - Opt-in Comments with Votes: before the first Vote, a Creator can enable one
   optional plain-text Comment and display name on each ballot. Accepted
   Comments commit atomically with their Vote, safe retryable failures preserve

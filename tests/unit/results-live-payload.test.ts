@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isLiveResultsPayload } from "../../src/scripts/results-live";
+import {
+  isLiveResultsPayload,
+  reserveResultsReload,
+  shouldReloadOwnerCommentControls,
+  sameCommentSnapshot,
+} from "../../src/scripts/results-live-core";
 
 const payload = {
   status: "open",
@@ -28,7 +33,7 @@ describe("live Results Comment payload validation", () => {
     expect(isLiveResultsPayload(payload)).toBe(true);
   });
 
-  it("rejects malformed order, hostile fields, and moderation IDs", () => {
+  it("rejects malformed order, hostile fields, moderation IDs, and unknown fields", () => {
     expect(
       isLiveResultsPayload({
         ...payload,
@@ -47,12 +52,70 @@ describe("live Results Comment payload validation", () => {
         comments: [{ body: "Good", displayName: "bad\nname", createdAtMs: 1 }],
       }),
     ).toBe(false);
+    expect(isLiveResultsPayload({ ...payload, ownerComments: [] })).toBe(false);
+    expect(isLiveResultsPayload({ ...payload, unknown: true })).toBe(false);
     expect(
       isLiveResultsPayload({
         ...payload,
-        ownerComments: [],
+        comments: [{
+          body: "Outside Date range",
+          displayName: null,
+          createdAtMs: 8_640_000_000_000_001,
+        }],
       }),
     ).toBe(false);
-    expect(isLiveResultsPayload({ ...payload, unknown: true })).toBe(false);
+  });
+
+  it("detects any ordered Comment snapshot change for bounded reload", () => {
+    expect(sameCommentSnapshot(payload.comments, payload.comments)).toBe(true);
+    expect(sameCommentSnapshot(payload.comments, payload.comments.slice(1))).toBe(false);
+    expect(
+      sameCommentSnapshot(payload.comments, [
+        { ...payload.comments[0], body: "Changed" },
+        payload.comments[1],
+      ]),
+    ).toBe(false);
+  });
+
+  it("caps one persistent reload cause but gives a distinct validator a fresh budget", () => {
+    const first = reserveResultsReload({ token: "", count: 0 }, '"2:open"');
+    expect(first).toEqual({
+      allowed: true,
+      recovery: { token: '"2:open"', count: 1 },
+    });
+    const second = reserveResultsReload(first.recovery, '"2:open"');
+    expect(second.allowed).toBe(true);
+    expect(reserveResultsReload(second.recovery, '"2:open"').allowed).toBe(false);
+    expect(reserveResultsReload(second.recovery, '"3:open"')).toEqual({
+      allowed: true,
+      recovery: { token: '"3:open"', count: 1 },
+    });
+  });
+
+  it("reloads owner controls after an otherwise indistinguishable replacement", () => {
+    expect(
+      shouldReloadOwnerCommentControls({
+        hasOwnerModeration: true,
+        previousValidator: '"7:open"',
+        incomingValidator: '"9:open"',
+        commentsMatch: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldReloadOwnerCommentControls({
+        hasOwnerModeration: false,
+        previousValidator: '"7:open"',
+        incomingValidator: '"9:open"',
+        commentsMatch: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldReloadOwnerCommentControls({
+        hasOwnerModeration: true,
+        previousValidator: '"7:open"',
+        incomingValidator: '"8:open"',
+        commentsMatch: true,
+      }),
+    ).toBe(false);
   });
 });

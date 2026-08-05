@@ -72,6 +72,9 @@ describe("overlay component contract (Story 1.12)", () => {
           "button-destructive.astro",
         ),
       );
-    expect(consumers).toEqual(["pages/creator/polls/[pollId].astro"]);
+    expect(consumers.sort()).toEqual([
+      "components/comment-list.astro",
+      "pages/creator/polls/[pollId].astro",
+    ]);
   });
 });

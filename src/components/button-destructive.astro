@@ -11,6 +11,7 @@ interface Props {
   value?: string;
   id?: string;
   class?: string;
+  "aria-label"?: string | null;
 }
 
 const {
@@ -20,6 +21,7 @@ const {
   value,
   id,
   class: className = "",
+  "aria-label": ariaLabel = undefined,
 } = Astro.props;
 
 const classes = ["btn-destructive", disabled ? "is-disabled" : "", className]
@@ -34,6 +36,7 @@ const classes = ["btn-destructive", disabled ? "is-disabled" : "", className]
   name={name}
   value={value}
   id={id}
+  aria-label={ariaLabel ?? undefined}
 >
   <slot />
 </button>

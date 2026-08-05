@@ -17,8 +17,9 @@ describe("results-live poller resilience contract", () => {
   it("caps page reloads per tab before giving up to a stale Tally", () => {
     expect(RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS).toBeGreaterThan(0);
     expect(pollerSource).toContain("sessionStorage");
+    expect(pollerSource).toContain("reserveResultsReload");
     expect(pollerSource).toMatch(
-      /reloadCount >= RESULTS_LIVE_MAX_CONSECUTIVE_RELOADS[\s\S]*?showStale\(\)/,
+      /if \(!reservation\.allowed\) \{[\s\S]*?showStale\(\)/,
     );
     expect(pollerSource).toContain("resetReloadCount");
   });
@@ -31,7 +32,7 @@ describe("results-live poller resilience contract", () => {
 
   it("reloads on a validator regression instead of staying stale on healthy responses", () => {
     expect(pollerSource).toMatch(
-      /!shouldAdoptResultsValidator\(validator, incomingValidator\)\) \{\s*reloadOnce\(\);/,
+      /!shouldAdoptResultsValidator\(validator, incomingValidator\)\) \{\s*reloadOnce\(incomingValidator\);/,
     );
   });
 

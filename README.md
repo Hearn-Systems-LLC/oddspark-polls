@@ -20,8 +20,8 @@ available yet.
 
 | Status | Capabilities |
 | --- | --- |
-| Shipped | Multiple-Choice Polls, including bounded multi-select and opt-in Comments with Votes; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
-| Planned / backlog | Comment lists and moderation; CSV and XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
+| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, and owner/administrator Comment moderation; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Planned / backlog | CSV and XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
 
 ## Product tour
 
@@ -35,7 +35,10 @@ available yet.
    Creator enabled them, and submit.
 5. Follow the same Poll to `/{reference}/results`; its visibility policy decides
    whether the Tally is live, opens after close, or remains creator-only. The
-   canonical URL and Share action stay visible wherever sharing is lawful.
+   complete newest-first Comment list follows every visible Tally. Owners can
+   remove an individual Comment there; the Administrator uses the separate
+   exact-reference `/creator/moderation` surface. The canonical URL and Share
+   action stay visible wherever sharing is lawful.
 
 Provider callbacks and operator-only endpoints are intentionally outside this
 primary evaluator path.
@@ -55,6 +58,10 @@ contains the complete decisions and capability map. The evaluator-sized map is:
 - Vote acceptance is one constrained transaction, including an optional typed
   Comment contribution; duplicate identities become secret-keyed, Poll-scoped
   digests rather than stored raw identifiers (AD-7, AD-8, AD-19).
+- Results authorizes before coherently projecting a Tally and its complete
+  Comment list; Voting-owned owner/administrator commands delete only a
+  Comment and advance the shared representation version atomically (AD-19,
+  AD-21, AD-24).
 - Local, staging, and production share code but never state, and production is
   promoted only after the staging gate (AD-14).
 - Telemetry remains voter-blind, and result authorization happens before any

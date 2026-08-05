@@ -32,6 +32,10 @@ import {
   type ResultsTallyView,
   type ResultsView,
 } from "../modules/results/index";
+import type {
+  CommentView,
+  OwnerCommentView,
+} from "../modules/comments/index";
 import { resolveAuthorizedBallotLabels } from "../modules/results/post-vote";
 import {
   VOTE_COPY,
@@ -120,7 +124,14 @@ export type ResultsExplanationView = {
 };
 
 export type PostVoteResultsView =
-  | { kind: "visible"; status: PollStatus; tally: ResultsTallyView }
+  | {
+      kind: "visible";
+      status: PollStatus;
+      tally: ResultsTallyView;
+      comments: CommentView[];
+      ownerComments: OwnerCommentView[] | null;
+      validator: string;
+    }
   | ({
       kind: "after_close_hidden" | "creator_only_hidden" | "unavailable";
     } & ResultsExplanationView);
@@ -150,6 +161,7 @@ export type PollDeliveryState = {
   commentBody: string;
   commentDisplayName: string;
   commentFieldErrors: Record<string, string>;
+  commentModerationCsrfToken: string;
 };
 
 export type PollDeliveryResult = {
@@ -232,7 +244,14 @@ const rateLimitedOutcome = (): VoteOutcomeView => {
 const postVoteResultsFrom = (view: ResultsView): PostVoteResultsView => {
   switch (view.kind) {
     case "visible":
-      return { kind: view.kind, status: view.status, tally: view.tally };
+      return {
+        kind: view.kind,
+        status: view.status,
+        tally: view.tally,
+        comments: view.comments,
+        ownerComments: view.ownerComments,
+        validator: view.validator,
+      };
     case "after_close_hidden":
       return view.deadlineMs === null
         ? { kind: view.kind, body: RESULTS_COPY.afterCloseHiddenNoDeadline, time: null }
@@ -642,6 +661,8 @@ export async function deliverPollVotingSurface(
       commentBody,
       commentDisplayName,
       commentFieldErrors,
+      commentModerationCsrfToken:
+        input.requestContext?.csrfToken?.value ?? "",
     },
     status,
     headers,

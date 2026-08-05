@@ -77,6 +77,7 @@ const handle: APIRoute = async ({ request, params, locals }) => {
   const payload: LiveResultsPayload = {
     ...view.tally,
     status: view.status,
+    comments: view.comments,
   };
   return new Response(JSON.stringify(payload), { status: 200, headers });
 };

@@ -153,7 +153,7 @@ describe("trust badge Tally composition contract (Story 2.4, AC #4)", () => {
       /:global\(\.results-tally-badge\)\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*6;/,
     );
     expect(voteSurfaceSource).toMatch(
-      /\.poll-shell\[data-post-vote="true"\] > \.share-block\s*\{[^}]*grid-row:\s*7;/,
+      /\.poll-shell\[data-post-vote="true"\] > \.share-block\s*\{[^}]*grid-row:\s*8;/,
     );
   });
 });

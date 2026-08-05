@@ -7,6 +7,7 @@ interface Props {
   value?: string;
   id?: string;
   class?: string;
+  "aria-label"?: string | null;
   "aria-haspopup"?: string | boolean | null;
   "aria-controls"?: string | null;
   "aria-expanded"?: string | boolean | null;
@@ -24,6 +25,7 @@ const {
   value,
   id,
   class: className = "",
+  "aria-label": ariaLabel = undefined,
   "aria-haspopup": ariaHaspopup = undefined,
   "aria-controls": ariaControls = undefined,
   "aria-expanded": ariaExpanded = undefined,
@@ -44,6 +46,7 @@ const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
       href={href}
       id={id}
       hidden={hidden || undefined}
+      aria-label={ariaLabel ?? undefined}
       aria-haspopup={ariaHaspopup ?? undefined}
       aria-controls={ariaControls ?? undefined}
       aria-expanded={ariaExpanded ?? undefined}
@@ -61,6 +64,7 @@ const classes = ["btn-secondary", disabled ? "is-disabled" : "", className]
       value={value}
       id={id}
       hidden={hidden || undefined}
+      aria-label={ariaLabel ?? undefined}
       aria-haspopup={ariaHaspopup ?? undefined}
       aria-controls={ariaControls ?? undefined}
       aria-expanded={ariaExpanded ?? undefined}

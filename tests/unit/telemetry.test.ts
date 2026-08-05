@@ -48,7 +48,10 @@ describe("telemetry adapter", () => {
     expect(isForbiddenTelemetryKey("tokens")).toBe(true);
     expect(isForbiddenTelemetryKey("voterDigest")).toBe(true);
     expect(isForbiddenTelemetryKey("comment")).toBe(true);
+    expect(isForbiddenTelemetryKey("commentId")).toBe(true);
+    expect(isForbiddenTelemetryKey("comment_id")).toBe(true);
     expect(isForbiddenTelemetryKey("displayName")).toBe(true);
+    expect(isForbiddenTelemetryKey("reference")).toBe(true);
     expect(isForbiddenTelemetryKey("display_name")).toBe(true);
     expect(isForbiddenTelemetryKey("ballot")).toBe(true);
     expect(isForbiddenTelemetryKey("voterCode")).toBe(true);
@@ -206,6 +209,12 @@ describe("telemetry adapter", () => {
       "/creator/moderation/",
       false,
       "GET /creator/moderation",
+    ],
+    [
+      "POST",
+      "/creator/comments/delete/",
+      false,
+      "POST /creator/comments/delete",
     ],
     [
       "GET",

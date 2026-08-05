@@ -32,17 +32,21 @@ describe("Comment moderation form parsing", () => {
     },
   );
 
-  it("rejects unknown and File-valued inputs", () => {
+  it("rejects unknown, File-valued, control-character, and oversized inputs", () => {
     const unknown = form();
-    unknown.set("target", "private-reference");
+    unknown.set("return_to", "https://evil.example/private-reference");
     expect(parseCommentModerationForm(unknown).ok).toBe(false);
 
     const file = form();
     file.set("comment_id", new File(["secret"], "id.txt"));
     expect(parseCommentModerationForm(file).ok).toBe(false);
 
-    const forgedReturn = form();
-    forgedReturn.set("return_to", "https://evil.example/private-reference");
-    expect(parseCommentModerationForm(forgedReturn).ok).toBe(false);
+    const control = form();
+    control.set("csrf_token", "bad\ntoken");
+    expect(parseCommentModerationForm(control).ok).toBe(false);
+
+    const oversized = form();
+    oversized.set("csrf_token", "x".repeat(129));
+    expect(parseCommentModerationForm(oversized).ok).toBe(false);
   });
 });

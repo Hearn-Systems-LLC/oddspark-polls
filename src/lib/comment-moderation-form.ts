@@ -1,8 +1,8 @@
+import { isCommentId } from "../modules/comments/index";
 import type { CommentId } from "../shared/domain/index";
 
 export const MAX_COMMENT_MODERATION_CSRF_LENGTH = 128;
 
-const COMMENT_ID = /^[A-Za-z0-9_-]{1,128}$/u;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 
 export type CommentModerationMode = "owner" | "administrator";
@@ -37,7 +37,7 @@ export function parseCommentModerationForm(
   if (
     (mode !== "owner" && mode !== "administrator") ||
     commentId === undefined ||
-    !COMMENT_ID.test(commentId) ||
+    !isCommentId(commentId) ||
     csrfToken === undefined ||
     csrfToken.length === 0 ||
     csrfToken.length > MAX_COMMENT_MODERATION_CSRF_LENGTH ||
@@ -47,10 +47,6 @@ export function parseCommentModerationForm(
   }
   return {
     ok: true,
-    value: {
-      mode,
-      commentId: commentId as CommentId,
-      csrfToken,
-    },
+    value: { mode, commentId, csrfToken },
   };
 }

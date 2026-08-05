@@ -165,6 +165,13 @@ function enhance(): void {
         "aria-expanded",
         controller.isOpen() ? "true" : "false",
       );
+      // The adjacent <details> remains the complete no-JS confirmation floor.
+      // Reveal exactly one enhanced invoker only after its controller exists.
+      invoker.hidden = false;
+      invoker
+        .closest<HTMLElement>("[data-comment-item]")
+        ?.querySelector<HTMLElement>("[data-comment-delete-nojs]")
+        ?.setAttribute("hidden", "");
       invoker.addEventListener("click", (event) => {
         // Intercept only when the enhancer found the dialog.
         event.preventDefault();
@@ -233,6 +240,25 @@ function enhance(): void {
       });
     },
   );
+
+  document
+    .querySelectorAll<HTMLFormElement>("[data-comment-delete-form]")
+    .forEach((form) => {
+      form.addEventListener("submit", (event) => {
+        const submit = form.querySelector<HTMLButtonElement>(
+          'button[type="submit"]',
+        );
+        if (!submit) return;
+        if (form.dataset.submitting === "true") {
+          event.preventDefault();
+          return;
+        }
+        form.dataset.submitting = "true";
+        submit.setAttribute("aria-disabled", "true");
+        submit.style.pointerEvents = "none";
+        submit.textContent = form.dataset.pendingLabel ?? "DELETING…";
+      });
+    });
 }
 
 enhance();

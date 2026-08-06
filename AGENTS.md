@@ -1,5 +1,34 @@
 # AGENTS.md — oddspark-polls
 
+<!-- context7 -->
+Use the `ctx7` CLI to fetch current documentation whenever the user asks about a library, framework, SDK, API, CLI tool, or cloud service — even well-known ones like React, Next.js, Prisma, Express, Tailwind, Django, or Spring Boot. This includes API syntax, configuration, version migration, library-specific debugging, setup instructions, and CLI tool usage. Use even when you think you know the answer — your training data may not reflect recent changes. Prefer this over web search for library docs.
+
+Do not use for: refactoring, writing scripts from scratch, debugging business logic, code review, or general programming concepts.
+
+## Context7 steps
+
+1. Resolve library: `npx ctx7@latest library <name> "<what to look up>"` — use the official library name with proper punctuation.
+2. Pick the best `/org/project` match by exact name, description relevance, snippet count, source reputation, and benchmark score.
+3. Fetch docs: `npx ctx7@latest docs <libraryId> "<what to look up>"` — use one command per distinct concept unless the question is about their interaction.
+4. Answer using the fetched documentation.
+
+Call `library` first unless the user provides a `/org/project` ID. Do not run more than three Context7 commands per question or include sensitive information in queries. For version-specific docs, use the versioned ID returned by `library`. If quota is exhausted, suggest `npx ctx7@latest login` or `CONTEXT7_API_KEY`; do not silently fall back to training data.
+<!-- context7 -->
+
+<!-- codebase-memory-mcp:start -->
+## Codebase Knowledge Graph
+
+Prefer codebase-memory-mcp graph tools over grep, glob, or file search for code discovery:
+
+1. `search_graph`
+2. `trace_path`
+3. `get_code_snippet`
+4. `query_graph`
+5. `get_architecture`
+
+Use grep or file search for string literals, error messages, configuration and non-code files, or when graph results are insufficient. Run `index_repository` first if the repository is not indexed.
+<!-- codebase-memory-mcp:end -->
+
 > This file is the authoritative guide for Claude Code and any AI agent working in this
 > repository. Read it fully before taking any action. It is committed to the repo root
 > and applies to every session.

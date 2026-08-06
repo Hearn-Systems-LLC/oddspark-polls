@@ -155,6 +155,7 @@ location: src/scripts/results-live.ts, src/pages/[reference]/results/live.ts, sr
 severity: medium
 reason: Measure and revisit the per-viewer D1 read volume from three-second visible-only Results polling; shared caching remains forbidden across authorization boundaries. `src/scripts/results-live.ts`, `src/pages/[reference]/results/live.ts`, `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Implement dynamic backoff poll intervals — Implement exponential or adaptive backoff intervals in src/scripts/results-live.ts when poll results remain unchanged.
 
 ### DW-73: Clamp multi-select bounds only after explicit row removal or a stable count change, not while an option label is temporarily blank
 origin: Story 1.8 review, 2026-07-30
@@ -183,6 +184,7 @@ location: src/middleware.ts, src/lib/csrf.ts
 severity: medium
 reason: Re-audit the historical Story 1.2 middleware-scope bundle as separate current findings before changing it; several original observations were superseded by the present request-context → telemetry → session → CSRF → creator-guard chain. `src/middleware.ts`, `src/lib/csrf.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Perform architectural re-audit of middleware findings — Review src/middleware.ts and src/lib/csrf.ts against AD-22 and file individual actionable findings.
 
 ### DW-77: Restore .astro static checking when @astrojs/check supports the pinned TypeScript 7 stack
 origin: Story 1.1 and Story 1.2 reviews, 2026-07-30
@@ -204,6 +206,7 @@ location: src/pages/api/sign-in.ts, src/adapters/auth/index.ts
 severity: medium
 reason: Replace Better Auth's per-isolate/default auth-endpoint limiter with an explicit production-safe policy if abuse evidence warrants it. `src/pages/api/sign-in.ts`, `src/adapters/auth/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Keep current default auth rate limiting
 
 ### DW-80: Remove duplicate createAuth() / session reads on cookie-bearing Better Auth traffic without weakening middleware behavior
 origin: Story 1.2 review, 2026-07-30
@@ -218,6 +221,7 @@ location: text/plain, src/lib/csrf.ts
 severity: medium
 reason: Decide whether same-origin `text/plain` forms belong in the CSRF body-transport contract; there are no current consumers. `src/lib/csrf.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Explicitly reject text/plain POST requests in CSRF middleware — Update src/lib/csrf.ts to reject text/plain content-types on mutation routes.
 
 ### DW-82: Align the masked .dev.vars parser with runtime dotenv semantics for comments, whitespace, and BETTER_AUTH_URL validation
 origin: Story 1.2 review, 2026-07-30
@@ -239,13 +243,16 @@ location: src/lib/poll-delivery.ts, src/pages/[reference].astro
 severity: medium
 reason: Make an explicit product/performance decision about caching canonical public Poll delivery; every unknown root reference currently reads D1. `src/lib/poll-delivery.ts`, `src/pages/[reference].astro` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Maintain direct D1 reads for public poll delivery
 
 ### DW-85: Define corrupt-state handling for an owned Poll with no canonical poll_reference row
 origin: Story 1.3 review round 2, 2026-07-30
 location: src/adapters/d1/index.ts
 severity: medium
 reason: Define corrupt-state handling for an owned Poll with no canonical `poll_reference` row. `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
-status: open
+status: done 2026-08-06
+resolution: closed by human decision: Foreign key constraints and transaction integrity prevent orphan poll rows.
+decision: 2026-08-06 Rely on foreign key constraint invariants — Foreign key constraints and transaction integrity prevent orphan poll rows.
 
 ### DW-86: Rebuild poll_reference if a future multi-reference design needs a safe default for is_canonical; current writers set it explicitly
 origin: Story 1.3 review round 3, 2026-07-30
@@ -253,6 +260,7 @@ location: db/migrations/0004_polls.sql, src/adapters/d1/index.ts
 severity: medium
 reason: Rebuild `poll_reference` if a future multi-reference design needs a safe default for `is_canonical`; current writers set it explicitly. `db/migrations/0004_polls.sql`, `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Keep explicit writer requirement without schema change
 
 ### DW-87: Establish a request-size policy so creator POST bodies are not fully materialized twice without a cap
 origin: Story 1.3 review round 4, 2026-07-30
@@ -274,6 +282,7 @@ location: src/middleware.ts
 severity: medium
 reason: Design a distinct transient-auth-lookup outcome instead of presenting D1 failure as signed-out. `src/middleware.ts` (Taxonomy: 3+, Owner: Sally (UX Designer))
 status: open
+decision: 2026-08-06 Maintain current graceful degradation to anonymous state
 
 ### DW-90: Clear the non-sensitive creator-session marker when sign-out succeeds after a failed pre-handler session lookup
 origin: Story 1.2 review round 2, 2026-07-30
@@ -288,6 +297,7 @@ location: src/adapters/auth/index.ts
 severity: medium
 reason: Give provider-email lookup outages truthful retry/account-linking behavior instead of a misleading local-verification denial. `src/adapters/auth/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Improve OAuth email lookup failure error mapping — Update src/adapters/auth/index.ts to return a distinct provider_outage error on email fetch failure.
 
 ### DW-92: Add a remote schema preflight proving migration 0003 is present before auth code depends on its uniqueness guarantee
 origin: Story 1.2 review round 2, 2026-07-30
@@ -322,7 +332,9 @@ origin: Story 1.4 review round 2, 2026-07-30
 location: src/lib/poll-delivery.ts, src/adapters/d1/index.ts
 severity: medium
 reason: Revisit the theoretical generated-reference case-fold collision only if the reserved-reference design changes; current probability and guards make it non-actionable. `src/lib/poll-delivery.ts`, `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
-status: open
+status: done 2026-08-06
+resolution: closed by human decision: Current reference generation algorithms and collision guards make case-fold collisions non-actionable.
+decision: 2026-08-06 Close as non-actionable under current reference generation design — Current reference generation algorithms and collision guards make case-fold collisions non-actionable.
 
 ### DW-97: Reassess whether exact lookup → bounded case-fold fallback → redirect needs a named application seam
 origin: Story 1.4 review round 2, 2026-07-30
@@ -330,6 +342,7 @@ location: src/lib/poll-delivery.ts, src/adapters/d1/index.ts
 severity: medium
 reason: Reassess whether exact lookup → bounded case-fold fallback → redirect needs a named application seam. `src/lib/poll-delivery.ts`, `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Keep current route and adapter reference resolution
 
 ### DW-98: Make authenticated create-poll E2E retries generate a fresh slug or clean per attempt
 origin: Story 1.4 review round 2, 2026-07-30
@@ -350,14 +363,18 @@ origin: Story 1.4 review round 3, 2026-07-30
 location: src/lib/poll-delivery.ts, src/adapters/d1/index.ts
 severity: medium
 reason: Decide whether corrupt orphan reference rows should recheck reachability before a case-fold redirect; foreign-key cascades prevent the state in normal writes. `src/lib/poll-delivery.ts`, `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
-status: open
+status: done 2026-08-06
+resolution: closed by human decision: Foreign key constraints prevent corrupt orphan reference rows in normal operations.
+decision: 2026-08-06 Close as unnecessary due to database foreign key invariants — Foreign key constraints prevent corrupt orphan reference rows in normal operations.
 
 ### DW-101: Decide whether scripted POSTs to case-variant custom slugs should preserve a ballot across canonicalization; rendered forms always post to canonical paths
 origin: Story 1.5 review, 2026-07-30
 location: src/lib/poll-delivery.ts
 severity: medium
 reason: Decide whether scripted POSTs to case-variant custom slugs should preserve a ballot across canonicalization; rendered forms always post to canonical paths. `src/lib/poll-delivery.ts` (Taxonomy: 3+, Owner: Winston (Architect))
-status: open
+status: done 2026-08-06
+resolution: closed by human decision: Rendered forms post to canonical URLs; non-canonical POST APIs should fail or require canonical URLs.
+decision: 2026-08-06 Enforce canonical URL submission without 307 body-preserving redirect — Rendered forms post to canonical URLs; non-canonical POST APIs should fail or require canonical URLs.
 
 ### DW-102: Implement adapter rendering for extension:* vote contributions only with the first real Comment or Voter-Code consumer
 origin: Story 1.5 review, 2026-07-30
@@ -365,13 +382,16 @@ location: src/modules/voting/index.ts, src/adapters/d1/index.ts
 severity: medium
 reason: Implement adapter rendering for `extension:*` vote contributions only with the first real Comment or Voter-Code consumer. `src/modules/voting/index.ts`, `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Winston (Architect))
 status: open
+decision: 2026-08-06 Keep extension adapter rendering deferred until new consumer lands
 
 ### DW-103: Treat VOTE_DIGEST_SECRET rotation as a planned integrity incident because prior duplicate claims become incomparable
 origin: Story 1.5 review, 2026-07-30
 location: README.md
 severity: medium
 reason: Treat `VOTE_DIGEST_SECRET` rotation as a planned integrity incident because prior duplicate claims become incomparable. The operational warning remains in `README.md`. (Taxonomy: 3+, Owner: Winston (Architect))
-status: open
+status: done 2026-08-06
+resolution: closed by human decision: VOTE_DIGEST_SECRET operational constraints are documented in README.md and AGENTS.md.
+decision: 2026-08-06 Close entry as fully documented operational policy in README.md — VOTE_DIGEST_SECRET operational constraints are documented in README.md and AGENTS.md.
 
 ### DW-104: Reduce the replay pre-read amplification on throttled Vote floods without weakening replay-before-challenge correctness
 origin: Story 1.5 review, 2026-07-30
@@ -392,7 +412,9 @@ origin: Story 1.5 review, 2026-07-30
 location: /api/health, src/pages/api/health.ts, .github/workflows/deploy.yml
 severity: medium
 reason: Decide whether `/api/health` should perform deeper D1/rate-limiter checks; its current presence-only contract is intentionally side-effect free and production is now smoked. `src/pages/api/health.ts`, `.github/workflows/deploy.yml` (Taxonomy: 3+, Owner: Winston (Architect))
-status: open
+status: done 2026-08-06
+resolution: closed by human decision: /api/health presence-only contract is an architectural invariant specified in AGENTS.md.
+decision: 2026-08-06 Preserve presence-only /api/health contract per AGENTS.md — /api/health presence-only contract is an architectural invariant specified in AGENTS.md.
 
 ### DW-107: Reject or safely encode an unquoted # if future provider credential formats can contain one
 origin: Story 1.5 review, 2026-07-30

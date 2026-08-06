@@ -11,7 +11,7 @@ Humanize known-group Polls by letting Voters attach an optional short Comment an
 - Story 4.1: Comment With Your Vote
 - Story 4.2: Comment List & Moderation
 - Story 4.3: CSV Export (shipped)
-- Story 4.4: XLSX Export (implemented; release evidence pending)
+- Story 4.4: XLSX Export (shipped — merged to `main` and deployed through staging/production deploy gate, 2026-08-06)
 
 ## Requirements & Constraints
 

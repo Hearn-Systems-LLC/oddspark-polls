@@ -101,11 +101,24 @@ async function expectExportControlLayout(page) {
 test.describe("creator XLSX export", () => {
   const users = [];
   let errors = [];
+  let expectedConflicts = [];
+  let allowExpectedConflict = false;
 
   test.beforeEach(({ page }) => {
     errors = [];
+    expectedConflicts = [];
+    allowExpectedConflict = false;
     page.on("console", (message) => {
-      if (message.type() === "error") errors.push(message.text());
+      if (message.type() !== "error") return;
+      if (
+        allowExpectedConflict &&
+        message.text() ===
+          "Failed to load resource: the server responded with a status of 409 (Conflict)"
+      ) {
+        expectedConflicts.push(message.text());
+        return;
+      }
+      errors.push(message.text());
     });
     page.on("pageerror", (error) => errors.push(error.message));
   });
@@ -241,18 +254,31 @@ test.describe("creator XLSX export", () => {
     const oversized = seedPoll(owner.userId, "oversized");
     seedOversize(oversized.pollId);
     await page.goto(`/creator/polls/${oversized.pollId}`);
-    await expect(page.getByRole("link", { name: "EXPORT XLSX" })).toHaveAttribute(
+    const xlsxLink = page.getByRole("link", { name: "EXPORT XLSX" });
+    await expect(xlsxLink).toHaveAttribute(
       "href",
       `/creator/polls/${oversized.pollId}/export.xlsx`,
     );
 
-    const xlsxResponse = await page.request.get(
-      `/creator/polls/${oversized.pollId}/export.xlsx`,
-    );
+    allowExpectedConflict = true;
+    const [xlsxResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/creator/polls/${oversized.pollId}/export.xlsx`) &&
+          response.request().isNavigationRequest(),
+      ),
+      xlsxLink.click(),
+    ]);
     expect(xlsxResponse.status()).toBe(409);
-    expect(await xlsxResponse.text()).toBe(OVERSIZE_MESSAGE);
     expect(xlsxResponse.headers()["content-disposition"]).toBeUndefined();
     expect(xlsxResponse.headers()["cache-control"]).toBe("private, no-store");
+    await expect(page.locator("body")).toHaveText(OVERSIZE_MESSAGE);
+    expect(page.url()).toContain(
+      `/creator/polls/${oversized.pollId}/export.xlsx`,
+    );
+    expect(expectedConflicts).toEqual([
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    ]);
 
     const csvResponse = await page.request.get(
       `/creator/polls/${oversized.pollId}/export.csv`,

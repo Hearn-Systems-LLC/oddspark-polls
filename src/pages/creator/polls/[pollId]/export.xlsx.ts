@@ -11,6 +11,14 @@ import type { PollId, UserId } from "../../../../shared/domain/index";
 export const XLSX_OVERSIZE_MESSAGE =
   "XLSX export supports up to 1,000 accepted votes. Download CSV for larger Polls.";
 
+function responseForRequest(
+  request: Request,
+  body: BodyInit | null,
+  init: ResponseInit,
+): Response {
+  return new Response(request.method === "HEAD" ? null : body, init);
+}
+
 export const ALL: APIRoute = () => {
   const headers = exportBaseHeaders();
   headers.set("allow", "GET, HEAD");
@@ -35,13 +43,13 @@ export function createXlsxExportHandler(
         userId: principal.userId as UserId,
       });
       if (!result) {
-        return new Response("Not found.", {
+        return responseForRequest(request, "Not found.", {
           status: 404,
           headers: exportBaseHeaders(),
         });
       }
       if (result.status === "oversize") {
-        return new Response(XLSX_OVERSIZE_MESSAGE, {
+        return responseForRequest(request, XLSX_OVERSIZE_MESSAGE, {
           status: 409,
           headers: exportBaseHeaders(),
         });
@@ -60,12 +68,12 @@ export function createXlsxExportHandler(
         return new Response(null, { status: 200, headers });
       }
       const body = await serialize(result.export.dataset);
-      return new Response(body, { status: 200, headers });
+      return responseForRequest(request, body, { status: 200, headers });
     } catch {
       if (locals.requestContext) {
         locals.requestContext.resultsLookupFailed = true;
       }
-      return new Response("Export unavailable.", {
+      return responseForRequest(request, "Export unavailable.", {
         status: 500,
         headers: exportBaseHeaders(),
       });

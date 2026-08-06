@@ -205,6 +205,40 @@ describe("creator XLSX export route", () => {
     expect(HEAD).toBe(GET);
   });
 
+  it("keeps missing, oversized, and failed HEAD outcomes bodyless", async () => {
+    const owner = await authenticated();
+
+    const missing = await requestRoute(HEAD, crypto.randomUUID(), {
+      method: "HEAD",
+      headers: { cookie: owner.cookie },
+    });
+    expect(missing.status).toBe(404);
+    expect(await missing.text()).toBe("");
+
+    const oversizedPoll = await poll(owner.userId, "head-oversized");
+    await seedAdditionalVotes(oversizedPoll, 1_000);
+    const oversized = await requestRoute(HEAD, oversizedPoll, {
+      method: "HEAD",
+      headers: { cookie: owner.cookie },
+    });
+    expect(oversized.status).toBe(409);
+    expect(oversized.headers.get("content-disposition")).toBeNull();
+    expect(await oversized.text()).toBe("");
+
+    const failedPoll = await poll(owner.userId, "head-failed");
+    await testEnv.DB.prepare(
+      "UPDATE poll SET poll_type = 'meeting' WHERE id = ?1",
+    )
+      .bind(failedPoll)
+      .run();
+    const failed = await requestRoute(HEAD, failedPoll, {
+      method: "HEAD",
+      headers: { cookie: owner.cookie },
+    });
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).toBe("");
+  });
+
   it("returns 405 with Allow and safe headers after CSRF", async () => {
     const owner = await authenticated();
     const pollId = await poll(owner.userId);

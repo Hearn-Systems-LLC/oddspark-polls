@@ -655,6 +655,6 @@ flowchart LR
 | Discovery ranking and search | The listed catalog is large enough that newest-first pagination is no longer useful. |
 | Email, passkeys, or additional OAuth providers | Creator research shows Google and GitHub exclude a material part of the target audience. |
 | Voter Codes and VPN Blocking implementation | The first real Poll needs them, per the PRD phase gate. |
-| XLSX capacity model | New measured Worker evidence justifies revisiting the shipped 1,000-Vote synchronous cap and the reconciled FR-22/UX contract selects another safe architecture. |
+| XLSX capacity model | New measured Worker evidence justifies revisiting the ratified 1,000-Vote synchronous cap and the reconciled FR-22/UX contract selects another safe architecture. |
 | Separate Workers or service bindings | A capability needs an independent deployment cadence or the modular monolith breaches a measured platform limit. |
 | Analytics vendor | Success metrics require durable product analytics beyond privacy-safe Workers operational telemetry. |

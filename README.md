@@ -20,7 +20,8 @@ available yet.
 
 | Status | Capabilities |
 | --- | --- |
-| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, and owner CSV/XLSX export; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, and owner CSV export; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Implemented, release evidence pending | Bounded owner XLSX export through 1,000 accepted Votes, with the existing CSV path retained for larger Polls |
 | Planned / backlog | Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
 
 ## Product tour

@@ -2,7 +2,7 @@
 title: 'Story 4.4: Bounded Synchronous XLSX Export'
 type: 'feature'
 created: '2026-08-05T23:33:54-04:00'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: 'bbe49a0194749b119be485286d31eca980ad12e2'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -66,6 +66,21 @@ warnings:
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-08-06 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 7: (high 1, medium 5, low 1)
+- defer: 0
+- reject: 5: (high 0, medium 3, low 2)
+- addressed_findings:
+  - `[high]` `[patch]` Made the maximum workerd fixture use 1,000 distinct maximum-length Comments and display names so SheetJS shared strings cannot understate the bounded memory case.
+  - `[medium]` `[patch]` Made every missing, oversized, and failed HEAD outcome bodyless while retaining its GET status and safe headers.
+  - `[medium]` `[patch]` Preflighted every table before importing SheetJS or constructing a worksheet, rejecting empty headers, ragged rows, invalid cells, and row/column overflow.
+  - `[medium]` `[patch]` Activated the rendered XLSX link in the oversized browser journey and asserted the real `409` navigation, exact page text, expected conflict signal, and continuing CSV availability.
+  - `[medium]` `[patch]` Changed release language to distinguish implemented XLSX code from deployed evidence and retained the ratified architecture wording.
+  - `[medium]` `[patch]` Restored replay, discovery-exclusion, and failed/no-op representation-version invariants in the regenerated Epic 4 context.
+  - `[low]` `[patch]` Replaced duplicate adapter constants with one Results-owned 1,000-Vote product boundary.
 
 ## Design Notes
 

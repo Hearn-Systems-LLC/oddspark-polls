@@ -3,11 +3,12 @@
 // purpose-built and identifier-free before the type strategy sees it.
 
 import type { MultipleChoiceExportFacts } from "../../../modules/polls/types/multiple-choice";
-import type {
-  BoundedExportFactDriver,
-  ExportFactDriver,
-  ExportDriverFacts,
-  SharedExportVoteFacts,
+import {
+  XLSX_ACCEPTED_VOTE_LIMIT,
+  type BoundedExportFactDriver,
+  type ExportFactDriver,
+  type ExportDriverFacts,
+  type SharedExportVoteFacts,
 } from "../../../modules/results/export";
 import type { PollId, PollOptionId } from "../../../shared/domain/index";
 
@@ -31,8 +32,6 @@ type ProjectionRow = {
   accepted_vote_count: number | null;
   oversized: number | null;
 };
-
-export const XLSX_ACCEPTED_VOTE_LIMIT = 1_000;
 
 /** One statement / one D1 snapshot; only the positive privacy allowlist. */
 export const MULTIPLE_CHOICE_EXPORT_PROJECTION_QUERY = `WITH target_votes AS MATERIALIZED (

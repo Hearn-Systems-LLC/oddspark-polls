@@ -8,7 +8,6 @@ import {
   createBoundedMultipleChoiceExportFactDriver,
   createMultipleChoiceExportFactDriver,
   MULTIPLE_CHOICE_BOUNDED_EXPORT_PROJECTION_QUERY,
-  XLSX_ACCEPTED_VOTE_LIMIT,
 } from "../../src/adapters/d1/export/multiple-choice";
 import { createOwnerExportPersistence } from "../../src/adapters/d1/index";
 import { serializeXlsxExport } from "../../src/adapters/xlsx/index";
@@ -18,6 +17,7 @@ import {
   bindExportDriver,
   queryBoundedOwnerExport,
   queryOwnerExport,
+  XLSX_ACCEPTED_VOTE_LIMIT,
 } from "../../src/modules/results/export";
 import type { PollId, UserId } from "../../src/shared/domain/index";
 
@@ -100,8 +100,9 @@ async function seedVotes(
   if (withMaxText) {
     await testEnv.DB.prepare(
       `INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms)
-       SELECT 'comment-' || id, id, printf('%.*c', 500, 'C'),
-              printf('%.*c', 80, 'N'), created_at_ms
+       SELECT 'comment-' || id, id,
+              substr(id, -4) || printf('%.*c', 496, 'C'),
+              substr(id, -4) || printf('%.*c', 76, 'N'), created_at_ms
        FROM vote WHERE poll_id = ?1`,
     )
       .bind(POLL)
@@ -206,8 +207,18 @@ describe("bounded owner XLSX export D1 adapter", () => {
       ["VOTERS", 1_000],
       ["SELECTIONS", 30_000],
     ]);
-    expect(result.export.dataset.votes.rows[0]?.[1]).toBe("N".repeat(80));
-    expect(result.export.dataset.votes.rows[0]?.[2]).toBe("C".repeat(500));
+    expect(result.export.dataset.votes.rows[0]?.[1]).toBe(
+      `0001${"N".repeat(76)}`,
+    );
+    expect(result.export.dataset.votes.rows[0]?.[2]).toBe(
+      `0001${"C".repeat(496)}`,
+    );
+    expect(new Set(result.export.dataset.votes.rows.map((row) => row[1])).size).toBe(
+      1_000,
+    );
+    expect(new Set(result.export.dataset.votes.rows.map((row) => row[2])).size).toBe(
+      1_000,
+    );
     const bytes = await serializeXlsxExport(result.export.dataset);
     const xlsx = await import("xlsx");
     const workbook = xlsx.read(bytes, { type: "array", cellFormula: true });

@@ -101,6 +101,23 @@ describe("XLSX export adapter", () => {
     await expect(
       serializeXlsxExport(dataset(), { worksheetColumnLimit: 3 }),
     ).rejects.toThrow("XLSX worksheet column limit exceeded");
+
+    const emptyColumns = dataset();
+    emptyColumns.summary = { columns: [], rows: [] };
+    await expect(serializeXlsxExport(emptyColumns)).rejects.toThrow(
+      "XLSX worksheet column limit exceeded",
+    );
+
+    for (const raggedRow of [
+      ["2027-01-15T08:00:00.000Z", "", ""],
+      ["2027-01-15T08:00:00.000Z", "", "", "Alpha", "unexpected"],
+    ]) {
+      const ragged = dataset();
+      ragged.votes.rows = [raggedRow];
+      await expect(serializeXlsxExport(ragged)).rejects.toThrow(
+        "Malformed XLSX table row",
+      );
+    }
   });
 
   it("rejects NUL, CR, malformed Unicode, unsafe numbers, and invalid limits", async () => {

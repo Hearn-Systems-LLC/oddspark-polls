@@ -2,12 +2,11 @@ import type {
   CanonicalExportDataset,
   CanonicalExportTable,
 } from "../../modules/results/export";
+import { XLSX_ACCEPTED_VOTE_LIMIT } from "../../modules/results/export";
 import type { PollTypeExportCell } from "../../shared/application/index";
 
 export const XLSX_WORKSHEET_ROW_LIMIT = 1_048_576;
 export const XLSX_WORKSHEET_COLUMN_LIMIT = 16_384;
-export const XLSX_EXPORT_VOTE_LIMIT = 1_000;
-
 type XlsxSerializationOptions = {
   /** Supports boundary tests without allocating an Excel-sized fixture. */
   worksheetRowLimit?: number;
@@ -60,20 +59,35 @@ function literalRow(cells: readonly PollTypeExportCell[]): PollTypeExportCell[] 
   });
 }
 
-function appendTable(
-  xlsx: typeof import("xlsx"),
-  workbook: import("xlsx").WorkBook,
-  tableName: "VOTES" | "TALLY" | "SUMMARY",
+function validateTable(
   table: CanonicalExportTable,
   worksheetRowLimit: number,
   worksheetColumnLimit: number,
 ): void {
-  if (table.columns.length > worksheetColumnLimit) {
+  if (
+    table.columns.length === 0 ||
+    table.columns.length > worksheetColumnLimit
+  ) {
     throw new Error("XLSX worksheet column limit exceeded");
   }
   if (table.rows.length + 1 > worksheetRowLimit) {
     throw new Error("XLSX worksheet row limit exceeded");
   }
+  literalRow(table.columns);
+  for (const row of table.rows) {
+    if (row.length !== table.columns.length) {
+      throw new Error("Malformed XLSX table row");
+    }
+    literalRow(row);
+  }
+}
+
+function appendTable(
+  xlsx: typeof import("xlsx"),
+  workbook: import("xlsx").WorkBook,
+  tableName: "VOTES" | "TALLY" | "SUMMARY",
+  table: CanonicalExportTable,
+): void {
   const worksheet = xlsx.utils.aoa_to_sheet([
     literalRow(table.columns),
     ...table.rows.map(literalRow),
@@ -100,36 +114,21 @@ export async function serializeXlsxExport(
   ) {
     throw new Error("Invalid XLSX worksheet limit");
   }
-  if (dataset.votes.rows.length > XLSX_EXPORT_VOTE_LIMIT) {
+  if (dataset.votes.rows.length > XLSX_ACCEPTED_VOTE_LIMIT) {
     throw new Error("XLSX accepted Vote limit exceeded");
+  }
+
+  // Validate the complete canonical workbook before importing SheetJS or
+  // constructing any private worksheet.
+  for (const table of [dataset.votes, dataset.tally, dataset.summary]) {
+    validateTable(table, worksheetRowLimit, worksheetColumnLimit);
   }
 
   const xlsx = await import("xlsx");
   const workbook = xlsx.utils.book_new();
-  appendTable(
-    xlsx,
-    workbook,
-    "VOTES",
-    dataset.votes,
-    worksheetRowLimit,
-    worksheetColumnLimit,
-  );
-  appendTable(
-    xlsx,
-    workbook,
-    "TALLY",
-    dataset.tally,
-    worksheetRowLimit,
-    worksheetColumnLimit,
-  );
-  appendTable(
-    xlsx,
-    workbook,
-    "SUMMARY",
-    dataset.summary,
-    worksheetRowLimit,
-    worksheetColumnLimit,
-  );
+  appendTable(xlsx, workbook, "VOTES", dataset.votes);
+  appendTable(xlsx, workbook, "TALLY", dataset.tally);
+  appendTable(xlsx, workbook, "SUMMARY", dataset.summary);
 
   return xlsx.write(workbook, {
     bookType: "xlsx",

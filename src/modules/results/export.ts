@@ -13,6 +13,9 @@ import type { PollId, PollType, UserId } from "../../shared/domain/index";
 import { COMMENT_CAPS } from "../comments/index";
 import type { ViewerContext } from "./index";
 
+/** Product boundary shared by the bounded fact reader and XLSX transport. */
+export const XLSX_ACCEPTED_VOTE_LIMIT = 1_000;
+
 export type ExportOwnerEnvelope = {
   pollId: PollId;
   canonicalReference: string;

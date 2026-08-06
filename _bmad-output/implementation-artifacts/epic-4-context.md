@@ -11,12 +11,12 @@ Humanize known-group Polls by letting Voters attach an optional short Comment an
 - Story 4.1: Comment With Your Vote
 - Story 4.2: Comment List & Moderation
 - Story 4.3: CSV Export (shipped)
-- Story 4.4: XLSX Export (shipped)
+- Story 4.4: XLSX Export (implemented; release evidence pending)
 
 ## Requirements & Constraints
 
-- A Vote may carry at most one optional Comment and optional display name. A Comment cannot be submitted independently, must pass the same Security Toggles as its Vote, and must commit or roll back with that Vote. When Comments are disabled, the composer is absent.
-- Comments follow Tally visibility: viewers see them only when they may see results. Lists are complete and newest first. The Poll owner may delete Comments on their Poll; the Administrator may delete any Comment through a distinct capability.
+- A Vote may carry at most one optional Comment and optional display name. A Comment cannot be submitted independently, must pass the same Security Toggles as its Vote, and must commit or roll back with that Vote. A failed Vote leaves no Comment, an exact accepted replay creates no duplicate, and the composer is absent when Comments are disabled.
+- Comments follow Tally visibility: viewers see them only when they may see results. Lists are complete and newest first, and discovery projections never contain Comments. The Poll owner may delete Comments on their Poll; the Administrator may delete any Comment through a distinct capability.
 - Comment bodies and display names are plain text, escaped on every surface, and excluded from operational telemetry. A Comment is limited to 500 UTF-16 code units, a display name to 80, and a blank Comment discards its name.
 - Creator exports contain one row per accepted Vote with the Poll Type's response data, RFC 3339 timestamp, and current Comment/name when present, plus the complete server-computed Tally. CSV and in-range XLSX must represent the same canonical data; PDF is out of scope.
 - Export is owner-only and authorized server-side before any Vote, selection, Comment, or Tally read. Internal IDs, IP or session identifiers, HMAC digests, duplicate claims, and all other enforcement data must not cross the export boundary.
@@ -27,7 +27,7 @@ Humanize known-group Polls by letting Voters attach an optional short Comment an
 
 - Poll Types are strategies with a required export projection. Generic CSV and XLSX transports consume one format-neutral canonical dataset, allowing later Ranked, Image, and Meeting Poll types to add row shapes without adding Poll Type switches to the exporters.
 - Persist the optional Comment as a one-to-zero-or-one child of the Vote in the constrained Vote batch alongside type facts, duplicate claims, optional code redemption, and the Poll's representation-version increment. A storage guard rechecks that Comments remain enabled so a concurrent disable cannot leave mismatched Vote and Comment state.
-- The Comments capability canonicalizes input and owns the legal owner and Administrator deletion commands; Voting owns the persisted Comment fact. A successful deletion removes only the Comment and increments `representation_version` once in the same guarded transaction. Denied, stale, or failed deletions change neither.
+- The Comments capability canonicalizes input and owns the legal owner and Administrator deletion commands; Voting owns the persisted Comment fact. A successful deletion removes only the Comment and increments `representation_version` once in the same guarded transaction. Denied, stale, failed, or no-op deletions change neither.
 - Results projections authorize visibility before reading private facts. Visible Tallies and Comments come from one snapshot; owner moderation may additionally expose Comment IDs, while the Administrator's exact-reference projection exposes Comments without granting Tally, Vote, owner, or security access.
 - Export separately requires the authenticated internal Poll owner before projection. One type-specific D1 driver reads accepted raw rows and the complete Tally from one snapshot, uses IDs only for joins and deterministic ordering, and strips them before the Poll Type projector and transport boundary.
 - XLSX runs inside workerd behind the export port. After authorization, one snapshot-consistent D1 statement reads at most 1,001 accepted Votes; the extra Vote is only an oversize sentinel and causes the query to return no Vote or selection rows. In-range workbooks contain exactly `VOTES`, `TALLY`, and `SUMMARY`; Vote, worksheet-row, or worksheet-column overflow fails closed before response bytes begin.

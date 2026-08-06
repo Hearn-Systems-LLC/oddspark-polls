@@ -1,5 +1,6 @@
 .bmad-loop/runs/
 .bmad-loop/cache/
+.bmad-loop/archive/
 .bmad-loop/policy.toml
 
 # BMad personal config (install answers scoped to one person)
@@ -38,6 +39,8 @@ test-results/*
 !test-results/story-3-6-presentable-repository-proof/voting-375-dark.png
 !test-results/story-4-2-comment-moderation-proof/
 !test-results/story-4-2-comment-moderation-proof/*.png
+!test-results/story-4-3-csv-export-proof/
+!test-results/story-4-3-csv-export-proof/*.png
 playwright-report/
 blob-report/
 playwright/.cache/

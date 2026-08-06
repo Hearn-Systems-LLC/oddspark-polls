@@ -1012,6 +1012,12 @@ const detailPath = `/creator/polls/${pollId}`;
                 >
                   EXPORT CSV
                 </ButtonSecondary>
+                <ButtonSecondary
+                  href={`${detailPath}/export.xlsx`}
+                  data-export-xlsx
+                >
+                  EXPORT XLSX
+                </ButtonSecondary>
               </p>
             </div>
 
@@ -1304,6 +1310,18 @@ const detailPath = `/creator/polls/${pollId}`;
   .results-link-row,
   .export-link-row {
     margin: 0;
+  }
+
+  .export-link-row {
+    display: flex;
+    gap: var(--space-3);
+  }
+
+  .export-link-row > :global(.btn-secondary) {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: var(--space-2);
+    white-space: nowrap;
   }
 
   .form-error {

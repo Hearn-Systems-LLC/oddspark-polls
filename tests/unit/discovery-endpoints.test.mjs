@@ -15,6 +15,12 @@ describe("discovery endpoint method contracts", () => {
   it("keeps sitemap enumeration in the Discovery application service", () => {
     const source = fs.readFileSync("src/pages/sitemap.xml.ts", "utf8");
     expect(source).toContain("buildDiscoverySitemap");
+    expect(source).toContain("parseDiscoverySitemapRequest");
+    expect(source).toContain("AbortSignal.any");
+    expect(source).toContain("request.signal");
+    expect(source).toContain("AbortSignal.timeout(SITEMAP_BUILD_BUDGET_MS)");
+    expect(source).toContain("deadlineAtMs");
+    expect(source).toContain("sitemap_range_gone");
     expect(source).not.toMatch(/SELECT\s|FROM\s+poll|discovery_state/i);
   });
 });

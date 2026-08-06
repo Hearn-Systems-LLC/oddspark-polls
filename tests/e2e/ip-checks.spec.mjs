@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 2.2 — IP Checks: same-network different-browser rejection, Session
@@ -60,9 +61,7 @@ test.describe("IP Checks", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   async function signIn(context, baseURL) {
@@ -152,7 +151,7 @@ test.describe("IP Checks", () => {
     assertUuid(pollId);
 
     const toggleRow = d1Query(
-      `SELECT session_checks_enabled, ip_checks_enabled, result_visibility FROM poll WHERE id = '${pollId}'`,
+      sql`SELECT session_checks_enabled, ip_checks_enabled, result_visibility FROM poll WHERE id = ${pollId}`,
     );
     expect(toggleRow[0]?.session_checks_enabled).toBe(sessionChecks ? 1 : 0);
     expect(toggleRow[0]?.ip_checks_enabled).toBe(ipChecks ? 1 : 0);
@@ -215,10 +214,10 @@ test.describe("IP Checks", () => {
     await expect(pageA.getByText("Counted.")).toBeVisible({ timeout: 15_000 });
 
     const versionAfterA = d1Query(
-      `SELECT representation_version AS v FROM poll WHERE id = '${poll.pollId}'`,
+      sql`SELECT representation_version AS v FROM poll WHERE id = ${poll.pollId}`,
     )[0].v;
     const votesAfterA = d1Query(
-      `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${poll.pollId}'`,
+      sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${poll.pollId}`,
     )[0].n;
 
     // Submit browser B's pre-loaded form.
@@ -248,10 +247,10 @@ test.describe("IP Checks", () => {
     await expect(pageB).toHaveTitle(/Already voted/);
 
     const versionAfterB = d1Query(
-      `SELECT representation_version AS v FROM poll WHERE id = '${poll.pollId}'`,
+      sql`SELECT representation_version AS v FROM poll WHERE id = ${poll.pollId}`,
     )[0].v;
     const votesAfterB = d1Query(
-      `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${poll.pollId}'`,
+      sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${poll.pollId}`,
     )[0].n;
     expect(versionAfterB).toBe(versionAfterA);
     expect(votesAfterB).toBe(votesAfterA);
@@ -282,20 +281,20 @@ test.describe("IP Checks", () => {
     expect(head.headers()["cache-control"]).toBe("private, no-store");
 
     const claims = d1Query(
-      `SELECT digest FROM voter_claim WHERE poll_id = '${poll.pollId}'`,
+      sql`SELECT digest FROM voter_claim WHERE poll_id = ${poll.pollId}`,
     );
     expect(claims.length).toBe(1);
     expect(claims[0].digest).toMatch(/^[a-f0-9]{64}$/);
     const storedDigest = claims[0].digest;
     const nonClaimStorage = JSON.stringify({
       poll: d1Query(
-        `SELECT id, question, description, representation_version FROM poll WHERE id = '${poll.pollId}'`,
+        sql`SELECT id, question, description, representation_version FROM poll WHERE id = ${poll.pollId}`,
       ),
       vote: d1Query(
-        `SELECT id, poll_id, submission_id, payload_hash, created_at_ms FROM vote WHERE poll_id = '${poll.pollId}'`,
+        sql`SELECT id, poll_id, submission_id, payload_hash, created_at_ms FROM vote WHERE poll_id = ${poll.pollId}`,
       ),
       selections: d1Query(
-        `SELECT vote_id, poll_option_id FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${poll.pollId}')`,
+        sql`SELECT vote_id, poll_option_id FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ${poll.pollId})`,
       ),
     });
     const responseHeaders = JSON.stringify({
@@ -377,7 +376,7 @@ test.describe("IP Checks", () => {
     await expect(pageB.getByText("Counted.")).toBeVisible({ timeout: 15_000 });
 
     const votes = d1Query(
-      `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${poll.pollId}'`,
+      sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${poll.pollId}`,
     )[0].n;
     expect(votes).toBe(2);
 
@@ -459,7 +458,7 @@ test.describe("IP Checks", () => {
     await expect(pageB.getByText(SESSION_COPY_HEADING)).toHaveCount(0);
 
     const votes = d1Query(
-      `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${poll.pollId}'`,
+      sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${poll.pollId}`,
     )[0].n;
     expect(votes).toBe(1);
 

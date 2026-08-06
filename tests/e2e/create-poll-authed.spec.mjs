@@ -1,12 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import {
   agePoll,
   assertUuid,
   requireBaseUrl,
-  cleanupCreator,
+  cleanupCreators,
   d1Query,
   hasBetterAuthSecret,
   seedCreatorSession,
+  seedPublicReferenceFixture,
+  sql,
 } from "./creator-session.mjs";
 
 // Route-level coverage of the real /creator/new page (Task 7): a Better Auth
@@ -18,6 +21,49 @@ import {
 // Serial: each test shells out to wrangler against the same local D1 file,
 // and a cold wrangler start is slow.
 test.describe.configure({ mode: "serial", timeout: 120_000 });
+
+test.describe("signed-out reference canonicalization", () => {
+  const seededUserIds = [];
+
+  test.afterAll(() => {
+    cleanupCreators(seededUserIds);
+  });
+
+  test("redirects a custom case variant with its query while a generated variant remains missing", async ({
+    page,
+  }) => {
+    await page.context().clearCookies();
+    expect(
+      (await page.context().cookies()).some(
+        (cookie) => cookie.name === "better-auth.session_token",
+      ),
+    ).toBe(false);
+    const fixture = seedPublicReferenceFixture();
+    seededUserIds.push(fixture.userId);
+    const customVariant = fixture.customReference.toUpperCase();
+    expect(customVariant).not.toBe(fixture.customReference);
+    const customResponse = await page.request.get(
+      `/${customVariant}?ref=newsletter`,
+      { maxRedirects: 0 },
+    );
+    expect(customResponse.status()).toBe(301);
+    expect(customResponse.headers().location).toBe(
+      `/${fixture.customReference}?ref=newsletter`,
+    );
+    expect(customResponse.headers()["cache-control"]).toBe("private, no-store");
+
+    const generatedVariant =
+      fixture.generatedReference[0].toLowerCase() +
+      fixture.generatedReference[1].toUpperCase() +
+      fixture.generatedReference.slice(2);
+    expect(generatedVariant).not.toBe(fixture.generatedReference);
+    expect(generatedVariant).toMatch(/[A-Z]/u);
+    const generatedResponse = await page.request.get(`/${generatedVariant}`, {
+      maxRedirects: 0,
+    });
+    expect(generatedResponse.status()).toBe(404);
+  });
+});
 
 test.describe("authenticated create flow (seeded session)", () => {
   test.skip(
@@ -42,9 +88,7 @@ test.describe("authenticated create flow (seeded session)", () => {
   }
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   test("renders the create form for a signed-in creator — the static route, not the catch-all", async ({
@@ -141,7 +185,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
     expect(
       d1Query(
-        `SELECT multi_select_enabled, min_selections, max_selections FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+        sql`SELECT multi_select_enabled, min_selections, max_selections FROM poll WHERE owner_user_id = ${seeded.userId}`,
       ),
     ).toEqual([
       {
@@ -181,7 +225,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     );
 
     const rows = d1Query(
-      `SELECT result_visibility, discovery_state, session_checks_enabled, representation_version FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      sql`SELECT result_visibility, discovery_state, session_checks_enabled, representation_version FROM poll WHERE owner_user_id = ${seeded.userId}`,
     );
     expect(rows).toEqual([
       {
@@ -223,11 +267,14 @@ test.describe("authenticated create flow (seeded session)", () => {
     baseURL,
   }) => {
     const seeded = await signIn(context, baseURL);
+    const attemptSlug = `team-lunch-${randomUUID()}`;
     await page.goto("/creator/new");
     await page.getByLabel("QUESTION").fill("Team lunch?");
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
-    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("  Team-Lunch  ");
+    await page
+      .getByLabel("CUSTOM LINK (OPTIONAL)")
+      .fill(`  ${attemptSlug.toUpperCase()}  `);
 
     const [publishResponse] = await Promise.all([
       page.waitForResponse(
@@ -239,18 +286,18 @@ test.describe("authenticated create flow (seeded session)", () => {
     ]);
     expect(publishResponse.status()).toBe(303);
 
-    const canonicalUrl = `${requireBaseUrl(baseURL)}/team-lunch`;
+    const canonicalUrl = `${requireBaseUrl(baseURL)}/${attemptSlug}`;
     await expect(page.locator(".canonical-url")).toHaveText(canonicalUrl);
     await expect(page.getByText("Its reference never changes.")).toBeVisible();
     expect(
       d1Query(
-        `SELECT r.reference, r.kind, r.is_canonical FROM poll_reference r JOIN poll p ON p.id = r.poll_id WHERE p.owner_user_id = '${seeded.userId}'`,
+        sql`SELECT r.reference, r.kind, r.is_canonical FROM poll_reference r JOIN poll p ON p.id = r.poll_id WHERE p.owner_user_id = ${seeded.userId}`,
       ),
     ).toEqual([
-      { reference: "team-lunch", kind: "custom", is_canonical: 1 },
+      { reference: attemptSlug, kind: "custom", is_canonical: 1 },
     ]);
 
-    const publicResponse = await page.goto("/team-lunch");
+    const publicResponse = await page.goto(`/${attemptSlug}`);
     expect(publicResponse?.status()).toBe(200);
     await expect(
       page.getByRole("heading", { name: "Team lunch?" }),
@@ -262,12 +309,12 @@ test.describe("authenticated create flow (seeded session)", () => {
     // instead of 404ing (Story 1.4 review decision) — query string kept,
     // caching suppressed so a wrong redirect is never permanent.
     const variantResponse = await page.request.get(
-      "/TEAM-Lunch?ref=newsletter",
+      `/${attemptSlug.toUpperCase()}?ref=newsletter`,
       { maxRedirects: 0 },
     );
     expect(variantResponse.status()).toBe(301);
     expect(variantResponse.headers()["location"]).toBe(
-      "/team-lunch?ref=newsletter",
+      `/${attemptSlug}?ref=newsletter`,
     );
     expect(variantResponse.headers()["cache-control"]).toContain("no-store");
   });
@@ -385,11 +432,12 @@ test.describe("authenticated create flow (seeded session)", () => {
     baseURL,
   }) => {
     const seeded = await signIn(context, baseURL);
+    const attemptSlug = `duplicate-lunch-${randomUUID()}`;
     await page.goto("/creator/new");
     await page.getByLabel("QUESTION").fill("Original lunch?");
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Pizza");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Tacos");
-    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("duplicate-lunch");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill(attemptSlug);
     await page.getByRole("button", { name: "PUBLISH POLL" }).click();
     await expect(page).toHaveURL(/\/creator\/polls\/[^?]+\?created/);
 
@@ -399,7 +447,9 @@ test.describe("authenticated create flow (seeded session)", () => {
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Salad");
     await page.locator("label.poll-option", { hasText: "AFTER CLOSE" }).click();
     await page.getByLabel("DEADLINE (OPTIONAL)").fill("2030-01-15T10:30");
-    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("  Duplicate-Lunch  ");
+    await page
+      .getByLabel("CUSTOM LINK (OPTIONAL)")
+      .fill(`  ${attemptSlug.toUpperCase()}  `);
     await page.getByLabel("DESCRIPTION (OPTIONAL)").fill("Keep this ballast.");
 
     const [duplicateResponse] = await Promise.all([
@@ -413,10 +463,10 @@ test.describe("authenticated create flow (seeded session)", () => {
     expect(duplicateResponse.status()).toBe(422);
 
     const customLink = page.getByLabel("CUSTOM LINK (OPTIONAL)");
-    await expect(customLink).toHaveValue("  Duplicate-Lunch  ");
+    await expect(customLink).toHaveValue(`  ${attemptSlug.toUpperCase()}  `);
     await expect(customLink).toHaveAttribute("aria-invalid", "true");
     await expect(page.locator("#custom-link-error")).toHaveText(
-      "`duplicate-lunch` is taken. Pick another.",
+      `\`${attemptSlug}\` is taken. Pick another.`,
     );
     await expect(page.getByLabel("QUESTION")).toHaveValue("Second lunch?");
     await expect(page.getByRole("textbox", { name: "OPTION 1" })).toHaveValue(
@@ -437,20 +487,20 @@ test.describe("authenticated create flow (seeded session)", () => {
 
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+        sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${seeded.userId}`,
       ),
     ).toEqual([{ n: 1 }]);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM poll_option o JOIN poll p ON p.id = o.poll_id WHERE p.owner_user_id = '${seeded.userId}'`,
+        sql`SELECT COUNT(*) AS n FROM poll_option o JOIN poll p ON p.id = o.poll_id WHERE p.owner_user_id = ${seeded.userId}`,
       ),
     ).toEqual([{ n: 2 }]);
     expect(
       d1Query(
-        `SELECT r.reference, r.kind, r.is_canonical FROM poll_reference r JOIN poll p ON p.id = r.poll_id WHERE p.owner_user_id = '${seeded.userId}'`,
+        sql`SELECT r.reference, r.kind, r.is_canonical FROM poll_reference r JOIN poll p ON p.id = r.poll_id WHERE p.owner_user_id = ${seeded.userId}`,
       ),
     ).toEqual([
-      { reference: "duplicate-lunch", kind: "custom", is_canonical: 1 },
+      { reference: attemptSlug, kind: "custom", is_canonical: 1 },
     ]);
   });
 
@@ -627,7 +677,7 @@ test.describe("authenticated create flow (seeded session)", () => {
 
     // The regression being pinned: ADD OPTION must never create a poll.
     const polls = d1Query(
-      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${seeded.userId}`,
     );
     expect(polls[0]?.n).toBe(0);
 
@@ -832,7 +882,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     expect(second.headers()["location"]).toBe(location);
 
     const polls = d1Query(
-      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${seeded.userId}`,
     );
     expect(polls[0]?.n).toBe(1);
   });
@@ -883,7 +933,7 @@ test.describe("authenticated create flow (seeded session)", () => {
 
     // Only the first publish exists — the divergent edit minted nothing.
     let polls = d1Query(
-      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${seeded.userId}`,
     );
     expect(polls[0]?.n).toBe(1);
 
@@ -894,7 +944,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     const recovered = await post(freshNonce ?? "", "Edited after the fact?");
     expect(recovered.status()).toBe(303);
     polls = d1Query(
-      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${seeded.userId}`,
     );
     expect(polls[0]?.n).toBe(2);
   });
@@ -948,12 +998,12 @@ test.describe("authenticated create flow (seeded session)", () => {
     expect(await forged.text()).toContain("may have published. Try again");
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${attacker.userId}'`,
+        sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${attacker.userId}`,
       )[0]?.n,
     ).toBe(0);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${victim.userId}'`,
+        sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${victim.userId}`,
       )[0]?.n,
     ).toBe(1);
   });
@@ -1031,7 +1081,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     expect(retry.status()).toBe(303);
     expect(retry.headers()["location"]).toBe(`/creator/polls/${pollId}`);
     const polls = d1Query(
-      `SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = '${seeded.userId}'`,
+      sql`SELECT COUNT(*) AS n FROM poll WHERE owner_user_id = ${seeded.userId}`,
     );
     expect(polls[0]?.n).toBe(1);
   });

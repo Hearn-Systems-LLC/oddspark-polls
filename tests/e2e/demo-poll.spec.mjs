@@ -10,6 +10,7 @@ import {
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 if (!hasBetterAuthSecret()) {
@@ -27,7 +28,7 @@ let demo;
 
 function seedExactDemo(ownerUserId) {
   const existing = d1Query(
-    "SELECT poll_id FROM poll_reference WHERE reference = 'demo' LIMIT 1",
+    sql`SELECT poll_id FROM poll_reference WHERE reference = 'demo' LIMIT 1`,
   )[0]?.poll_id;
   if (existing) {
     assertUuid(existing);
@@ -38,19 +39,11 @@ function seedExactDemo(ownerUserId) {
   const optionIds = [randomUUID(), randomUUID(), randomUUID()];
   const now = Date.now();
   d1Execute(
-    `INSERT INTO poll (` +
-      `id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, ` +
-      `session_checks_enabled, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms, ` +
-      `multi_select_enabled, min_selections, max_selections, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled` +
-      `) VALUES (` +
-      `'${pollId}', '${ownerUserId}', 'multiple_choice', 'Best day for a long weekend?', NULL, 'live', 'unlisted', ` +
-      `1, NULL, NULL, 1, ${now}, ${now}, 0, NULL, NULL, 0, 0, 1, 0);` +
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ` +
-      `('${optionIds[0]}', '${pollId}', 'Friday', 0, ${now}),` +
-      `('${optionIds[1]}', '${pollId}', 'Monday', 1, ${now}),` +
-      `('${optionIds[2]}', '${pollId}', 'Either works', 2, ${now});` +
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) ` +
-      `VALUES ('demo', '${pollId}', 'custom', 1, ${now});`,
+    sql.join([
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, description, result_visibility, discovery_state, session_checks_enabled, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms, multi_select_enabled, min_selections, max_selections, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled) VALUES (${pollId}, ${ownerUserId}, 'multiple_choice', 'Best day for a long weekend?', NULL, 'live', 'unlisted', 1, NULL, NULL, 1, ${now}, ${now}, 0, NULL, NULL, 0, 0, 1, 0);`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionIds[0]}, ${pollId}, 'Friday', 0, ${now}), (${optionIds[1]}, ${pollId}, 'Monday', 1, ${now}), (${optionIds[2]}, ${pollId}, 'Either works', 2, ${now});`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('demo', ${pollId}, 'custom', 1, ${now});`,
+    ]),
   );
   return { pollId, optionIds };
 }
@@ -208,7 +201,7 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
     assertUuid(successorId);
     expect(successorId).not.toBe(demo.pollId);
     const storedOptionIds = d1Query(
-      `SELECT id FROM poll_option WHERE poll_id = '${successorId}' ORDER BY position`,
+      sql`SELECT id FROM poll_option WHERE poll_id = ${successorId} ORDER BY position`,
     ).map((row) => row.id);
     expect(storedOptionIds).toEqual(demo.optionIds);
 
@@ -225,7 +218,7 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
     await voter.getByRole("button", { name: "VOTE" }).click();
     await expect(voter.locator('[data-outcome-code="counted"]')).toBeVisible({ timeout: 20_000 });
     const successorVotes = d1Query(
-      `SELECT COUNT(*) AS count FROM vote WHERE poll_id = '${successorId}'`,
+      sql`SELECT COUNT(*) AS count FROM vote WHERE poll_id = ${successorId}`,
     );
     // Both independent browser contexts reach the dev Worker through the
     // same loopback source. IP Checks are off, so both Session-distinct Votes

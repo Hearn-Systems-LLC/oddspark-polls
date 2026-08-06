@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 2.3 — CAPTCHA on the Vote Action: conditional Turnstile widget,
@@ -71,9 +72,7 @@ test.describe("CAPTCHA on the Vote Action", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   async function signIn(context, baseURL) {
@@ -135,7 +134,7 @@ test.describe("CAPTCHA on the Vote Action", () => {
     const pollId = /\/creator\/polls\/([^?]+)/.exec(page.url())?.[1] ?? "";
     assertUuid(pollId);
     const row = d1Query(
-      `SELECT captcha_enabled, comments_enabled FROM poll WHERE id = '${pollId}'`,
+      sql`SELECT captcha_enabled, comments_enabled FROM poll WHERE id = ${pollId}`,
     );
     expect(row[0]).toEqual({
       captcha_enabled: captcha ? 1 : 0,
@@ -253,7 +252,7 @@ test.describe("CAPTCHA on the Vote Action", () => {
     await expect(page.locator('button[type="submit"]')).toBeEnabled();
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${poll.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = ${poll.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
     await page.screenshot({

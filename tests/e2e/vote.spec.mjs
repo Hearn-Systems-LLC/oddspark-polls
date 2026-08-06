@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   d1Query,
   deletePoll,
@@ -12,6 +12,7 @@ import {
   seedCreatorSession,
   setPollDeadline,
   setResultVisibility,
+  sql,
 } from "./creator-session.mjs";
 
 test.describe.configure({ mode: "serial", timeout: 120_000 });
@@ -258,9 +259,7 @@ test.describe("public voting flow", () => {
       .evaluate((marker) => getComputedStyle(marker, "::before").content);
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   test("server-renders accessible option rows and progressively disables Vote", async ({
@@ -640,7 +639,7 @@ test.describe("public voting flow", () => {
     expect(retrySubmissionId).not.toBe(afterMinSubmissionId);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
 
@@ -668,7 +667,7 @@ test.describe("public voting flow", () => {
     expect(replay.status()).toBe(303);
     expect(
       d1Query(
-        `SELECT COUNT(DISTINCT v.id) AS votes, COUNT(vs.poll_option_id) AS selections, p.representation_version FROM poll p LEFT JOIN vote v ON v.poll_id = p.id LEFT JOIN vote_selection vs ON vs.vote_id = v.id WHERE p.id = '${created.pollId}' GROUP BY p.id`,
+        sql`SELECT COUNT(DISTINCT v.id) AS votes, COUNT(vs.poll_option_id) AS selections, p.representation_version FROM poll p LEFT JOIN vote v ON v.poll_id = p.id LEFT JOIN vote_selection vs ON vs.vote_id = v.id WHERE p.id = ${created.pollId} GROUP BY p.id`,
       ),
     ).toEqual([{ votes: 1, selections: 2, representation_version: 2 }]);
 
@@ -844,7 +843,7 @@ test.describe("public voting flow", () => {
 
     expect(
       d1Query(
-        `SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = ${created.pollId}`,
       ),
     ).toEqual([{ votes: 1, representation_version: 2 }]);
   });
@@ -900,7 +899,7 @@ test.describe("public voting flow", () => {
     expect(retrySubmissionId).not.toBe(submissionId);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
   });
@@ -981,7 +980,7 @@ test.describe("public voting flow", () => {
     ).toBeVisible();
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
     await noJsContext.close();
@@ -1044,7 +1043,7 @@ test.describe("public voting flow", () => {
     expect(retrySubmissionId).not.toBe(originalSubmissionId);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
 
@@ -1053,7 +1052,7 @@ test.describe("public voting flow", () => {
     await expect(noJsPage).toHaveTitle(`Counted — ${question}`);
     expect(
       d1Query(
-        `SELECT vc.body, vc.display_name FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${created.pollId}'`,
+        sql`SELECT vc.body, vc.display_name FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ body: safeComment, display_name: "No-JS Voter" }]);
     await noJsContext.close();
@@ -1393,7 +1392,7 @@ test.describe("public voting flow", () => {
     expect(postCount).toBe(1);
   });
 
-  test("mints a fresh submission id when the 10s restore fires on a held POST", async ({
+  test("keeps the original submission id on the 10s restore so a resubmission still yields exactly one Vote", async ({
     page,
     context,
     baseURL,
@@ -1426,9 +1425,10 @@ test.describe("public voting flow", () => {
       .toBe(1);
 
     // The response is lost from the page's perspective, so the 10s restore
-    // fires: the form unlocks with a FRESH submission id — an edited
-    // resubmit can never dead-end in IDEMPOTENCY_CONFLICT if the original
-    // request still committed server-side.
+    // fires: the form unlocks with the ORIGINAL submission id byte-identical
+    // — the client never mints ids, and the server's idempotency contract
+    // adjudicates every retry (identical resubmit replays, edited resubmit
+    // conflicts) whether or not the original request committed.
     await page.waitForTimeout(10_500);
     const restored = await page.evaluate(() => {
       const button = document.querySelector('button[type="submit"]');
@@ -1447,12 +1447,67 @@ test.describe("public voting flow", () => {
     });
     expect(restored.inFlight).not.toBe("true");
     assertUuid(restored.submissionId);
-    expect(restored.submissionId).not.toBe(submissionId);
+    expect(restored.submissionId).toBe(submissionId);
+    // The ballot survives the restore unchanged.
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
 
-    // And the restored form's retry actually lands.
+    // And the restored form's retry actually lands — and even though the
+    // first POST's fate was unknown, exactly one Vote is ever counted.
     await page.unroute(`**${created.path}`);
     await page.getByRole("button", { name: "VOTE" }).click();
     await expect(page).toHaveTitle("Counted — Slow count?");
+    const rows = d1Query(
+      sql`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = ${created.pollId}`,
+    );
+    expect(Number(rows[0]?.votes ?? -1)).toBe(1);
+  });
+
+  test("commits an edited resubmission cleanly when the held original never committed", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Edited retry?");
+    await page.goto(created.path);
+    const submissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(submissionId);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    await page.route(`**${created.path}`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      // A 204 answers the POST without committing a navigation: the document
+      // (and its 10s restore timer) stays alive, as with any lost response.
+      await route.fulfill({ status: 204 });
+    });
+
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page.getByRole("button", { name: "COUNTING…" })).toBeDisabled();
+
+    // The restore keeps the original submission id; the voter edits the
+    // ballot before retrying.
+    await page.waitForTimeout(10_500);
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
+    await page.locator("label.poll-option", { hasText: "Beta" }).click();
+
+    // The held original never reached the server, so the edited resubmission
+    // under the retained id commits as the one and only Vote — Beta wins.
+    await page.unroute(`**${created.path}`);
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle("Counted — Edited retry?");
+    const votes = d1Query(
+      sql`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = ${created.pollId}`,
+    );
+    expect(Number(votes[0]?.votes ?? -1)).toBe(1);
+    const stored = d1Query(
+      sql`SELECT o.label AS label FROM vote_selection s JOIN vote v ON s.vote_id = v.id JOIN poll_option o ON o.id = s.poll_option_id WHERE v.poll_id = ${created.pollId}`,
+    );
+    expect(stored[0]?.label).toBe("Beta");
   });
 
   test("suppresses the offline line on a rate-limit-locked form and reconciles it on pageshow", async ({
@@ -1536,7 +1591,7 @@ test.describe("public voting flow", () => {
     expect(second.status()).toBe(303);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
 
@@ -1617,7 +1672,7 @@ test.describe("public voting flow", () => {
 
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
   });
@@ -1708,7 +1763,7 @@ test.describe("public voting flow", () => {
     assertUuid(minted);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
   });
@@ -1766,7 +1821,7 @@ test.describe("public voting flow", () => {
     );
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
   });
@@ -1903,7 +1958,7 @@ test.describe("public voting flow", () => {
     // selections, exercising the additive Results failure path without a test
     // hook or shared-schema mutation.
     d1Execute(
-      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${created.pollId}')`,
+      sql`DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ${created.pollId})`,
     );
 
     const countedResponse = await page.goto(created.path);
@@ -2034,7 +2089,7 @@ test.describe("public voting flow", () => {
     await expect(page.getByRole("button", { name: "VOTE" })).toBeDisabled();
     expect(
       d1Query(
-        `SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = ${created.pollId}`,
       ),
     ).toEqual([{ votes: 1, representation_version: 2 }]);
   });
@@ -2125,7 +2180,7 @@ test.describe("public voting flow", () => {
 
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
     await tabB.close();

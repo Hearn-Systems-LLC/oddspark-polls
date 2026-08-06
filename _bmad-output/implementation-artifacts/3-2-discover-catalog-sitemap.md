@@ -297,3 +297,27 @@ OpenAI Codex (GPT-5)
 - [x] [Review][Patch] 500 retry URL drops cursor [src/pages/discover.astro:75] — On D1 500 error with pagination, retry redirected to `/discover` instead of same cursor URL. Now only redirects to page 1 on invalid-cursor 400s.
 - [x] [Review][Patch] `showFailure` leaves stale empty message [src/scripts/discover-catalog.ts:45] — Enhanced navigation failure could show both empty state and error message. Now removes `[data-discover-empty]` alongside `[data-discover-error]`.
 - [x] [Review][Patch] `indexabilityNowMs` stale after POST [src/pages/[reference].astro:124] — Timestamp captured before Turnstile/vote processing caused stale effective status. Split into `closedCheckMs` (post-verification) and `indexabilityNowMs` (post-POST for robots meta).
+
+## Deferred-work bundle follow-up — 2026-08-06
+
+- Replaced the 49,998-Poll single-file failure point with a hybrid sitemap:
+  catalogs through 45,000 Polls retain the original XML bytes, while larger
+  catalogs receive strict opaque v1 keyset-range children from the same route.
+- Scoped exact-once coverage to a stable root-and-children traversal. Each
+  child is a fresh D1 read that excludes newly ineligible rows and cannot cross
+  its encoded range; newly eligible rows outside the range wait for a refreshed
+  root. Deleted boundaries remain safe, and an emptied non-static child returns
+  `410 sitemap_range_gone`.
+- Combined client disconnect with one ten-second whole-build deadline/signal,
+  added pre/post-render and late-rejection checks, and retained the 500-page
+  enumeration ceiling, per-document 50,000-URL/50 MiB enforcement, strict UUID
+  range boundaries, and stable privacy-safe failure responses.
+- Split sitemap persistence into explicit root/start/end/both row-value query
+  shapes so bounded children range-seek the creation/UUID keyset. Real-D1 plan
+  evidence and equal-timestamp fixtures prove the boundary contract; unit proof
+  covers exactly 50,000 and 50,001 non-static child URLs.
+- Hardened Cache API expiry arithmetic and four-digit HTTP-date handling. The
+  deferred-work ledger remains orchestrator-owned and was not edited here.
+- Node 24.18.0 follow-up proof passed migration guard 12/12, all 99 Vitest
+  files / 1,480 tests, TypeScript, full Playwright 164/164, generated binding
+  drift, the production build, and diff hygiene.

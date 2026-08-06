@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   agePoll,
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   closePoll,
   d1Execute,
   d1Query,
@@ -11,6 +11,7 @@ import {
   requireBaseUrl,
   seedCreatorSession,
   setPollDeadline,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 1.9: conditional live Results polling, privacy, lifecycle behavior,
@@ -22,10 +23,6 @@ const proofDir = "test-results/live-results-proof";
 
 function scopedReference(reference) {
   return `${reference}-${liveRunId}`;
-}
-
-function sqlText(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
 }
 
 test.describe("live-updating results", () => {
@@ -66,20 +63,7 @@ test.describe("live-updating results", () => {
   });
 
   test.afterAll(() => {
-    const cleanupErrors = [];
-    for (const userId of seededUserIds) {
-      try {
-        cleanupCreator(userId);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        cleanupErrors,
-        `Failed to clean ${cleanupErrors.length} live Results E2E creator fixture(s)`,
-      );
-    }
+    cleanupCreators(seededUserIds);
   });
 
   async function seedOwner() {
@@ -116,24 +100,24 @@ test.describe("live-updating results", () => {
     const runReference = scopedReference(reference);
     const nowMs = Date.now();
     const statements = [
-      `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${ownerId}', 'multiple_choice', 'Live Results?', '${visibility}', 1, ${multiSelect ? 1 : 0}, NULL, NULL, NULL, NULL, ${1 + votes.length}, ${nowMs}, ${nowMs});`,
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerId}, 'multiple_choice', 'Live Results?', ${visibility}, 1, ${multiSelect ? 1 : 0}, NULL, NULL, NULL, NULL, ${1 + votes.length}, ${nowMs}, ${nowMs});`,
       ...options.map(
         (label, position) =>
-          `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionIds[position]}', '${pollId}', ${sqlText(label)}, ${position}, ${nowMs});`,
+          sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionIds[position]}, ${pollId}, ${label}, ${position}, ${nowMs});`,
       ),
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(runReference)}, '${pollId}', 'custom', 1, ${nowMs});`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${runReference}, ${pollId}, 'custom', 1, ${nowMs});`,
     ];
     votes.forEach((selections, index) => {
       const voteId = randomUUID();
       statements.push(
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${pollId}', '${randomUUID()}', 'seed-${liveRunId}-${index}', ${nowMs});`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${randomUUID()}, ${`seed-${liveRunId}-${index}`}, ${nowMs});`,
         ...selections.map(
           (optionIndex) =>
-            `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteId}', '${optionIds[optionIndex]}');`,
+            sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteId}, ${optionIds[optionIndex]});`,
         ),
       );
     });
-    d1Execute(statements.join(""));
+    d1Execute(sql.join(statements));
     agePoll(pollId, nowMs - 60_000);
     return {
       pollId,
@@ -261,12 +245,12 @@ test.describe("live-updating results", () => {
       ).toEqual({ animation: "none", opacity: "1" });
 
       const versionBeforeVote = d1Query(
-        `SELECT representation_version FROM poll WHERE id = '${poll.pollId}'`,
+        sql`SELECT representation_version FROM poll WHERE id = ${poll.pollId}`,
       )[0].representation_version;
       await castVote(voterOne, poll, "Beta");
       expect(
         d1Query(
-          `SELECT representation_version FROM poll WHERE id = '${poll.pollId}'`,
+          sql`SELECT representation_version FROM poll WHERE id = ${poll.pollId}`,
         ),
       ).toEqual([{ representation_version: versionBeforeVote + 1 }]);
       await expect(page.locator("[data-live-tied]")).toBeVisible({
@@ -448,7 +432,7 @@ test.describe("live-updating results", () => {
     expect((await deadlineClosed.json()).status).toBe("closed");
     expect(
       d1Query(
-        `SELECT representation_version, closed_at_ms FROM poll WHERE id = '${deadlinePoll.pollId}'`,
+        sql`SELECT representation_version, closed_at_ms FROM poll WHERE id = ${deadlinePoll.pollId}`,
       ),
     ).toEqual([{ representation_version: 1, closed_at_ms: null }]);
 

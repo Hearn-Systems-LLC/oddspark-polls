@@ -2,11 +2,12 @@ import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 2.1 — per-poll Security Toggles on create + detail, tighten-only after Vote.
@@ -59,9 +60,7 @@ test.describe("per-poll Security Toggles", () => {
   }
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   async function screenshotProof(page, dir, label) {
@@ -112,7 +111,7 @@ test.describe("per-poll Security Toggles", () => {
     await expect(page.getByText("Your Poll is live.")).toBeVisible();
 
     const rows = d1Query(
-      `SELECT session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = '${reference}'`,
+      sql`SELECT session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = ${reference}`,
     );
     expect(rows).toEqual([
       {
@@ -153,7 +152,7 @@ test.describe("per-poll Security Toggles", () => {
     await expect(page).toHaveURL(/\/creator\/polls\//);
 
     const toggleRow = d1Query(
-      `SELECT p.id AS id, p.session_checks_enabled AS session_checks_enabled FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = '${reference}'`,
+      sql`SELECT p.id AS id, p.session_checks_enabled AS session_checks_enabled FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = ${reference}`,
     );
     expect(toggleRow[0]?.session_checks_enabled).toBe(0);
     assertUuid(toggleRow[0].id);
@@ -168,7 +167,7 @@ test.describe("per-poll Security Toggles", () => {
     });
 
     const claims = d1Query(
-      `SELECT COUNT(*) AS n FROM voter_claim WHERE poll_id = '${toggleRow[0].id}'`,
+      sql`SELECT COUNT(*) AS n FROM voter_claim WHERE poll_id = ${toggleRow[0].id}`,
     );
     expect(Number(claims[0]?.n ?? 0)).toBe(0);
   });
@@ -190,7 +189,7 @@ test.describe("per-poll Security Toggles", () => {
     const detailUrl = page.url().split("?")[0];
 
     const pollRows = d1Query(
-      `SELECT p.id AS id FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = '${reference}'`,
+      sql`SELECT p.id AS id FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = ${reference}`,
     );
     assertUuid(pollRows[0].id);
 
@@ -233,7 +232,7 @@ test.describe("per-poll Security Toggles", () => {
       .getAttribute("value");
     expect(csrfToken).toBeTruthy();
     const persistedBeforeReject = d1Query(
-      `SELECT session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, representation_version FROM poll WHERE id = '${pollRows[0].id}'`,
+      sql`SELECT session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, representation_version FROM poll WHERE id = ${pollRows[0].id}`,
     );
     const rejectedBody = new URLSearchParams({
       csrf_token: csrfToken ?? "",
@@ -259,7 +258,7 @@ test.describe("per-poll Security Toggles", () => {
     expect(rejectedHtml).toContain('name="sessionChecks" value="true"');
     expect(
       d1Query(
-        `SELECT session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, representation_version FROM poll WHERE id = '${pollRows[0].id}'`,
+        sql`SELECT session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, representation_version FROM poll WHERE id = ${pollRows[0].id}`,
       ),
     ).toEqual(persistedBeforeReject);
 
@@ -269,7 +268,7 @@ test.describe("per-poll Security Toggles", () => {
     await expect(page.getByText("Security updated.")).toBeVisible();
 
     const after = d1Query(
-      `SELECT session_checks_enabled, captcha_enabled FROM poll WHERE id = '${pollRows[0].id}'`,
+      sql`SELECT session_checks_enabled, captcha_enabled FROM poll WHERE id = ${pollRows[0].id}`,
     );
     expect(after[0]).toMatchObject({
       session_checks_enabled: 1,

@@ -40,11 +40,15 @@ export const DISCOVERY_COPY = {
 
 export const DISCOVERY_PAGE_SIZE = 20;
 export const SITEMAP_BATCH_SIZE = 1_000;
+export const SITEMAP_SHARD_POLL_URLS = 45_000;
+export const SITEMAP_MAX_URLS = 50_000;
 export const SITEMAP_MAX_POLL_URLS = 49_998;
-export const SITEMAP_MAX_PAGES = 50;
+export const SITEMAP_MAX_PAGES = 500;
 export const SITEMAP_MAX_BYTES = 50 * 1024 * 1024;
 const DISCOVERY_CURSOR_VERSION = 1;
 const MAX_DISCOVERY_CURSOR_LENGTH = 512;
+const SITEMAP_RANGE_VERSION = 1;
+const MAX_SITEMAP_RANGE_LENGTH = 1_024;
 const UUID_SHAPE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -371,9 +375,19 @@ export type DiscoverySitemapRecord = DiscoveryOrderKey & {
   deadlineMs: number | null;
 };
 
+export type DiscoverySitemapRange = {
+  startExclusive: DiscoveryOrderKey | null;
+  endInclusive: DiscoveryOrderKey;
+};
+
+export type DiscoverySitemapRequest =
+  | { kind: "root" }
+  | { kind: "range"; range: DiscoverySitemapRange };
+
 export type DiscoverySitemapPersistencePort = {
   querySitemapPage: (input: {
-    boundary: DiscoveryOrderKey | null;
+    startExclusive: DiscoveryOrderKey | null;
+    endInclusive: DiscoveryOrderKey | null;
     limit: number;
     nowMs: number;
   }) => Promise<DiscoverySitemapRecord[]>;
@@ -387,7 +401,15 @@ export type DiscoverySitemapBuild = {
 
 export type DiscoverySitemapBuildResult =
   | { ok: true; value: DiscoverySitemapBuild }
-  | { ok: false; error: { code: "sitemap_capacity_exceeded" } };
+  | {
+      ok: false;
+      error: {
+        code:
+          | "sitemap_capacity_exceeded"
+          | "sitemap_generation_aborted"
+          | "sitemap_range_gone";
+      };
+    };
 
 export type DiscoveryCatalogPersistencePort = {
   readRevision: () => Promise<number | null>;
@@ -423,6 +445,14 @@ type EncodedCursor = {
   d: DiscoveryCursorDirection;
   t: number;
   i: string;
+};
+
+type EncodedSitemapOrderKey = { t: number; i: string };
+
+type EncodedSitemapRange = {
+  v: typeof SITEMAP_RANGE_VERSION;
+  s: EncodedSitemapOrderKey | null;
+  e: EncodedSitemapOrderKey;
 };
 
 function invalidCursorError(): ApplicationError {
@@ -466,6 +496,119 @@ export function encodeDiscoveryCursor(
     i: boundary.id,
   };
   return toBase64Url(JSON.stringify(payload));
+}
+
+function validSitemapOrderKey(value: unknown): value is DiscoveryOrderKey {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const key = value as Record<string, unknown>;
+  return (
+    Number.isSafeInteger(key.createdAtMs) &&
+    (key.createdAtMs as number) >= 0 &&
+    typeof key.id === "string" &&
+    UUID_SHAPE.test(key.id)
+  );
+}
+
+function encodedSitemapOrderKey(
+  key: DiscoveryOrderKey,
+): EncodedSitemapOrderKey {
+  return { t: key.createdAtMs, i: key.id };
+}
+
+function decodeSitemapOrderKey(value: unknown): DiscoveryOrderKey | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const key = value as Record<string, unknown>;
+  if (Object.keys(key).sort().join(",") !== "i,t") return null;
+  const decoded = { createdAtMs: key.t, id: key.i };
+  return validSitemapOrderKey(decoded)
+    ? (decoded as DiscoveryOrderKey)
+    : null;
+}
+
+function compareOrderKeys(
+  left: DiscoveryOrderKey,
+  right: DiscoveryOrderKey,
+): number {
+  if (left.createdAtMs !== right.createdAtMs) {
+    return left.createdAtMs < right.createdAtMs ? -1 : 1;
+  }
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+}
+
+export function encodeDiscoverySitemapRange(
+  range: DiscoverySitemapRange,
+): string {
+  if (
+    (range.startExclusive !== null &&
+      !validSitemapOrderKey(range.startExclusive)) ||
+    !validSitemapOrderKey(range.endInclusive) ||
+    (range.startExclusive !== null &&
+      compareOrderKeys(range.startExclusive, range.endInclusive) <= 0)
+  ) {
+    throw new Error("Invalid sitemap range");
+  }
+  const payload: EncodedSitemapRange = {
+    v: SITEMAP_RANGE_VERSION,
+    s:
+      range.startExclusive === null
+        ? null
+        : encodedSitemapOrderKey(range.startExclusive),
+    e: encodedSitemapOrderKey(range.endInclusive),
+  };
+  return toBase64Url(JSON.stringify(payload));
+}
+
+function decodeDiscoverySitemapRange(
+  value: string,
+): DiscoverySitemapRange | null {
+  if (value.length === 0 || value.length > MAX_SITEMAP_RANGE_LENGTH) return null;
+  try {
+    const parsed: unknown = JSON.parse(fromBase64Url(value));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const payload = parsed as Record<string, unknown>;
+    if (Object.keys(payload).sort().join(",") !== "e,s,v") return null;
+    if (payload.v !== SITEMAP_RANGE_VERSION) return null;
+    const startExclusive =
+      payload.s === null ? null : decodeSitemapOrderKey(payload.s);
+    const endInclusive = decodeSitemapOrderKey(payload.e);
+    if (
+      (payload.s !== null && startExclusive === null) ||
+      endInclusive === null ||
+      (startExclusive !== null &&
+        compareOrderKeys(startExclusive, endInclusive) <= 0)
+    ) {
+      return null;
+    }
+    const range = { startExclusive, endInclusive };
+    return encodeDiscoverySitemapRange(range) === value ? range : null;
+  } catch {
+    return null;
+  }
+}
+
+function invalidSitemapRangeError(): ApplicationError {
+  return {
+    code: "invalid_sitemap_range",
+    message: "Invalid sitemap range.",
+  };
+}
+
+export function parseDiscoverySitemapRequest(
+  searchParams: URLSearchParams,
+): Result<DiscoverySitemapRequest> {
+  if ([...searchParams].length === 0) {
+    return { ok: true, value: { kind: "root" } };
+  }
+  const values = searchParams.getAll("range");
+  if ([...searchParams].length !== 1 || values.length !== 1) {
+    return { ok: false, error: invalidSitemapRangeError() };
+  }
+  const range = decodeDiscoverySitemapRange(values[0] as string);
+  return range
+    ? { ok: true, value: { kind: "range", range } }
+    : { ok: false, error: invalidSitemapRangeError() };
 }
 
 function decodeDiscoveryCursor(
@@ -641,6 +784,14 @@ function sitemapCapacityExceeded(): DiscoverySitemapBuildResult {
   return { ok: false, error: { code: "sitemap_capacity_exceeded" } };
 }
 
+function sitemapGenerationAborted(): DiscoverySitemapBuildResult {
+  return { ok: false, error: { code: "sitemap_generation_aborted" } };
+}
+
+function sitemapRangeGone(): DiscoverySitemapBuildResult {
+  return { ok: false, error: { code: "sitemap_range_gone" } };
+}
+
 function escapeXmlText(value: string): string {
   return value.replace(/[&<>"']/g, (character) => {
     switch (character) {
@@ -662,6 +813,7 @@ export function renderDiscoverySitemapXml(
   urls: readonly string[],
   maxBytes = SITEMAP_MAX_BYTES,
 ): DiscoverySitemapBuildResult {
+  if (urls.length > SITEMAP_MAX_URLS) return sitemapCapacityExceeded();
   const xml = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
@@ -679,49 +831,179 @@ export function renderDiscoverySitemapXml(
   };
 }
 
+export function renderDiscoverySitemapIndexXml(
+  urls: readonly string[],
+  maxBytes = SITEMAP_MAX_BYTES,
+): DiscoverySitemapBuildResult {
+  if (urls.length > SITEMAP_MAX_URLS) return sitemapCapacityExceeded();
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...urls.map((url) => `  <sitemap><loc>${escapeXmlText(url)}</loc></sitemap>`),
+    "</sitemapindex>",
+    "",
+  ].join("\n");
+  if (new TextEncoder().encode(xml).byteLength > maxBytes) {
+    return sitemapCapacityExceeded();
+  }
+  return {
+    ok: true,
+    value: { xml, pollUrlCount: 0, pageCount: 0 },
+  };
+}
+
+const SITEMAP_ABORTED = Symbol("sitemap-aborted");
+
+async function waitForSitemapPage<T>(
+  pending: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T | typeof SITEMAP_ABORTED> {
+  if (!signal) return pending;
+  if (signal.aborted) return SITEMAP_ABORTED;
+  return new Promise<T | typeof SITEMAP_ABORTED>((resolve, reject) => {
+    const abort = () => resolve(SITEMAP_ABORTED);
+    signal.addEventListener("abort", abort, { once: true });
+    pending.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", abort);
+    });
+  });
+}
+
+export type DiscoverySitemapBuildOptions = {
+  request?: DiscoverySitemapRequest;
+  signal?: AbortSignal;
+  deadlineAtMs?: number;
+  clock?: () => number;
+};
+
+function sitemapBuildExpired(options: DiscoverySitemapBuildOptions): boolean {
+  if (options.signal?.aborted) return true;
+  if (options.deadlineAtMs === undefined) return false;
+  const clock = options.clock ?? Date.now;
+  return clock() >= options.deadlineAtMs;
+}
+
 export async function buildDiscoverySitemap(
   persistence: DiscoverySitemapPersistencePort,
   requestUrl: URL,
   nowMs: number,
+  options: DiscoverySitemapBuildOptions = {},
 ): Promise<DiscoverySitemapBuildResult> {
   const origin = requestUrl.origin;
+  const request = options.request ?? { kind: "root" };
   const pollUrls: string[] = [];
-  let boundary: DiscoveryOrderKey | null = null;
+  const ranges: DiscoverySitemapRange[] = [];
+  const initialStart =
+    request.kind === "range" ? request.range.startExclusive : null;
+  const endInclusive =
+    request.kind === "range" ? request.range.endInclusive : null;
+  let boundary = initialStart;
+  let rangeStart: DiscoveryOrderKey | null = null;
+  let rangeCount = 0;
+  let totalPolls = 0;
+  let lastRecord: DiscoverySitemapRecord | null = null;
   let pageCount = 0;
 
   while (pageCount < SITEMAP_MAX_PAGES) {
-    const rows = await persistence.querySitemapPage({
-      boundary,
-      limit: SITEMAP_BATCH_SIZE + 1,
-      nowMs,
-    });
+    if (sitemapBuildExpired(options)) return sitemapGenerationAborted();
+    let waited: DiscoverySitemapRecord[] | typeof SITEMAP_ABORTED;
+    try {
+      waited = await waitForSitemapPage(
+        persistence.querySitemapPage({
+          startExclusive: boundary,
+          endInclusive,
+          limit: SITEMAP_BATCH_SIZE + 1,
+          nowMs,
+        }),
+        options.signal,
+      );
+    } catch (cause) {
+      if (sitemapBuildExpired(options)) return sitemapGenerationAborted();
+      throw cause;
+    }
+    if (waited === SITEMAP_ABORTED || sitemapBuildExpired(options)) {
+      return sitemapGenerationAborted();
+    }
+    const rows = waited;
     pageCount += 1;
     if (rows.length > SITEMAP_BATCH_SIZE + 1) {
       return sitemapCapacityExceeded();
     }
 
     const page = rows.slice(0, SITEMAP_BATCH_SIZE);
-    if (pollUrls.length + page.length > SITEMAP_MAX_POLL_URLS) {
-      return sitemapCapacityExceeded();
-    }
     for (const record of page) {
-      pollUrls.push(
-        `${origin}/${encodeURIComponent(record.canonicalReference)}`,
-      );
+      totalPolls += 1;
+      lastRecord = record;
+      if (request.kind === "range") {
+        const maximumPolls =
+          request.range.startExclusive === null
+            ? SITEMAP_MAX_POLL_URLS
+            : SITEMAP_MAX_URLS;
+        if (totalPolls > maximumPolls) return sitemapCapacityExceeded();
+        pollUrls.push(
+          `${origin}/${encodeURIComponent(record.canonicalReference)}`,
+        );
+      } else {
+        if (totalPolls <= SITEMAP_SHARD_POLL_URLS) {
+          pollUrls.push(
+            `${origin}/${encodeURIComponent(record.canonicalReference)}`,
+          );
+        } else if (totalPolls === SITEMAP_SHARD_POLL_URLS + 1) {
+          pollUrls.length = 0;
+        }
+        rangeCount += 1;
+        if (rangeCount === SITEMAP_SHARD_POLL_URLS) {
+          ranges.push({ startExclusive: rangeStart, endInclusive: record });
+          rangeStart = record;
+          rangeCount = 0;
+        }
+      }
     }
+    if (sitemapBuildExpired(options)) return sitemapGenerationAborted();
 
     if (rows.length <= SITEMAP_BATCH_SIZE) {
-      const rendered = renderDiscoverySitemapXml([
-        `${origin}/`,
-        `${origin}/discover`,
-        ...pollUrls,
-      ]);
+      if (request.kind === "root" && totalPolls > SITEMAP_SHARD_POLL_URLS) {
+        if (rangeCount > 0 && lastRecord !== null) {
+          ranges.push({ startExclusive: rangeStart, endInclusive: lastRecord });
+        }
+        const childUrls = ranges.map((range) => {
+          const token = encodeDiscoverySitemapRange(range);
+          return `${origin}/sitemap.xml?range=${encodeURIComponent(token)}`;
+        });
+        if (sitemapBuildExpired(options)) return sitemapGenerationAborted();
+        const rendered = renderDiscoverySitemapIndexXml(childUrls);
+        if (sitemapBuildExpired(options)) return sitemapGenerationAborted();
+        return rendered.ok
+          ? {
+              ok: true,
+              value: {
+                ...rendered.value,
+                pollUrlCount: totalPolls,
+                pageCount,
+              },
+            }
+          : rendered;
+      }
+      if (
+        request.kind === "range" &&
+        request.range.startExclusive !== null &&
+        totalPolls === 0
+      ) {
+        return sitemapRangeGone();
+      }
+      const staticUrls =
+        request.kind === "root" || request.range.startExclusive === null
+          ? [`${origin}/`, `${origin}/discover`]
+          : [];
+      if (sitemapBuildExpired(options)) return sitemapGenerationAborted();
+      const rendered = renderDiscoverySitemapXml([...staticUrls, ...pollUrls]);
+      if (sitemapBuildExpired(options)) return sitemapGenerationAborted();
       return rendered.ok
         ? {
             ok: true,
             value: {
               ...rendered.value,
-              pollUrlCount: pollUrls.length,
+              pollUrlCount: totalPolls,
               pageCount,
             },
           }

@@ -8,6 +8,7 @@ import {
   deletePoll,
   hasBetterAuthSecret,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 if (!hasBetterAuthSecret()) {
@@ -21,7 +22,7 @@ let demoOwner;
 
 function seedLandingDemo(ownerUserId) {
   const existing = d1Query(
-    "SELECT poll_id FROM poll_reference WHERE reference = 'demo' LIMIT 1",
+    sql`SELECT poll_id FROM poll_reference WHERE reference = 'demo' LIMIT 1`,
   )[0]?.poll_id;
   if (existing) {
     assertUuid(existing);
@@ -30,18 +31,16 @@ function seedLandingDemo(ownerUserId) {
   const pollId = randomUUID();
   const now = Date.now();
   const options = ["Friday", "Monday", "Either works"];
+  const statements = [
+    sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, discovery_state, session_checks_enabled, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms, multi_select_enabled, min_selections, max_selections, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled) VALUES (${pollId}, ${ownerUserId}, 'multiple_choice', 'Best day for a long weekend?', 'live', 'unlisted', 1, NULL, NULL, 1, ${now}, ${now}, 0, NULL, NULL, 0, 0, 1, 0);`,
+    ...options.map((label, position) => {
+      const optionId = randomUUID();
+      return sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionId}, ${pollId}, ${label}, ${position}, ${now});`;
+    }),
+    sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('demo', ${pollId}, 'custom', 1, ${now});`,
+  ];
   d1Execute(
-    `INSERT INTO poll (` +
-      `id, owner_user_id, poll_type, question, result_visibility, discovery_state, session_checks_enabled, ` +
-      `deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms, multi_select_enabled, ` +
-      `min_selections, max_selections, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled` +
-      `) VALUES ('${pollId}', '${ownerUserId}', 'multiple_choice', 'Best day for a long weekend?', 'live', ` +
-      `'unlisted', 1, NULL, NULL, 1, ${now}, ${now}, 0, NULL, NULL, 0, 0, 1, 0);` +
-      options.map((label, position) => {
-        const optionId = randomUUID();
-        return `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionId}', '${pollId}', '${label}', ${position}, ${now});`;
-      }).join("") +
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('demo', '${pollId}', 'custom', 1, ${now});`,
+    sql.join(statements),
   );
 }
 

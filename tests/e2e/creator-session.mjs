@@ -71,8 +71,108 @@ function wrangler(args) {
   throw new Error("unreachable");
 }
 
-function d1Execute(sql) {
-  wrangler(["d1", "execute", "DB", "--local", "--command", sql]);
+const sqlStatements = new WeakSet();
+const sqlStatementText = new WeakMap();
+
+function brandedStatement(text) {
+  const statement = Object.freeze(Object.create(null));
+  sqlStatements.add(statement);
+  sqlStatementText.set(statement, text);
+  return statement;
+}
+
+function encodedSqlValue(value) {
+  if (value === null) return "NULL";
+  if (typeof value === "boolean") return value ? "1" : "0";
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError("SQL numbers must be safe integers");
+    }
+    return String(value);
+  }
+  if (typeof value === "string") {
+    if (value.includes("\0")) {
+      throw new TypeError("SQL strings must not contain NUL bytes");
+    }
+    return `'${value.replaceAll("'", "''")}'`;
+  }
+  throw new TypeError(`Unsupported SQL value type: ${typeof value}`);
+}
+
+function insideSqlString(text) {
+  let inside = false;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "'") continue;
+    if (inside && text[index + 1] === "'") {
+      index += 1;
+    } else {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function requireSqlStatement(statement) {
+  if (
+    typeof statement !== "object" ||
+    statement === null ||
+    !sqlStatements.has(statement)
+  ) {
+    throw new TypeError("Expected a statement produced by the sql tag");
+  }
+  return sqlStatementText.get(statement);
+}
+
+export function sql(strings, ...values) {
+  if (
+    !Array.isArray(strings) ||
+    !Array.isArray(strings.raw) ||
+    !Object.isFrozen(strings) ||
+    !Object.isFrozen(strings.raw) ||
+    strings.length !== values.length + 1 ||
+    strings.raw.length !== strings.length
+  ) {
+    throw new TypeError("sql must be used as a tagged template");
+  }
+  let text = strings[0];
+  for (let index = 0; index < values.length; index += 1) {
+    if (insideSqlString(text)) {
+      throw new TypeError(
+        "SQL interpolations must represent complete values outside string literals",
+      );
+    }
+    text += encodedSqlValue(values[index]) + strings[index + 1];
+  }
+  return brandedStatement(text);
+}
+
+Object.defineProperty(sql, "join", {
+  value(statements) {
+    if (typeof statements?.[Symbol.iterator] !== "function") {
+      throw new TypeError("sql.join expects an iterable of SQL statements");
+    }
+    const statementTexts = Array.from(statements, (statement) =>
+      requireSqlStatement(statement),
+    );
+    if (statementTexts.length === 0) {
+      throw new TypeError("sql.join requires at least one SQL statement");
+    }
+    const formattedStatements = statementTexts.map((text) =>
+      text.trimEnd().endsWith(";") ? text : `${text};`,
+    );
+    return brandedStatement(formattedStatements.join(""));
+  },
+});
+
+function d1Execute(statement) {
+  wrangler([
+    "d1",
+    "execute",
+    "DB",
+    "--local",
+    "--command",
+    requireSqlStatement(statement),
+  ]);
 }
 
 // Results-route fixtures seed polls/votes directly (the route under test is
@@ -80,7 +180,7 @@ function d1Execute(sql) {
 // query half. All interpolated IDs must pass assertUuid first.
 export { d1Execute };
 
-export function d1Query(sql) {
+export function d1Query(statement) {
   const out = wrangler([
     "d1",
     "execute",
@@ -88,7 +188,7 @@ export function d1Query(sql) {
     "--local",
     "--json",
     "--command",
-    sql,
+    requireSqlStatement(statement),
   ]);
   let parsed;
   try {
@@ -118,8 +218,10 @@ export async function seedCreatorSession(role = "creator") {
   const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   const name = role === "administrator" ? "E2E Administrator" : "E2E Creator";
   d1Execute(
-    `INSERT INTO user (id, name, email, email_verified, role, created_at, updated_at) VALUES ('${userId}', '${name}', '${userId}@example.test', 1, '${role}', '${now}', '${now}');` +
-      `INSERT INTO session (id, expires_at, token, user_id, created_at, updated_at) VALUES ('${sessionId}', '${expires}', '${token}', '${userId}', '${now}', '${now}');`,
+    sql.join([
+      sql`INSERT INTO user (id, name, email, email_verified, role, created_at, updated_at) VALUES (${userId}, ${name}, ${`${userId}@example.test`}, 1, ${role}, ${now}, ${now});`,
+      sql`INSERT INTO session (id, expires_at, token, user_id, created_at, updated_at) VALUES (${sessionId}, ${expires}, ${token}, ${userId}, ${now}, ${now});`,
+    ]),
   );
 
   const key = await webcrypto.subtle.importKey(
@@ -149,17 +251,69 @@ export function cleanupCreator(userId) {
   // Clean vote and Poll facts explicitly so test failures remain inspectable
   // and retries do not inherit accepted submissions.
   d1Execute(
-    `DELETE FROM moderation_action WHERE actor_user_id = '${userId}' OR poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
-      `DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
-      `DELETE FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}'));` +
-      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}'));` +
-      `DELETE FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
-      `DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
-      `DELETE FROM poll_reference WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = '${userId}');` +
-      `DELETE FROM poll WHERE owner_user_id = '${userId}';` +
-      `DELETE FROM session WHERE user_id = '${userId}';` +
-      `DELETE FROM user WHERE id = '${userId}';`,
+    sql.join([
+      sql`DELETE FROM moderation_action WHERE actor_user_id = ${userId} OR poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
+      sql`DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
+      sql`DELETE FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId}));`,
+      sql`DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId}));`,
+      sql`DELETE FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
+      sql`DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
+      sql`DELETE FROM poll_reference WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
+      sql`DELETE FROM poll WHERE owner_user_id = ${userId};`,
+      sql`DELETE FROM session WHERE user_id = ${userId};`,
+      sql`DELETE FROM user WHERE id = ${userId};`,
+    ]),
   );
+}
+
+export function cleanupCreators(userIds, cleanup = cleanupCreator) {
+  if (typeof userIds?.[Symbol.iterator] !== "function") return;
+  const failures = [];
+  for (const userId of userIds) {
+    try {
+      cleanup(userId);
+    } catch (error) {
+      failures.push(
+        new Error(`Failed to clean E2E Creator ${userId}`, { cause: error }),
+      );
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "One or more E2E Creator cleanups failed");
+  }
+}
+
+export function seedPublicReferenceFixture() {
+  const userId = randomUUID();
+  const customPollId = randomUUID();
+  const generatedPollId = randomUUID();
+  const customReference = `signed-out-${randomUUID()}`;
+  const generatedReference = `Ab${randomUUID().replaceAll("-", "").slice(0, 20)}`;
+  const now = new Date().toISOString();
+
+  try {
+    d1Execute(
+      sql.join([
+        sql`INSERT INTO user (id, name, email, email_verified, role, created_at, updated_at) VALUES (${userId}, 'Signed-out Fixture', ${`${userId}@example.test`}, 1, 'creator', ${now}, ${now});`,
+        sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, representation_version, created_at_ms, updated_at_ms) VALUES (${customPollId}, ${userId}, 'multiple_choice', 'Signed-out custom reference?', 'live', 1, 0, 0);`,
+        sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${customReference}, ${customPollId}, 'custom', 1, 0);`,
+        sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, representation_version, created_at_ms, updated_at_ms) VALUES (${generatedPollId}, ${userId}, 'multiple_choice', 'Signed-out generated reference?', 'live', 1, 0, 0);`,
+        sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${generatedReference}, ${generatedPollId}, 'generated', 1, 0);`,
+      ]),
+    );
+  } catch (seedError) {
+    try {
+      cleanupCreator(userId);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [seedError, cleanupError],
+        `Failed to seed and clean public E2E reference fixture ${userId}`,
+      );
+    }
+    throw seedError;
+  }
+
+  return { userId, customReference, generatedReference };
 }
 
 export function closePoll(pollId, closedAtMs) {
@@ -168,7 +322,7 @@ export function closePoll(pollId, closedAtMs) {
     throw new Error("closedAtMs must be a non-negative integer");
   }
   d1Execute(
-    `UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = '${pollId}';`,
+    sql`UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = ${pollId};`,
   );
 }
 
@@ -180,7 +334,7 @@ export function setPollDeadline(pollId, deadlineMs) {
     throw new Error("deadlineMs must be a non-negative integer");
   }
   d1Execute(
-    `UPDATE poll SET deadline_ms = ${deadlineMs} WHERE id = '${pollId}';`,
+    sql`UPDATE poll SET deadline_ms = ${deadlineMs} WHERE id = ${pollId};`,
   );
 }
 
@@ -192,7 +346,7 @@ export function setResultVisibility(pollId, visibility) {
     throw new Error(`Unknown result_visibility: ${visibility}`);
   }
   d1Execute(
-    `UPDATE poll SET result_visibility = '${visibility}' WHERE id = '${pollId}';`,
+    sql`UPDATE poll SET result_visibility = ${visibility} WHERE id = ${pollId};`,
   );
 }
 
@@ -201,13 +355,15 @@ export function setResultVisibility(pollId, visibility) {
 export function deletePoll(pollId) {
   assertUuid(pollId);
   d1Execute(
-    `DELETE FROM voter_claim WHERE poll_id = '${pollId}';` +
-      `DELETE FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${pollId}');` +
-      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${pollId}');` +
-      `DELETE FROM vote WHERE poll_id = '${pollId}';` +
-      `DELETE FROM poll_option WHERE poll_id = '${pollId}';` +
-      `DELETE FROM poll_reference WHERE poll_id = '${pollId}';` +
-      `DELETE FROM poll WHERE id = '${pollId}';`,
+    sql.join([
+      sql`DELETE FROM voter_claim WHERE poll_id = ${pollId};`,
+      sql`DELETE FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ${pollId});`,
+      sql`DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ${pollId});`,
+      sql`DELETE FROM vote WHERE poll_id = ${pollId};`,
+      sql`DELETE FROM poll_option WHERE poll_id = ${pollId};`,
+      sql`DELETE FROM poll_reference WHERE poll_id = ${pollId};`,
+      sql`DELETE FROM poll WHERE id = ${pollId};`,
+    ]),
   );
 }
 
@@ -229,5 +385,5 @@ export function agePoll(pollId, createdAtMs) {
   if (!Number.isInteger(createdAtMs) || createdAtMs < 0) {
     throw new Error("createdAtMs must be a non-negative integer");
   }
-  d1Execute(`UPDATE poll SET created_at_ms = ${createdAtMs} WHERE id = '${pollId}';`);
+  d1Execute(sql`UPDATE poll SET created_at_ms = ${createdAtMs} WHERE id = ${pollId};`);
 }

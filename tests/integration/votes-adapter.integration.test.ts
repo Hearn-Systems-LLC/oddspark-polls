@@ -10,6 +10,7 @@ import {
   sha256Hex,
 } from "../../src/adapters/digest/index";
 import { multipleChoiceStrategy } from "../../src/modules/polls/types/multiple-choice";
+import { POLL_CAPS } from "../../src/modules/polls/index";
 import {
   AlreadyVotedError,
   asVoterClaimDigest,
@@ -52,6 +53,7 @@ type MigrationTestEnv = Cloudflare.Env & {
 
 const testEnv = env as MigrationTestEnv;
 const NOW = 1_800_000_000_000;
+const RFC3339_MAX_TIMESTAMP_MS = 253_402_300_799_999;
 const POLL_ID = "vote-adapter-poll" as PollId;
 const OPTION_A = "vote-adapter-option-a" as PollOptionId;
 const OPTION_B = "vote-adapter-option-b" as PollOptionId;
@@ -502,10 +504,12 @@ describe("createVotePersistence", () => {
   });
 
   it("rejects non-canonical Comment contributions before any D1 write", async () => {
-    const prepare = vi.fn();
+    const bind = vi.fn();
+    const prepare = vi.fn(() => ({ bind }));
+    const executeBatch = vi.fn();
     const persistence = createVotePersistence({
       prepare,
-      batch: vi.fn(),
+      batch: executeBatch,
     } as unknown as D1Database);
     const base = {
       kind: "vote_comment" as const,
@@ -517,10 +521,13 @@ describe("createVotePersistence", () => {
     };
     const invalid = [
       { ...base, id: "" },
+      { ...base, id: "comment id" },
       { ...base, body: " Context" },
+      { ...base, body: "x".repeat(501) },
       { ...base, body: "line one\r\nline two" },
       { ...base, body: "context\0hidden" },
       { ...base, displayName: " Jo" },
+      { ...base, displayName: "x".repeat(81) },
       { ...base, displayName: "Jo\0hidden" },
       { ...base, displayName: "Jo\nAdmin" },
       { ...base, createdAtMs: NOW + 1 },
@@ -534,25 +541,411 @@ describe("createVotePersistence", () => {
       ).rejects.toThrow(/invalid vote comment contribution/);
     }
     expect(prepare).not.toHaveBeenCalled();
+    expect(bind).not.toHaveBeenCalled();
+    expect(executeBatch).not.toHaveBeenCalled();
   });
 
-  it("rolls back the Vote when Comment persistence collides", async () => {
-    await insertPoll({ commentsEnabled: true });
-    const persistence = createVotePersistence(testEnv.DB);
+  it.each([
+    [
+      "a representation increment for another Poll",
+      () =>
+        batch({
+          representationVersion: incrementRepresentationVersion(
+            "different-poll" as PollId,
+            NOW,
+          ),
+        }),
+      "invalid vote persistence batch",
+    ],
+    [
+      "a representation increment with a different timestamp",
+      () =>
+        batch({
+          representationVersion: incrementRepresentationVersion(
+            POLL_ID,
+            NOW + 1,
+          ),
+        }),
+      "invalid vote persistence batch",
+    ],
+    [
+      "a selection for another Vote",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "different-vote",
+              pollOptionId: OPTION_A,
+            },
+          ],
+        }),
+      "invalid vote selection contribution",
+    ],
+    [
+      "a Vote with no selection contribution",
+      () => batch({ contributions: [] }),
+      "invalid vote persistence batch",
+    ],
+    [
+      "a claim for another Poll",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "voter_claim",
+              pollId: "different-poll" as PollId,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "vote-1",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      "invalid voter claim contribution",
+    ],
+    [
+      "a claim for another Vote",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "different-vote",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      "invalid voter claim contribution",
+    ],
+    [
+      "a claim with a different timestamp",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "vote-1",
+              createdAtMs: NOW + 1,
+            },
+          ],
+        }),
+      "invalid voter claim contribution",
+    ],
+    [
+      "an unsafe matching Vote and Comment timestamp",
+      () =>
+        batch({
+          vote: { ...batch().vote, createdAtMs: -1 },
+          contributions: [
+            {
+              kind: "vote_comment",
+              id: "comment-1",
+              voteId: "vote-1",
+              body: "Context",
+              displayName: null,
+              createdAtMs: -1,
+            },
+          ],
+          representationVersion: incrementRepresentationVersion(POLL_ID, -1),
+        }),
+      "invalid vote persistence batch",
+    ],
+    [
+      "a Vote timestamp beyond RFC 3339's four-digit-year range",
+      () => {
+        const createdAtMs = RFC3339_MAX_TIMESTAMP_MS + 1;
+        return batch({
+          vote: { ...batch().vote, createdAtMs },
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+          ],
+          representationVersion: incrementRepresentationVersion(
+            POLL_ID,
+            createdAtMs,
+          ),
+        });
+      },
+      "invalid vote persistence batch",
+    ],
+    [
+      "a Comment timestamp beyond RFC 3339's four-digit-year range",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "vote_comment",
+              id: "comment-1",
+              voteId: "vote-1",
+              body: "Context",
+              displayName: null,
+              createdAtMs: RFC3339_MAX_TIMESTAMP_MS + 1,
+            },
+          ],
+        }),
+      "invalid vote comment contribution",
+    ],
+    [
+      "a claim timestamp beyond RFC 3339's four-digit-year range",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "vote-1",
+              createdAtMs: RFC3339_MAX_TIMESTAMP_MS + 1,
+            },
+          ],
+        }),
+      "invalid voter claim contribution",
+    ],
+    [
+      "a sparse contribution array",
+      () => {
+        const contributions = new Array(2) as VotePersistenceBatch["contributions"];
+        contributions[0] = {
+          kind: "vote_selection",
+          voteId: "vote-1",
+          pollOptionId: OPTION_A,
+        };
+        return batch({ contributions });
+      },
+      "invalid vote contribution array",
+    ],
+    [
+      "a wrong-typed contribution after a valid entry",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            null,
+          ] as unknown as VotePersistenceBatch["contributions"],
+        }),
+      "invalid vote contribution",
+    ],
+    [
+      "a tampered contribution kind after a valid entry",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "vote_comment",
+              voteId: "vote-1",
+              pollOptionId: OPTION_B,
+            },
+          ] as unknown as VotePersistenceBatch["contributions"],
+        }),
+      "invalid vote contribution",
+    ],
+    [
+      "a duplicate selection",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+            {
+              kind: "vote_selection",
+              voteId: "vote-1",
+              pollOptionId: OPTION_A,
+            },
+          ],
+        }),
+      "invalid vote selection contribution",
+    ],
+    [
+      "more selections than a Poll can define",
+      () =>
+        batch({
+          contributions: Array.from(
+            { length: POLL_CAPS.maxOptions + 1 },
+            (_, index) => ({
+              kind: "vote_selection" as const,
+              voteId: "vote-1",
+              pollOptionId: `option-${index}` as PollOptionId,
+            }),
+          ),
+        }),
+      "invalid vote persistence batch",
+    ],
+    [
+      "multiple Comments",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "vote_comment",
+              id: "comment-1",
+              voteId: "vote-1",
+              body: "One",
+              displayName: null,
+              createdAtMs: NOW,
+            },
+            {
+              kind: "vote_comment",
+              id: "comment-2",
+              voteId: "vote-1",
+              body: "Two",
+              displayName: null,
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      "invalid vote comment contribution",
+    ],
+    [
+      "duplicate claim check-kinds",
+      () =>
+        batch({
+          contributions: [
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_1,
+              voteId: "vote-1",
+              createdAtMs: NOW,
+            },
+            {
+              kind: "voter_claim",
+              pollId: POLL_ID,
+              checkKind: "session",
+              digest: DIGEST_SESSION_ALT,
+              voteId: "vote-1",
+              createdAtMs: NOW,
+            },
+          ],
+        }),
+      "invalid voter claim contribution",
+    ],
+    [
+      "a tampered representation kind",
+      () =>
+        batch({
+          representationVersion: {
+            ...incrementRepresentationVersion(POLL_ID, NOW),
+            kind: "replace_representation_version",
+          } as unknown as VotePersistenceBatch["representationVersion"],
+        }),
+      "invalid vote persistence batch",
+    ],
+    [
+      "a wrong-typed Vote shape",
+      () =>
+        batch({
+          vote: {
+            ...batch().vote,
+            id: 42,
+          } as unknown as VotePersistenceBatch["vote"],
+        }),
+      "invalid vote persistence batch",
+    ],
+  ] as const)(
+    "rejects %s before any D1 operation",
+    async (_label, makeBatch, message) => {
+      const bind = vi.fn();
+      const prepare = vi.fn(() => ({ bind }));
+      const executeBatch = vi.fn();
+      const persistence = createVotePersistence({
+        prepare,
+        batch: executeBatch,
+      } as unknown as D1Database);
+
+      await expect(persistence.insertVote(makeBatch())).rejects.toThrow(
+        message,
+      );
+      expect(prepare).not.toHaveBeenCalled();
+      expect(bind).not.toHaveBeenCalled();
+      expect(executeBatch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("snapshots accessor-backed batches once before validation and D1 binding", async () => {
+    await insertPoll();
+    const input = batch();
+    let pollIdReads = 0;
+    Object.defineProperty(input.vote, "pollId", {
+      enumerable: true,
+      get: () => {
+        pollIdReads += 1;
+        return pollIdReads === 1 ? POLL_ID : ("different-poll" as PollId);
+      },
+    });
+
+    await expect(
+      createVotePersistence(testEnv.DB).insertVote(input),
+    ).resolves.toBeUndefined();
+    expect(pollIdReads).toBe(1);
+    expect(await counts()).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 1,
+      version: 2,
+    });
+  });
+
+  it("rejects inherited contribution fields before any D1 operation", async () => {
+    const inherited = Object.assign(
+      Object.create({ kind: "vote_selection" }) as Record<string, unknown>,
+      {
+        voteId: "vote-1",
+        pollOptionId: OPTION_A,
+        unrelated: true,
+      },
+    );
+    const prepare = vi.fn();
+    const executeBatch = vi.fn();
+    const persistence = createVotePersistence({
+      prepare,
+      batch: executeBatch,
+    } as unknown as D1Database);
+
     await expect(
       persistence.insertVote(
         batch({
           contributions: [
-            { kind: "vote_selection", voteId: "vote-1", pollOptionId: OPTION_A },
-            { kind: "vote_comment", id: "comment-1", voteId: "vote-1", body: "One", displayName: null, createdAtMs: NOW },
-            { kind: "vote_comment", id: "comment-2", voteId: "vote-1", body: "Two", displayName: null, createdAtMs: NOW },
+            inherited as unknown as VotePersistenceBatch["contributions"][number],
           ],
         }),
       ),
-    ).rejects.toThrow();
-    await expect(testEnv.DB.prepare("SELECT COUNT(*) AS count FROM vote").first()).resolves.toEqual({ count: 0 });
-    await expect(testEnv.DB.prepare("SELECT COUNT(*) AS count FROM vote_comment").first()).resolves.toEqual({ count: 0 });
-    await expect(testEnv.DB.prepare("SELECT representation_version AS version FROM poll WHERE id = ?1").bind(POLL_ID).first()).resolves.toEqual({ version: 1 });
+    ).rejects.toThrow("invalid vote contribution");
+    expect(prepare).not.toHaveBeenCalled();
+    expect(executeBatch).not.toHaveBeenCalled();
   });
 
   it("rejects hostile claim reads before any D1 prepare or bind call", async () => {
@@ -734,6 +1127,11 @@ describe("createVotePersistence", () => {
         batch({
           vote: { ...batch().vote, id: "vote-replay" },
           contributions: [
+            {
+              kind: "vote_selection",
+              voteId: "vote-replay",
+              pollOptionId: OPTION_A,
+            },
             {
               kind: "voter_claim",
               pollId: POLL_ID,

@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 const CREATOR_DELISTED_COPY =
@@ -45,22 +46,9 @@ test.describe("Administrator delisting journey", () => {
   });
 
   test.afterAll(() => {
-    const cleanupErrors = [];
     // Owners go first so deleting their Polls removes Poll-scoped moderation
     // facts before the Administrator's restrictive actor FK is released.
-    for (const userId of seededUserIds) {
-      try {
-        cleanupCreator(userId);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        cleanupErrors,
-        `Failed to clean ${cleanupErrors.length} Story 3.3 E2E fixture(s)`,
-      );
-    }
+    cleanupCreators(seededUserIds);
   });
 
   function observePage(page, label) {
@@ -128,7 +116,7 @@ test.describe("Administrator delisting journey", () => {
     assertUuid(pollId);
     expect(
       d1Query(
-        `SELECT discovery_state FROM poll WHERE id = '${pollId}'`,
+        sql`SELECT discovery_state FROM poll WHERE id = ${pollId}`,
       ),
     ).toEqual([{ discovery_state: expected }]);
   }
@@ -148,9 +136,25 @@ test.describe("Administrator delisting journey", () => {
     const response = await page.request.get("/sitemap.xml");
     expect(response.status()).toBe(200);
     expect(response.headers()["cache-control"]).toContain("no-store");
-    const xml = await response.text();
+    const rootXml = await response.text();
+    const documents = [rootXml];
+    if (rootXml.includes("<sitemapindex")) {
+      const childUrls = [
+        ...rootXml.matchAll(/<sitemap><loc>([^<]+)<\/loc><\/sitemap>/gu),
+      ].map((match) => match[1].replaceAll("&amp;", "&"));
+      for (const childUrl of childUrls) {
+        const child = await page.request.get(childUrl);
+        expect(child.headers()["cache-control"]).toContain("no-store");
+        if (child.status() === 410) {
+          expect(await child.text()).toBe("sitemap_range_gone");
+          continue;
+        }
+        expect(child.status()).toBe(200);
+        documents.push(await child.text());
+      }
+    }
     const canonicalUrl = `${requireBaseUrl(baseURL)}${poll.publicPath}`;
-    expect(xml.includes(canonicalUrl)).toBe(visible);
+    expect(documents.some((xml) => xml.includes(canonicalUrl))).toBe(visible);
   }
 
   async function expectModerationBlind(page) {
@@ -442,7 +446,7 @@ test.describe("Administrator delisting journey", () => {
         "Counted.",
       );
       expect(
-        d1Query(`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = '${listed.pollId}'`),
+        d1Query(sql`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = ${listed.pollId}`),
       ).toEqual([{ votes: 1 }]);
       await expectModerationBlind(noJsVoterPage);
 

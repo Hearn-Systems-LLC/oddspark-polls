@@ -442,7 +442,9 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     expect(html).toContain("Keep &lt;this&gt; context");
     expect(html).toContain("Jo &amp; Co");
     expect(html).toContain("data-comment-composer");
-    expect(purposes).toEqual(["ip", "rate_limit"]);
+    // The response flash is signed ahead of the commit so a failure there
+    // can never leave a committed Vote behind a retry outcome.
+    expect(purposes).toEqual(["ip", "rate_limit", "session"]);
     expect(await counts(poll.pollId)).toEqual({
       votes: 0,
       selections: 0,
@@ -536,7 +538,7 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     const html = await response.text();
     expect(html).toContain('data-outcome-code="ip_check_unavailable"');
     expect(html).toMatch(new RegExp(`value="${poll.optionA}"[^>]*checked`));
-    expect(purposes).toEqual(["ip", "rate_limit"]);
+    expect(purposes).toEqual(["ip", "rate_limit", "session"]);
     expect(await counts(poll.pollId)).toEqual({
       votes: 0,
       selections: 0,
@@ -785,6 +787,137 @@ describe("POST /:reference IP Checks delivery boundary", () => {
       claims: 1,
       version: 2,
     });
+  });
+
+  it("stores nothing and renders a truthful fresh-ID retry when flash signing fails", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      ipChecksEnabled: false,
+      commentsEnabled: true,
+    });
+    const submittedId = crypto.randomUUID();
+    const purposes: Array<string | null> = [];
+    mockDigestSigning(async (purpose, sign) => {
+      purposes.push(purpose);
+      if (purpose === "session") {
+        throw new Error("flash signing unavailable");
+      }
+      return sign();
+    });
+    const body = formBody(poll.optionA, submittedId);
+    body.set("comment", "must never persist");
+    body.set("display_name", "Ghost");
+
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+
+    // The signing failure precedes the atomic commit, so the broad retry
+    // render is truthful: nothing was stored and the re-rendered ID is fresh.
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain('data-outcome-code="vote_failed"');
+    expect(html).toMatch(new RegExp(`value="${poll.optionA}"[^>]*checked`));
+    expect(html).toContain("must never persist");
+    expect(html).toContain("Ghost");
+    expect(purposes).toEqual(["session"]);
+    const renderedId = /name="submission_id" value="([^"]+)"/u.exec(html)?.[1];
+    expect(renderedId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
+    );
+    expect(renderedId).not.toBe(submittedId);
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 0,
+      selections: 0,
+      claims: 0,
+      version: 1,
+    });
+    const comments = await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS n FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ?1)",
+    )
+      .bind(poll.pollId)
+      .first<{ n: number }>();
+    expect(comments?.n ?? 0).toBe(0);
+
+    // And resubmitting after that failure commits exactly one Vote, with the
+    // pre-computed flash still set on the success path.
+    vi.restoreAllMocks();
+    const retry = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: formBody(
+            poll.optionA,
+            (renderedId ?? crypto.randomUUID()) as typeof submittedId,
+          ),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(retry.status).toBe(303);
+    expect(retry.headers.get("set-cookie")).toContain("oddspark.vote_flash=");
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 0,
+      version: 2,
+    });
+  });
+
+  it("conflicts an edited resubmit under a retained submission id and keeps the counted original", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      ipChecksEnabled: false,
+    });
+    const submittedId = crypto.randomUUID();
+
+    const first = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: formBody(poll.optionA, submittedId),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(first.status).toBe(303);
+
+    // The retained-id client contract sends every retry under the original
+    // submission id; an edited payload must conflict and never count twice.
+    const edited = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: formBody(poll.optionB, submittedId),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(edited.status).toBe(422);
+    const html = await edited.text();
+    expect(html).toContain('data-outcome-code="idempotency_conflict"');
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 0,
+      version: 2,
+    });
+    const stored = await testEnv.DB.prepare(
+      "SELECT poll_option_id AS optionId FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ?1)",
+    )
+      .bind(poll.pollId)
+      .first<{ optionId: string }>();
+    expect(stored?.optionId).toBe(poll.optionA);
   });
 
   it("orders Counted before closed before Session before IP on GET", async () => {
@@ -1460,7 +1593,7 @@ describe("Comment With Your Vote", () => {
     expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 1 });
   });
 
-  it("rejects ambiguous or non-text Comment fields without committing", async () => {
+  it("rejects ambiguous or non-text Comment fields symmetrically without committing", async () => {
     const poll = await seedPoll({
       commentsEnabled: true,
       sessionChecksEnabled: false,
@@ -1498,6 +1631,61 @@ describe("Comment With Your Vote", () => {
       poll.reference,
     );
     expect(fileResponse.status).toBe(422);
+
+    const duplicateName = formBody(poll.optionA);
+    duplicateName.set("comment", "Context");
+    duplicateName.append("display_name", "Attacker One");
+    duplicateName.append("display_name", "Attacker Two");
+    const duplicateNameResponse = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: duplicateName,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(duplicateNameResponse.status).toBe(422);
+    expect(duplicateNameResponse.headers.get("cache-control")).toBe(
+      "private, no-store",
+    );
+    expect(duplicateNameResponse.headers.get("x-request-id")).toBeTruthy();
+    const duplicateNameHtml = await duplicateNameResponse.text();
+    expect(duplicateNameHtml).not.toContain("Attacker One");
+    expect(duplicateNameHtml).not.toContain("Attacker Two");
+    expect(duplicateNameHtml).not.toContain("[object File]");
+
+    const fileNameBody = new FormData();
+    fileNameBody.set("submission_id", crypto.randomUUID());
+    fileNameBody.set("option_id", poll.optionA);
+    fileNameBody.set("comment", "Context");
+    fileNameBody.set(
+      "display_name",
+      new File(["Attacker File"], "display-name.txt"),
+    );
+    const fileNameResponse = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: {
+            origin: ORIGIN,
+            "sec-fetch-site": "same-origin",
+          },
+          body: fileNameBody,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(fileNameResponse.status).toBe(422);
+    expect(fileNameResponse.headers.get("cache-control")).toBe(
+      "private, no-store",
+    );
+    expect(fileNameResponse.headers.get("x-request-id")).toBeTruthy();
+    const fileNameHtml = await fileNameResponse.text();
+    expect(fileNameHtml).not.toContain("Attacker File");
+    expect(fileNameHtml).not.toContain("display-name.txt");
+    expect(fileNameHtml).not.toContain("[object File]");
     expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 1 });
   });
 

@@ -4,11 +4,12 @@ import { readFile } from "node:fs/promises";
 import { read, utils } from "xlsx";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 if (!hasBetterAuthSecret()) {
@@ -22,10 +23,6 @@ test.describe.configure({ mode: "serial", timeout: 180_000 });
 const OVERSIZE_MESSAGE =
   "XLSX export supports up to 1,000 accepted votes. Download CSV for larger Polls.";
 
-function sqlText(value) {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
 function seedPoll(ownerUserId, suffix, { rich = false } = {}) {
   assertUuid(ownerUserId);
   const pollId = randomUUID();
@@ -34,10 +31,12 @@ function seedPoll(ownerUserId, suffix, { rich = false } = {}) {
   const reference = `xlsx-${suffix}-${pollId.slice(0, 8)}`;
   for (const value of [pollId, optionA, optionB]) assertUuid(value);
   d1Execute(
-    `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, multi_select_enabled, min_selections, max_selections, representation_version, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${ownerUserId}', 'multiple_choice', ${sqlText(`XLSX ${suffix}`)}, 'creator_only', 1, 1, 1, 2, 1, 0, 0);` +
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionA}', '${pollId}', ${sqlText("Alpha, choice")}, 0, 0);` +
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionB}', '${pollId}', ${sqlText('=Beta "formula"')}, 1, 0);` +
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(reference)}, '${pollId}', 'custom', 1, 0);`,
+    sql.join([
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, multi_select_enabled, min_selections, max_selections, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerUserId}, 'multiple_choice', ${`XLSX ${suffix}`}, 'creator_only', 1, 1, 1, 2, 1, 0, 0);`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionA}, ${pollId}, ${"Alpha, choice"}, 0, 0);`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionB}, ${pollId}, ${'=Beta "formula"'}, 1, 0);`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${reference}, ${pollId}, 'custom', 1, 0);`,
+    ]),
   );
   if (rich) {
     const voteLate = randomUUID();
@@ -45,12 +44,14 @@ function seedPoll(ownerUserId, suffix, { rich = false } = {}) {
     const commentId = randomUUID();
     for (const value of [voteLate, voteEarly, commentId]) assertUuid(value);
     d1Execute(
-      `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteLate}', '${pollId}', '${randomUUID()}', 'xlsx-private-late', 1800000000001);` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteLate}', '${optionA}');` +
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteEarly}', '${pollId}', '${randomUUID()}', 'xlsx-private-early', 1800000000000);` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteEarly}', '${optionB}');` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteEarly}', '${optionA}');` +
-        `INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES ('${commentId}', '${voteEarly}', ${sqlText('=First line, "quoted" _x000A_\nsecond line')}, ${sqlText("Zoë")}, 1800000000000);`,
+      sql.join([
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteLate}, ${pollId}, ${randomUUID()}, 'xlsx-private-late', 1800000000001);`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteLate}, ${optionA});`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteEarly}, ${pollId}, ${randomUUID()}, 'xlsx-private-early', 1800000000000);`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteEarly}, ${optionB});`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteEarly}, ${optionA});`,
+        sql`INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (${commentId}, ${voteEarly}, ${'=First line, "quoted" _x000A_\nsecond line'}, ${"Zoë"}, 1800000000000);`,
+      ]),
     );
   }
   return { pollId, reference };
@@ -59,15 +60,10 @@ function seedPoll(ownerUserId, suffix, { rich = false } = {}) {
 function seedOversize(pollId) {
   assertUuid(pollId);
   d1Execute(
-    `WITH RECURSIVE indexes(value) AS (` +
-      `SELECT 1 UNION ALL SELECT value + 1 FROM indexes WHERE value < 1001` +
-      `) INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) ` +
-      `SELECT printf('e2e-xlsx-vote-%04d', value), '${pollId}', ` +
-      `printf('e2e-xlsx-submission-%04d', value), ` +
-      `printf('e2e-xlsx-private-%04d', value), 1800000000000 + value FROM indexes;` +
-      `INSERT INTO vote_selection (vote_id, poll_option_id) ` +
-      `SELECT v.id, o.id FROM vote v JOIN poll_option o ON o.poll_id = v.poll_id ` +
-      `WHERE v.poll_id = '${pollId}' AND o.position = 0;`,
+    sql.join([
+      sql`WITH RECURSIVE indexes(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM indexes WHERE value < 1001) INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) SELECT printf('e2e-xlsx-vote-%04d', value), ${pollId}, printf('e2e-xlsx-submission-%04d', value), printf('e2e-xlsx-private-%04d', value), 1800000000000 + value FROM indexes;`,
+      sql`INSERT INTO vote_selection (vote_id, poll_option_id) SELECT v.id, o.id FROM vote v JOIN poll_option o ON o.poll_id = v.poll_id WHERE v.poll_id = ${pollId} AND o.position = 0;`,
+    ]),
   );
 }
 
@@ -128,7 +124,7 @@ test.describe("creator XLSX export", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of users) cleanupCreator(userId);
+    cleanupCreators(users);
   });
 
   async function signIn(context, baseURL) {

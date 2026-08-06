@@ -140,14 +140,30 @@ export function buildDiscoveryCacheKey(
   );
 }
 
-function expiryFor(page: DiscoveryCatalogPage, nowMs: number): number {
-  let expiresAtMs = nowMs + MAX_CACHE_AGE_MS;
+function expiryFor(page: DiscoveryCatalogPage, nowMs: number): number | null {
+  if (!safeInteger(nowMs)) return null;
+  let lifetimeMs = MAX_CACHE_AGE_MS;
   for (const item of page.items) {
     if (item.deadlineMs !== null) {
-      expiresAtMs = Math.min(expiresAtMs, item.deadlineMs);
+      if (!safeInteger(item.deadlineMs)) return null;
+      lifetimeMs = Math.min(lifetimeMs, item.deadlineMs - nowMs);
     }
   }
-  return expiresAtMs;
+  if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0) return null;
+  const expiresAtMs = nowMs + lifetimeMs;
+  return safeInteger(expiresAtMs) ? expiresAtMs : null;
+}
+
+function httpDateFor(expiresAtMs: number): string | null {
+  const expires = new Date(expiresAtMs);
+  const year = expires.getUTCFullYear();
+  if (!Number.isInteger(year) || year < 1_000 || year > 9_999) return null;
+  const value = expires.toUTCString();
+  return /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/u.test(
+    value,
+  )
+    ? value
+    : null;
 }
 
 export function createDiscoveryCache(
@@ -195,6 +211,7 @@ export function createDiscoveryCache(
 
     async put(input): Promise<void> {
       const expiresAtMs = expiryFor(input.page, input.nowMs);
+      if (expiresAtMs === null) return;
       const maxAgeSeconds = Math.floor((expiresAtMs - input.nowMs) / 1000);
       if (maxAgeSeconds <= 0) return;
 
@@ -204,13 +221,13 @@ export function createDiscoveryCache(
         expiresAtMs,
         page: input.page,
       };
-      const response = new Response(JSON.stringify(entry), {
-        headers: {
-          "cache-control": `public, max-age=${Math.min(30, maxAgeSeconds)}`,
-          "content-type": "application/json; charset=utf-8",
-          expires: new Date(expiresAtMs).toUTCString(),
-        },
+      const headers = new Headers({
+        "cache-control": `public, max-age=${Math.min(30, maxAgeSeconds)}`,
+        "content-type": "application/json; charset=utf-8",
       });
+      const expires = httpDateFor(expiresAtMs);
+      if (expires !== null) headers.set("expires", expires);
+      const response = new Response(JSON.stringify(entry), { headers });
 
       const population = (async () => {
         const cache = await cacheStorage.open(DISCOVERY_CACHE_NAME);

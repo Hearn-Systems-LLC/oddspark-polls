@@ -15,6 +15,12 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Large Discover catalogs now publish a bounded sitemap index whose opaque
+  keyset-range children reapply fresh D1 eligibility without crossing their
+  encoded ranges; smaller catalogs keep the byte-compatible single
+  `sitemap.xml` shape. Empty retired children return a stable gone response,
+  generation has one whole-build request budget, and extreme cache timestamps
+  no longer emit invalid HTTP dates.
 - Direct owner XLSX export beside CSV on each creator Poll detail. Polls with
   up to 1,000 accepted Votes receive literal-string/numeric `VOTES`, `TALLY`,
   and `SUMMARY` worksheets from one bounded snapshot; a 1,001st-Vote sentinel
@@ -173,3 +179,14 @@ production on every merge, but no version has been cut or tagged.
   / detail right from the large breakpoint while keeping both regions stacked
   below it, with a monitor floor (status + vote total + link to live results).
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.
+
+### Fixed
+
+- Vote recovery can no longer duplicate a Vote when every Security Toggle is
+  off. The voter's "Counted." proof is now signed before the Vote commits, so
+  a signing failure surfaces as a truthful retry with nothing stored instead
+  of a fresh retry behind an already-counted Vote; and the ten-second
+  in-flight form recovery now keeps the original submission identity, so a
+  resubmission after a slow or lost response replays to the stored outcome —
+  or conflicts with the counted original standing — instead of counting
+  twice.

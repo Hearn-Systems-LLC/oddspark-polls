@@ -229,6 +229,109 @@ describe("sitemap.xml", () => {
     expect(xml).toContain("/batch-1001</loc>");
   });
 
+  it("keeps fresh children range-bounded through boundary deletion and Deadline exclusion", async () => {
+    const now = Date.now();
+    await testEnv.DB.prepare(
+      `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 45001)
+       INSERT INTO poll (
+         id, owner_user_id, poll_type, question, result_visibility,
+         discovery_state, session_checks_enabled, deadline_ms,
+         representation_version, created_at_ms, updated_at_ms
+       )
+       SELECT printf('71000000-0000-4000-8000-%012d', n), '${OWNER}',
+         'multiple_choice', 'Range child', 'live', 'listed', 1,
+         CASE WHEN n = 45001 THEN ${now} + 60000 ELSE NULL END,
+         1, ${now} + n, ${now} + n
+       FROM seq`,
+    ).run();
+    await testEnv.DB.prepare(
+      `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 45001)
+       INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms)
+       SELECT printf('range-%d', n), printf('71000000-0000-4000-8000-%012d', n),
+         'generated', 1, ${now} + n FROM seq`,
+    ).run();
+
+    const root = await sitemapGet(context("/sitemap.xml"));
+    const index = await root.text();
+    const children = [
+      ...index.matchAll(/<sitemap><loc>([^<]+)<\/loc><\/sitemap>/gu),
+    ].map((match) => new URL((match[1] as string).replaceAll("&amp;", "&")));
+    expect(root.status).toBe(200);
+    expect(index).toContain("<sitemapindex");
+    expect(children).toHaveLength(2);
+
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        "DELETE FROM poll WHERE id = '71000000-0000-4000-8000-000000000002'",
+      ),
+      testEnv.DB.prepare(
+        "UPDATE poll SET deadline_ms = ?1 WHERE id = '71000000-0000-4000-8000-000000045001'",
+      ).bind(Date.now() - 1),
+    ]);
+
+    const childDocuments: string[] = [];
+    for (const child of children) {
+      const response = await sitemapGet(context(`${child.pathname}${child.search}`));
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      childDocuments.push(await response.text());
+    }
+    const combined = childDocuments.join("\n");
+    const pollLocations = [...combined.matchAll(/<url><loc>([^<]+)<\/loc><\/url>/gu)]
+      .map((match) => match[1] as string)
+      .filter((location) => location.includes("/range-"));
+    expect(pollLocations).toHaveLength(44_999);
+    expect(new Set(pollLocations)).toHaveLength(44_999);
+    expect(combined).not.toContain("/range-2</loc>");
+    expect(combined).not.toContain("/range-45001</loc>");
+    expect(childDocuments[0]?.match(/<url><loc>/g)).toHaveLength(45_000);
+    expect(childDocuments[1]?.match(/<url><loc>/g)).toHaveLength(1);
+
+    await testEnv.DB.prepare(
+      "DELETE FROM poll WHERE id = '71000000-0000-4000-8000-000000000001'",
+    ).run();
+    const emptied = await sitemapGet(
+      context(`${children[1]!.pathname}${children[1]!.search}`),
+    );
+    expect(emptied.status).toBe(410);
+    expect(emptied.headers.get("cache-control")).toBe("no-store");
+    expect(await emptied.text()).toBe("sitemap_range_gone");
+  });
+
+  it("rejects malformed range queries before touching D1", async () => {
+    const prepare = vi.spyOn(testEnv.DB, "prepare");
+    const response = await sitemapGet(
+      context("/sitemap.xml?range=bad&range=duplicate&private=value"),
+    );
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("invalid_sitemap_range");
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("maps an already-disconnected request to the stable abort response", async () => {
+    const prepare = vi.spyOn(testEnv.DB, "prepare");
+    const controller = new AbortController();
+    controller.abort();
+    const response = await sitemapGet(
+      context("/sitemap.xml", { signal: controller.signal }),
+    );
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("sitemap_generation_aborted");
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("maps persistence failures to a stable private-data-free response", async () => {
+    vi.spyOn(testEnv.DB, "prepare").mockImplementation(() => {
+      throw new Error("private poll reference");
+    });
+    const response = await sitemapGet(context("/sitemap.xml"));
+    expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("sitemap_unavailable");
+  });
+
   it("rejects unsupported methods without discovery work", async () => {
     const prepare = vi.spyOn(testEnv.DB, "prepare");
     const response = await sitemapAll(context("/sitemap.xml", { method: "POST" }));

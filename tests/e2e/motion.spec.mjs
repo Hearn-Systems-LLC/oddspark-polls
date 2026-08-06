@@ -3,12 +3,13 @@ import { expect, test } from "@playwright/test";
 import {
   agePoll,
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   closePoll,
   d1Execute,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 1.10: the four motion primitives, the reduced-motion contract, the
@@ -21,10 +22,6 @@ const proofDir = "test-results/motion-proof";
 
 function scopedReference(reference) {
   return `${reference}-${motionRunId}`;
-}
-
-function sqlText(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
 }
 
 // Frame control (house idiom, results.spec.mjs cold-load test): callbacks
@@ -138,20 +135,7 @@ test.describe("motion system and chart toggle", () => {
   });
 
   test.afterAll(() => {
-    const cleanupErrors = [];
-    for (const userId of seededUserIds) {
-      try {
-        cleanupCreator(userId);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        cleanupErrors,
-        `Failed to clean ${cleanupErrors.length} motion E2E creator fixture(s)`,
-      );
-    }
+    cleanupCreators(seededUserIds);
   });
 
   async function seedOwner() {
@@ -185,24 +169,24 @@ test.describe("motion system and chart toggle", () => {
     const runReference = scopedReference(reference);
     const nowMs = Date.now();
     const statements = [
-      `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${ownerId}', 'multiple_choice', 'Motion?', '${visibility}', 1, ${multiSelect ? 1 : 0}, NULL, NULL, NULL, NULL, ${1 + votes.length}, ${nowMs}, ${nowMs});`,
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerId}, 'multiple_choice', 'Motion?', ${visibility}, 1, ${multiSelect ? 1 : 0}, NULL, NULL, NULL, NULL, ${1 + votes.length}, ${nowMs}, ${nowMs});`,
       ...options.map(
         (label, position) =>
-          `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionIds[position]}', '${pollId}', ${sqlText(label)}, ${position}, ${nowMs});`,
+          sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionIds[position]}, ${pollId}, ${label}, ${position}, ${nowMs});`,
       ),
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(runReference)}, '${pollId}', 'custom', 1, ${nowMs});`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${runReference}, ${pollId}, 'custom', 1, ${nowMs});`,
     ];
     votes.forEach((selections, index) => {
       const voteId = randomUUID();
       statements.push(
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${pollId}', '${randomUUID()}', 'seed-${motionRunId}-${index}', ${nowMs});`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${randomUUID()}, ${`seed-${motionRunId}-${index}`}, ${nowMs});`,
         ...selections.map(
           (optionIndex) =>
-            `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteId}', '${optionIds[optionIndex]}');`,
+            sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteId}, ${optionIds[optionIndex]});`,
         ),
       );
     });
-    d1Execute(statements.join(""));
+    d1Execute(sql.join(statements));
     agePoll(pollId, nowMs - 60_000);
     return {
       pollId,
@@ -251,17 +235,17 @@ test.describe("motion system and chart toggle", () => {
     for (const selections of selectionsList) {
       const voteId = randomUUID();
       statements.push(
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${poll.pollId}', '${randomUUID()}', 'motion-${randomUUID()}', ${nowMs});`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${poll.pollId}, ${randomUUID()}, ${`motion-${randomUUID()}`}, ${nowMs});`,
         ...selections.map(
           (optionIndex) =>
-            `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteId}', '${poll.optionIds[optionIndex]}');`,
+            sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteId}, ${poll.optionIds[optionIndex]});`,
         ),
       );
     }
     statements.push(
-      `UPDATE poll SET representation_version = representation_version + 1, updated_at_ms = ${nowMs} WHERE id = '${poll.pollId}';`,
+      sql`UPDATE poll SET representation_version = representation_version + 1, updated_at_ms = ${nowMs} WHERE id = ${poll.pollId};`,
     );
-    d1Execute(statements.join(""));
+    d1Execute(sql.join(statements));
   }
 
   function bar(page, label) {

@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 const PROOF_DIR = "test-results/story-4-2-comment-moderation-proof";
@@ -21,10 +22,6 @@ if (!hasBetterAuthSecret()) {
 }
 
 test.describe.configure({ mode: "serial", timeout: 300_000 });
-
-function sqlText(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
 
 test("renders the complete list, preserves no-JS moderation, deletes as Administrator and owner, and refreshes a stale live tab", async ({ browser, baseURL }) => {
   const origin = requireBaseUrl(baseURL);
@@ -95,24 +92,24 @@ test("renders the complete list, preserves no-JS moderation, deletes as Administ
     assertUuid(owner.userId);
     assertUuid(administrator.userId);
     const seededVotes = seededCommentIds.map(() => randomUUID());
-    d1Execute([
-      `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, representation_version, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${owner.userId}', 'multiple_choice', 'Which context matters?', 'live', 1, 1, 0, 0);`,
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionIds[0]}', '${pollId}', 'Alpha', 0, 0);`,
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionIds[1]}', '${pollId}', 'Beta', 1, 0);`,
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(reference)}, '${pollId}', 'custom', 1, 0);`,
-      `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${seededVotes[0]}', '${pollId}', '${randomUUID()}', 'hash-old', 100);`,
-      `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${seededVotes[0]}', '${optionIds[0]}');`,
-      `INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES ('${seededCommentIds[0]}', '${seededVotes[0]}', ${sqlText("Older <script>alert('comment')</script> & context")}, NULL, 100);`,
-      `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${seededVotes[1]}', '${pollId}', '${randomUUID()}', 'hash-new', 200);`,
-      `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${seededVotes[1]}', '${optionIds[1]}');`,
-      `INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES ('${seededCommentIds[1]}', '${seededVotes[1]}', 'Newer context', 'Named Reader', 200);`,
+    d1Execute(sql.join([
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${owner.userId}, 'multiple_choice', 'Which context matters?', 'live', 1, 1, 0, 0);`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionIds[0]}, ${pollId}, 'Alpha', 0, 0);`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionIds[1]}, ${pollId}, 'Beta', 1, 0);`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${reference}, ${pollId}, 'custom', 1, 0);`,
+      sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${seededVotes[0]}, ${pollId}, ${randomUUID()}, 'hash-old', 100);`,
+      sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${seededVotes[0]}, ${optionIds[0]});`,
+      sql`INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (${seededCommentIds[0]}, ${seededVotes[0]}, ${"Older <script>alert('comment')</script> & context"}, NULL, 100);`,
+      sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${seededVotes[1]}, ${pollId}, ${randomUUID()}, 'hash-new', 200);`,
+      sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${seededVotes[1]}, ${optionIds[1]});`,
+      sql`INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (${seededCommentIds[1]}, ${seededVotes[1]}, 'Newer context', 'Named Reader', 200);`,
       ...hiddenScenarios.flatMap((scenario) => [
-        `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, representation_version, deadline_ms, created_at_ms, updated_at_ms) VALUES ('${scenario.pollId}', '${owner.userId}', 'multiple_choice', 'Hidden Comments?', '${scenario.visibility}', 1, 1, ${scenario.visibility === "after_close" ? Date.now() + 600_000 : "NULL"}, 0, 0);`,
-        `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(scenario.reference)}, '${scenario.pollId}', 'custom', 1, 0);`,
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${scenario.voteId}', '${scenario.pollId}', '${randomUUID()}', 'hidden-hash-${scenario.visibility}', 300);`,
-        `INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES ('${scenario.commentId}', '${scenario.voteId}', ${sqlText(scenario.sentinel)}, NULL, 300);`,
+        sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, representation_version, deadline_ms, created_at_ms, updated_at_ms) VALUES (${scenario.pollId}, ${owner.userId}, 'multiple_choice', 'Hidden Comments?', ${scenario.visibility}, 1, 1, ${scenario.visibility === "after_close" ? Date.now() + 600_000 : null}, 0, 0);`,
+        sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${scenario.reference}, ${scenario.pollId}, 'custom', 1, 0);`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${scenario.voteId}, ${scenario.pollId}, ${randomUUID()}, ${`hidden-hash-${scenario.visibility}`}, 300);`,
+        sql`INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (${scenario.commentId}, ${scenario.voteId}, ${scenario.sentinel}, NULL, 300);`,
       ]),
-    ].join(""));
+    ]));
 
     const voterContext = await browser.newContext({ baseURL: origin });
     contexts.push(voterContext);
@@ -181,7 +178,7 @@ test("renders the complete list, preserves no-JS moderation, deletes as Administ
     await noJsDelete.click();
     await expect(noJsPage).toHaveURL(`/${reference}/results`);
     await expect(noJsPage.locator("[data-comment-item]")).toHaveCount(2);
-    expect(d1Query(`SELECT representation_version FROM poll WHERE id = '${pollId}'`)).toEqual([{ representation_version: 3 }]);
+    expect(d1Query(sql`SELECT representation_version FROM poll WHERE id = ${pollId}`)).toEqual([{ representation_version: 3 }]);
 
     const adminContext = await sessionContext(administrator);
     const adminPage = observe(await adminContext.newPage(), "Administrator desk");
@@ -204,15 +201,14 @@ test("renders the complete list, preserves no-JS moderation, deletes as Administ
     await expect(ownerPage).toHaveURL(`/${reference}/results`);
     await expect(ownerPage.locator("[data-comment-item]")).toHaveCount(0);
 
-    expect(d1Query(`SELECT representation_version FROM poll WHERE id = '${pollId}'`)).toEqual([{ representation_version: 5 }]);
-    expect(d1Query(`SELECT COUNT(*) AS comments FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${pollId}'`)).toEqual([{ comments: 0 }]);
-    expect(d1Query(`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = '${pollId}'`)).toEqual([{ votes: 3 }]);
+    expect(d1Query(sql`SELECT representation_version FROM poll WHERE id = ${pollId}`)).toEqual([{ representation_version: 5 }]);
+    expect(d1Query(sql`SELECT COUNT(*) AS comments FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = ${pollId}`)).toEqual([{ comments: 0 }]);
+    expect(d1Query(sql`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = ${pollId}`)).toEqual([{ votes: 3 }]);
   } finally {
     for (const context of contexts) {
       if (context.pages().length > 0) await context.close();
     }
-    cleanupCreator(owner.userId);
-    cleanupCreator(administrator.userId);
+    cleanupCreators([owner.userId, administrator.userId]);
     for (const state of observed) {
       expect(state.console, `${state.label} console`).toEqual([]);
       expect(state.page, `${state.label} page errors`).toEqual([]);

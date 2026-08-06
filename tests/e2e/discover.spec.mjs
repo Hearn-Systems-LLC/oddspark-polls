@@ -3,23 +3,21 @@ import { expect, test } from "@playwright/test";
 import {
   assertUuid,
   cleanupCreator,
+  cleanupCreators,
   d1Execute,
   requireBaseUrl,
+  sql,
 } from "./creator-session.mjs";
 
 const owners = [];
 const ERROR_COPY =
   "The directory didn't load. Try again — everything that was on screen is still there.";
 
-function sqlText(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
 function seedOwner() {
   const userId = randomUUID();
   assertUuid(userId);
   d1Execute(
-    `INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${userId}', 'Discover E2E', '${userId}@example.test', 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z');`,
+    sql`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (${userId}, 'Discover E2E', ${`${userId}@example.test`}, 1, '1970-01-01T00:00:00.000Z', '1970-01-01T00:00:00.000Z');`,
   );
   owners.push(userId);
   return userId;
@@ -42,27 +40,27 @@ function seedPoll({
   const optionId = randomUUID();
   const reference = `discover-${ownerId.slice(0, 8)}-${index}`;
   const statements = [
-    `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, discovery_state, session_checks_enabled, representation_version, deadline_ms, closed_at_ms, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${ownerId}', 'multiple_choice', ${sqlText(question)}, 'creator_only', '${state}', 0, 1, NULL, NULL, ${createdAtMs}, ${createdAtMs});`,
-    `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionId}', '${pollId}', 'Yes', 0, ${createdAtMs});`,
-    `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(reference)}, '${pollId}', 'generated', 1, ${createdAtMs});`,
+    sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, discovery_state, session_checks_enabled, representation_version, deadline_ms, closed_at_ms, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerId}, 'multiple_choice', ${question}, 'creator_only', ${state}, 0, 1, NULL, NULL, ${createdAtMs}, ${createdAtMs});`,
+    sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionId}, ${pollId}, 'Yes', 0, ${createdAtMs});`,
+    sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${reference}, ${pollId}, 'generated', 1, ${createdAtMs});`,
   ];
   for (let vote = 0; vote < votes; vote += 1) {
     const voteId = randomUUID();
     statements.push(
-      `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${pollId}', '${randomUUID()}', 'discover-${vote}', ${createdAtMs});`,
+      sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${randomUUID()}, ${`discover-${vote}`}, ${createdAtMs});`,
     );
   }
   if (deadlineMs !== null) {
     statements.push(
-      `UPDATE poll SET deadline_ms = ${deadlineMs} WHERE id = '${pollId}';`,
+      sql`UPDATE poll SET deadline_ms = ${deadlineMs} WHERE id = ${pollId};`,
     );
   }
   if (closedAtMs !== null) {
     statements.push(
-      `UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = '${pollId}';`,
+      sql`UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = ${pollId};`,
     );
   }
-  if (execute) d1Execute(statements.join(""));
+  if (execute) d1Execute(sql.join(statements));
   return { pollId, question, reference, statements };
 }
 
@@ -75,7 +73,7 @@ function seedCatalog(ownerId, count, startAt = Date.now() - 100_000) {
       execute: false,
     }),
   );
-  d1Execute(rows.flatMap((row) => row.statements).join(""));
+  d1Execute(sql.join(rows.flatMap((row) => row.statements)));
   return rows;
 }
 
@@ -105,7 +103,7 @@ function watchPage(
 
 test.describe.serial("Discover catalog", () => {
   test.afterEach(() => {
-    while (owners.length > 0) cleanupCreator(owners.pop());
+    cleanupCreators(owners.splice(0).reverse());
   });
 
   test("keeps 45 rows traversable in stable order with JavaScript disabled", async ({

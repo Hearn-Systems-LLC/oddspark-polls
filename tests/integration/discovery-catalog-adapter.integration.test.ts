@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   DISCOVERY_ACTIVE_DEADLINE_QUERY,
   DISCOVERY_NO_DEADLINE_QUERY,
+  DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY,
+  DISCOVERY_SITEMAP_NO_DEADLINE_QUERY,
   createDiscoveryPersistence,
 } from "../../src/adapters/d1/index";
 import type { DiscoveryOrderKey } from "../../src/modules/discovery/index";
@@ -406,6 +408,47 @@ describe("discovery query plans and bounded active-set work", () => {
     expect(deadlineDetails).not.toMatch(/SCAN (?:TABLE )?p(?:\s|$)/);
   });
 
+  it("range-seeks sitemap children across equal-timestamp UUID boundaries", async () => {
+    for (let index = 11; index <= 15; index += 1) {
+      await seedPoll({ index, createdAtMs: NOW });
+    }
+    const startExclusive: DiscoveryOrderKey = {
+      createdAtMs: NOW,
+      id: pollId(15),
+    };
+    const endInclusive: DiscoveryOrderKey = {
+      createdAtMs: NOW,
+      id: pollId(12),
+    };
+    const rows = await createDiscoveryPersistence(testEnv.DB).querySitemapPage({
+      startExclusive,
+      endInclusive,
+      limit: 10,
+      nowMs: NOW,
+    });
+    expect(rows.map((row) => row.id)).toEqual([
+      pollId(14),
+      pollId(13),
+      pollId(12),
+    ]);
+
+    for (const [query, expectedIndex] of [
+      [DISCOVERY_SITEMAP_NO_DEADLINE_QUERY, "poll_discovery_no_deadline_idx"],
+      [
+        DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY,
+        "poll_discovery_active_deadline_idx",
+      ],
+    ] as const) {
+      const plan = await testEnv.DB.prepare(`EXPLAIN QUERY PLAN ${query}`)
+        .bind(NOW, NOW, pollId(15), NOW, pollId(12), 10)
+        .all<{ detail: string }>();
+      const details = plan.results.map((row) => row.detail).join("\n");
+      expect(details).toContain(expectedIndex);
+      expect(details).toContain("poll_reference_canonical_idx");
+      expect(details).not.toMatch(/SCAN (?:TABLE )?p(?:\s|$)/);
+    }
+  });
+
   it("range-seeks past a large expired prefix", async () => {
     await testEnv.DB.prepare(
       `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 2000)
@@ -474,12 +517,14 @@ describe("discovery sitemap persistence", () => {
     await seedPoll({ index: 100, discoveryState: "unlisted" });
     const persistence = createDiscoveryPersistence(testEnv.DB);
     const first = await persistence.querySitemapPage({
-      boundary: null,
+      startExclusive: null,
+      endInclusive: null,
       limit: 11,
       nowMs: NOW,
     });
     const second = await persistence.querySitemapPage({
-      boundary: first[9]!,
+      startExclusive: first[9]!,
+      endInclusive: null,
       limit: 11,
       nowMs: NOW,
     });
@@ -490,5 +535,31 @@ describe("discovery sitemap persistence", () => {
       createdAtMs: NOW + 25,
       deadlineMs: null,
     });
+  });
+
+  it("rejects a non-UUID boundary row before a range token can be built", async () => {
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        `INSERT INTO poll (
+          id, owner_user_id, poll_type, question, result_visibility,
+          discovery_state, session_checks_enabled, representation_version,
+          created_at_ms, updated_at_ms
+        ) VALUES ('legacy-non-uuid', ?1, 'multiple_choice', 'Malformed?',
+          'live', 'listed', 1, 1, ?2, ?2)`,
+      ).bind(OWNER, NOW),
+      testEnv.DB.prepare(
+        `INSERT INTO poll_reference
+          (reference, poll_id, kind, is_canonical, created_at_ms)
+         VALUES ('legacy-non-uuid', 'legacy-non-uuid', 'generated', 1, ?1)`,
+      ).bind(NOW),
+    ]);
+    await expect(
+      createDiscoveryPersistence(testEnv.DB).querySitemapPage({
+        startExclusive: null,
+        endInclusive: null,
+        limit: 2,
+        nowMs: NOW,
+      }),
+    ).rejects.toThrow("Malformed discovery sitemap projection");
   });
 });

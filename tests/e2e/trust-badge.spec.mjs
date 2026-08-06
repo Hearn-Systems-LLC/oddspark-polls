@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 2.4 — Trust Badge: enforced-only voter-terms lines above the vote
@@ -70,9 +71,7 @@ test.describe("Trust Badge", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   async function seedOwner() {
@@ -92,19 +91,19 @@ test.describe("Trust Badge", () => {
     const nowMs = Date.now();
     const flag = (key, fallback) => (toggles[key] ?? fallback ? 1 : 0);
     const statements = [
-      `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${ownerId}', 'multiple_choice', 'Trust badge e2e?', 'live', ${flag("sessionChecks", true)}, ${flag("ipChecks", false)}, ${flag("voterCodes", false)}, ${flag("captcha", false)}, ${flag("vpnBlocking", false)}, 0, NULL, NULL, NULL, NULL, ${1 + votes}, ${nowMs}, ${nowMs});`,
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionA}', '${pollId}', 'Alpha', 0, ${nowMs});`,
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionB}', '${pollId}', 'Beta', 1, ${nowMs});`,
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('${reference}', '${pollId}', 'custom', 1, ${nowMs});`,
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, ip_checks_enabled, voter_codes_enabled, captcha_enabled, vpn_blocking_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerId}, 'multiple_choice', 'Trust badge e2e?', 'live', ${flag("sessionChecks", true)}, ${flag("ipChecks", false)}, ${flag("voterCodes", false)}, ${flag("captcha", false)}, ${flag("vpnBlocking", false)}, 0, NULL, NULL, NULL, NULL, ${1 + votes}, ${nowMs}, ${nowMs});`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionA}, ${pollId}, 'Alpha', 0, ${nowMs});`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionB}, ${pollId}, 'Beta', 1, ${nowMs});`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${reference}, ${pollId}, 'custom', 1, ${nowMs});`,
     ];
     for (let index = 0; index < votes; index += 1) {
       const voteId = randomUUID();
       statements.push(
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${pollId}', '${randomUUID()}', 'seed-badge-${index}', ${nowMs});`,
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteId}', '${optionA}');`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${randomUUID()}, ${`seed-badge-${index}`}, ${nowMs});`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteId}, ${optionA});`,
       );
     }
-    d1Execute(statements.join(""));
+    d1Execute(sql.join(statements));
     return {
       pollId,
       pollPath: `/${reference}`,

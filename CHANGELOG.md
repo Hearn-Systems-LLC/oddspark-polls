@@ -15,6 +15,12 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Large Discover catalogs now publish a bounded sitemap index whose opaque
+  keyset-range children reapply fresh D1 eligibility without crossing their
+  encoded ranges; smaller catalogs keep the byte-compatible single
+  `sitemap.xml` shape. Empty retired children return a stable gone response,
+  generation has one whole-build request budget, and extreme cache timestamps
+  no longer emit invalid HTTP dates.
 - Direct owner XLSX export beside CSV on each creator Poll detail. Polls with
   up to 1,000 accepted Votes receive literal-string/numeric `VOTES`, `TALLY`,
   and `SUMMARY` worksheets from one bounded snapshot; a 1,001st-Vote sentinel

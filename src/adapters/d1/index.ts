@@ -153,13 +153,73 @@ const DISCOVERY_ACTIVE_DEADLINE_NEWER_QUERY = discoveryActiveDeadlineQuery(
   DISCOVERY_CATALOG_COLUMNS,
   "newer",
 );
-const DISCOVERY_SITEMAP_NO_DEADLINE_QUERY = discoveryNoDeadlineQuery(
-  DISCOVERY_SITEMAP_COLUMNS,
-  "older",
+
+type DiscoverySitemapQueryBounds = "root" | "start" | "end" | "both";
+
+function discoverySitemapQuery(
+  deadline: "none" | "active",
+  bounds: DiscoverySitemapQueryBounds,
+): string {
+  const deadlinePredicate =
+    deadline === "none"
+      ? "p.deadline_ms IS NULL"
+      : "p.deadline_ms IS NOT NULL AND p.deadline_ms > ?1";
+  const index =
+    deadline === "none"
+      ? "poll_discovery_no_deadline_idx"
+      : "poll_discovery_active_deadline_idx";
+  const startPredicate =
+    bounds === "start" || bounds === "both"
+      ? "AND (p.created_at_ms, p.id) < (?2, ?3)"
+      : "";
+  const endParameter = bounds === "both" ? 4 : 2;
+  const endPredicate =
+    bounds === "end" || bounds === "both"
+      ? `AND (p.created_at_ms, p.id) >= (?${endParameter}, ?${endParameter + 1})`
+      : "";
+  const limitParameter =
+    bounds === "both" ? 6 : bounds === "root" ? 2 : 4;
+  return `SELECT ${DISCOVERY_SITEMAP_COLUMNS}
+    FROM poll AS p INDEXED BY ${index}
+    JOIN poll_reference AS pr INDEXED BY poll_reference_canonical_idx
+      ON pr.poll_id = p.id AND pr.is_canonical = 1
+    WHERE p.discovery_state = 'listed'
+      AND p.closed_at_ms IS NULL
+      AND ${deadlinePredicate}
+      AND ?1 >= 0
+      ${startPredicate}
+      ${endPredicate}
+    ORDER BY p.created_at_ms DESC, p.id DESC
+    LIMIT ?${limitParameter}`;
+}
+
+export const DISCOVERY_SITEMAP_NO_DEADLINE_QUERY =
+  discoverySitemapQuery("none", "both");
+export const DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY =
+  discoverySitemapQuery("active", "both");
+const DISCOVERY_SITEMAP_NO_DEADLINE_ROOT_QUERY = discoverySitemapQuery(
+  "none",
+  "root",
 );
-const DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY = discoveryActiveDeadlineQuery(
-  DISCOVERY_SITEMAP_COLUMNS,
-  "older",
+const DISCOVERY_SITEMAP_ACTIVE_DEADLINE_ROOT_QUERY = discoverySitemapQuery(
+  "active",
+  "root",
+);
+const DISCOVERY_SITEMAP_NO_DEADLINE_START_QUERY = discoverySitemapQuery(
+  "none",
+  "start",
+);
+const DISCOVERY_SITEMAP_ACTIVE_DEADLINE_START_QUERY = discoverySitemapQuery(
+  "active",
+  "start",
+);
+const DISCOVERY_SITEMAP_NO_DEADLINE_END_QUERY = discoverySitemapQuery(
+  "none",
+  "end",
+);
+const DISCOVERY_SITEMAP_ACTIVE_DEADLINE_END_QUERY = discoverySitemapQuery(
+  "active",
+  "end",
 );
 
 export type PollPage = {
@@ -2082,6 +2142,9 @@ function isSafeTimestamp(value: number | null): boolean {
   return value === null || (Number.isSafeInteger(value) && value >= 0);
 }
 
+const UUID_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
 function mapDiscoveryCatalogRow(
   row: DiscoveryCatalogRow,
 ): DiscoveryCatalogRecord {
@@ -2117,8 +2180,10 @@ function mapDiscoverySitemapRow(
 ): DiscoverySitemapRecord {
   if (
     typeof row.id !== "string" ||
+    !UUID_SHAPE.test(row.id) ||
     typeof row.canonical_reference !== "string" ||
     row.canonical_reference.length === 0 ||
+    row.canonical_reference.length > 128 ||
     !isSafeTimestamp(row.deadline_ms) ||
     !Number.isSafeInteger(row.created_at_ms) ||
     row.created_at_ms < 0
@@ -2253,7 +2318,10 @@ function isDiscoveryState(value: unknown): value is DiscoveryState {
 }
 
 /** Dedicated arbitrary-owner moderation adapter; creator listing stays scoped. */
-export function createModerationPersistence(db: D1Database) {
+export function createModerationPersistence(
+  db: D1Database,
+  runtimeDiscoveryStates: readonly string[] = DISCOVERY_STATES,
+) {
   async function classifyNoChange(
     actorUserId: string,
     pollId: PollId,
@@ -2275,13 +2343,23 @@ export function createModerationPersistence(db: D1Database) {
     if (!poll) {
       return "not_found";
     }
-    if (!isDiscoveryState(poll.discovery_state)) {
+    if (
+      typeof poll.discovery_state !== "string" ||
+      !runtimeDiscoveryStates.includes(poll.discovery_state)
+    ) {
       throw new Error("Malformed Poll discovery state");
     }
     if (intent === "delist" && poll.discovery_state === "delisted") {
       return "unchanged";
     }
     if (intent === "clear_delisted" && poll.discovery_state !== "delisted") {
+      return "invalid_transition";
+    }
+    if (
+      poll.discovery_state !== "unlisted" &&
+      poll.discovery_state !== "listed" &&
+      poll.discovery_state !== "delisted"
+    ) {
       return "invalid_transition";
     }
     throw new Error("Moderation transaction guard changed no row");
@@ -2406,14 +2484,59 @@ export function createDiscoveryPersistence(db: D1Database) {
   }
 
   async function querySitemapStream(
-    query: string,
+    deadline: "none" | "active",
     nowMs: number,
-    boundary: DiscoveryOrderKey | null,
+    startExclusive: DiscoveryOrderKey | null,
+    endInclusive: DiscoveryOrderKey | null,
     limit: number,
   ): Promise<DiscoverySitemapRecord[]> {
+    let query: string;
+    let bindings: readonly (number | string)[];
+    if (startExclusive !== null && endInclusive !== null) {
+      query =
+        deadline === "none"
+          ? DISCOVERY_SITEMAP_NO_DEADLINE_QUERY
+          : DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY;
+      bindings = [
+        nowMs,
+        startExclusive.createdAtMs,
+        startExclusive.id,
+        endInclusive.createdAtMs,
+        endInclusive.id,
+        limit,
+      ];
+    } else if (startExclusive !== null) {
+      query =
+        deadline === "none"
+          ? DISCOVERY_SITEMAP_NO_DEADLINE_START_QUERY
+          : DISCOVERY_SITEMAP_ACTIVE_DEADLINE_START_QUERY;
+      bindings = [
+        nowMs,
+        startExclusive.createdAtMs,
+        startExclusive.id,
+        limit,
+      ];
+    } else if (endInclusive !== null) {
+      query =
+        deadline === "none"
+          ? DISCOVERY_SITEMAP_NO_DEADLINE_END_QUERY
+          : DISCOVERY_SITEMAP_ACTIVE_DEADLINE_END_QUERY;
+      bindings = [
+        nowMs,
+        endInclusive.createdAtMs,
+        endInclusive.id,
+        limit,
+      ];
+    } else {
+      query =
+        deadline === "none"
+          ? DISCOVERY_SITEMAP_NO_DEADLINE_ROOT_QUERY
+          : DISCOVERY_SITEMAP_ACTIVE_DEADLINE_ROOT_QUERY;
+      bindings = [nowMs, limit];
+    }
     const result = await db
       .prepare(query)
-      .bind(nowMs, boundary?.createdAtMs ?? null, boundary?.id ?? null, limit)
+      .bind(...bindings)
       .all<DiscoverySitemapRow>();
     return result.results.map(mapDiscoverySitemapRow);
   }
@@ -2469,21 +2592,24 @@ export function createDiscoveryPersistence(db: D1Database) {
     },
 
     async querySitemapPage(input: {
-      boundary: DiscoveryOrderKey | null;
+      startExclusive: DiscoveryOrderKey | null;
+      endInclusive: DiscoveryOrderKey | null;
       limit: number;
       nowMs: number;
     }): Promise<DiscoverySitemapRecord[]> {
       const [noDeadline, activeDeadline] = await Promise.all([
         querySitemapStream(
-          DISCOVERY_SITEMAP_NO_DEADLINE_QUERY,
+          "none",
           input.nowMs,
-          input.boundary,
+          input.startExclusive,
+          input.endInclusive,
           input.limit,
         ),
         querySitemapStream(
-          DISCOVERY_SITEMAP_ACTIVE_DEADLINE_QUERY,
+          "active",
           input.nowMs,
-          input.boundary,
+          input.startExclusive,
+          input.endInclusive,
           input.limit,
         ),
       ]);

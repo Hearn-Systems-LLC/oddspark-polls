@@ -289,3 +289,18 @@ OpenAI Codex (GPT-5)
 
 - [x] [Review][Defer] Route test `fail_moderation_route` trigger cleanup is only in beforeEach, not afterEach [tests/integration/moderation-route.integration.test.ts:279] — suite passes because applyD1Migrations resets schema, but cross-file fragility remains. Deferred, pre-existing.
 - [x] [Review][Defer] E2E `cleanupCreator` call in afterAll may not await async operations [tests/e2e/administrator-moderation.spec.mjs:47-64] — unawaited promise rejections could be lost. Deferred, pre-existing.
+
+## Deferred-work bundle follow-up — 2026-08-06
+
+- Hardened the D1 no-change classifier so a state newly added to the shared
+  runtime Discovery vocabulary returns `invalid_transition` without a state,
+  audit, or catalog-revision write. Malformed values and impossible guard
+  mismatches for the current transition set still throw.
+- Added real-D1 regression proof for the future-recognized-state boundary and
+  made the moderation browser assertion follow live sitemap-index children,
+  tolerating a correctly retired `410` child.
+- The deferred-work ledger remains orchestrator-owned and was not edited by
+  this implementation.
+- The future-state real-D1 proof passed within the 99-file / 1,480-test Node
+  24.18.0 regression, and the updated Administrator browser journey passed
+  within the full Chromium 164/164 gate with strict sitemap-child handling.

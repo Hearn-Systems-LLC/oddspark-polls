@@ -5,7 +5,11 @@ import {
   createModerationPersistence,
   createPollPersistence,
 } from "../../src/adapters/d1/index";
-import type { PollId, UserId } from "../../src/shared/domain/index";
+import {
+  DISCOVERY_STATES,
+  type PollId,
+  type UserId,
+} from "../../src/shared/domain/index";
 
 type MigrationTestEnv = Cloudflare.Env & { TEST_MIGRATIONS: D1Migration[] };
 
@@ -350,6 +354,32 @@ describe("Administrator moderation D1 transaction", () => {
     expect(await pollState(id)).toEqual(afterClear);
     expect(await revision()).toBe(afterClearRevision);
     expect(await actions(id)).toHaveLength(2);
+  });
+
+  it("classifies a future recognized state as invalid without writing", async () => {
+    const id = pollId("future-state");
+    await insertPoll(id, "listed");
+    await testEnv.DB.prepare(
+      "UPDATE poll SET discovery_state = 'archived' WHERE id = ?1",
+    )
+      .bind(id)
+      .run();
+    const before = await pollState(id);
+    const beforeRevision = await revision();
+    expect(
+      await createModerationPersistence(testEnv.DB, [
+        ...DISCOVERY_STATES,
+        "archived",
+      ]).applyModeration({
+          actorUserId: ADMINISTRATOR,
+          pollId: id,
+          intent: "delist",
+          updatedAtMs: NOW,
+      }),
+    ).toBe("invalid_transition");
+    expect(await pollState(id)).toEqual(before);
+    expect(await actions(id)).toHaveLength(0);
+    expect(await revision()).toBe(beforeRevision);
   });
 
   it("checks the live role before target classification or mutation", async () => {

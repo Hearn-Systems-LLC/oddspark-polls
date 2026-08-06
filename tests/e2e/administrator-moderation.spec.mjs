@@ -148,9 +148,25 @@ test.describe("Administrator delisting journey", () => {
     const response = await page.request.get("/sitemap.xml");
     expect(response.status()).toBe(200);
     expect(response.headers()["cache-control"]).toContain("no-store");
-    const xml = await response.text();
+    const rootXml = await response.text();
+    const documents = [rootXml];
+    if (rootXml.includes("<sitemapindex")) {
+      const childUrls = [
+        ...rootXml.matchAll(/<sitemap><loc>([^<]+)<\/loc><\/sitemap>/gu),
+      ].map((match) => match[1].replaceAll("&amp;", "&"));
+      for (const childUrl of childUrls) {
+        const child = await page.request.get(childUrl);
+        expect(child.headers()["cache-control"]).toContain("no-store");
+        if (child.status() === 410) {
+          expect(await child.text()).toBe("sitemap_range_gone");
+          continue;
+        }
+        expect(child.status()).toBe(200);
+        documents.push(await child.text());
+      }
+    }
     const canonicalUrl = `${requireBaseUrl(baseURL)}${poll.publicPath}`;
-    expect(xml.includes(canonicalUrl)).toBe(visible);
+    expect(documents.some((xml) => xml.includes(canonicalUrl))).toBe(visible);
   }
 
   async function expectModerationBlind(page) {

@@ -7,7 +7,7 @@ paradigm: 'Hexagonal modular monolith'
 scope: 'Whole-product architecture governing independently implemented Oddspark Polls epics'
 status: final
 created: '2026-07-29'
-updated: '2026-08-05'
+updated: '2026-08-06'
 binds:
   - 'FR-1..FR-28'
   - 'UJ-1..UJ-7'
@@ -123,6 +123,20 @@ flowchart LR
   invalid transition. The public directory and sitemap return only eligible
   literal `listed` Polls. Delisting changes neither link reachability,
   ownership, result visibility, Poll representation, nor Vote data.
+  Sitemap generation reads fresh D1 truth under one signal combining client
+  disconnect with a ten-second whole-build deadline and a 500-page operational
+  ceiling. Explicit root/start/end/both D1 query shapes keep child boundaries
+  on row-value keyset seeks instead of nullable range scans. Up to 45,000 eligible
+  Polls keep the byte-compatible single URL set; larger catalogs receive a
+  same-route sitemap index whose strict opaque v1 tokens address
+  non-overlapping keyset ranges. Every independently requested child reapplies
+  live eligibility and stays inside its encoded `(startExclusive,
+  endInclusive]` range; `/` and `/discover` appear only in the first range.
+  A stable dataset is covered exactly once, while concurrent eligibility
+  changes may require refreshing the root index. An emptied non-static child
+  is gone, not a successful empty document. Every file fails closed before the
+  50,000-URL or 50 MiB ceiling, and the implementation does not claim
+  cancellation of an in-flight D1 call.
 
 ### AD-6 — D1 owns facts; everything else is a projection
 
@@ -416,6 +430,9 @@ sequenceDiagram
   That attendance count is not Tally authorization; option/round counts,
   percentages, selections, result visibility, Comments, owner identity, and
   internal Poll IDs never enter the public projection or cache.
+  Cache population requires safe expiry arithmetic. A representable lifetime
+  retains bounded `max-age`; `Expires` is emitted only when it is a valid HTTP
+  date with a four-digit year.
   A visible Results read projects its Tally, complete newest-first public
   Comment list, and representation version from one D1 snapshot. Only the Poll
   owner receives the aligned moderation projection with Comment IDs. The

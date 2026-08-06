@@ -1,25 +1,48 @@
 import { env } from "cloudflare:workers";
 import type { APIContext, APIRoute } from "astro";
 import { createDiscoveryPersistence } from "../adapters/d1/index";
-import { buildDiscoverySitemap } from "../modules/discovery/index";
+import {
+  buildDiscoverySitemap,
+  parseDiscoverySitemapRequest,
+} from "../modules/discovery/index";
 
 const CACHE_CONTROL = "no-store";
+const SITEMAP_BUILD_BUDGET_MS = 10_000;
+
+function textResponse(body: string, status: number): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": CACHE_CONTROL,
+    },
+  });
+}
 
 export const GET = (async ({ request }) => {
   try {
+    const requestUrl = new URL(request.url);
+    const parsed = parseDiscoverySitemapRequest(requestUrl.searchParams);
+    if (!parsed.ok) return textResponse(parsed.error.code, 400);
+    const nowMs = Date.now();
+    const signal = AbortSignal.any([
+      request.signal,
+      AbortSignal.timeout(SITEMAP_BUILD_BUDGET_MS),
+    ]);
     const result = await buildDiscoverySitemap(
       createDiscoveryPersistence(env.DB),
-      new URL(request.url),
-      Date.now(),
+      requestUrl,
+      nowMs,
+      {
+        request: parsed.value,
+        signal,
+        deadlineAtMs: nowMs + SITEMAP_BUILD_BUDGET_MS,
+        clock: Date.now,
+      },
     );
     if (!result.ok) {
-      return new Response(result.error.code, {
-        status: 503,
-        headers: {
-          "content-type": "text/plain; charset=utf-8",
-          "cache-control": CACHE_CONTROL,
-        },
-      });
+      const status = result.error.code === "sitemap_range_gone" ? 410 : 503;
+      return textResponse(result.error.code, status);
     }
     return new Response(result.value.xml, {
       headers: {
@@ -28,13 +51,7 @@ export const GET = (async ({ request }) => {
       },
     });
   } catch {
-    return new Response("sitemap_unavailable", {
-      status: 500,
-      headers: {
-        "content-type": "text/plain; charset=utf-8",
-        "cache-control": CACHE_CONTROL,
-      },
-    });
+    return textResponse("sitemap_unavailable", 500);
   }
 }) satisfies APIRoute;
 

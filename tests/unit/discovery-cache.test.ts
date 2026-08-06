@@ -163,6 +163,59 @@ describe("Discovery named Cache API adapter", () => {
     expect(scheduled).toHaveLength(0);
   });
 
+  it("skips population when expiry arithmetic cannot produce a safe timestamp", async () => {
+    const { adapter, scheduled } = harness();
+    await adapter.put({
+      revision: 1,
+      request: initial,
+      page: {
+        ...page,
+        items: page.items.map((item) => ({ ...item, deadlineMs: null })),
+      },
+      nowMs: Number.MAX_SAFE_INTEGER - 10_000,
+    });
+    expect(scheduled).toHaveLength(0);
+  });
+
+  it("omits Expires when the representable lifetime has a five-digit year", async () => {
+    const deadlineMs = Date.UTC(10_000, 0, 1);
+    const nowMs = deadlineMs - 10_000;
+    const { adapter, cache, scheduled } = harness();
+    await adapter.put({
+      revision: 1,
+      request: initial,
+      page: {
+        ...page,
+        items: page.items.map((item) => ({ ...item, deadlineMs })),
+      },
+      nowMs,
+    });
+    expect(scheduled).toHaveLength(1);
+    await scheduled[0];
+    expect(cache.puts[0]?.response.headers.get("cache-control")).toBe(
+      "public, max-age=10",
+    );
+    expect(cache.puts[0]?.response.headers.has("expires")).toBe(false);
+  });
+
+  it("retains a valid four-digit-year Expires header", async () => {
+    const nowMs = Date.UTC(9_999, 0, 1);
+    const { adapter, cache, scheduled } = harness();
+    await adapter.put({
+      revision: 1,
+      request: initial,
+      page: {
+        ...page,
+        items: page.items.map((item) => ({ ...item, deadlineMs: null })),
+      },
+      nowMs,
+    });
+    await scheduled[0];
+    expect(cache.puts[0]?.response.headers.get("expires")).toMatch(
+      / \d{4} \d{2}:\d{2}:\d{2} GMT$/u,
+    );
+  });
+
   it.each([
     ["corrupt JSON", "not-json"],
     ["wrong version", JSON.stringify({ version: 2, expiresAtMs: NOW + 1, page })],

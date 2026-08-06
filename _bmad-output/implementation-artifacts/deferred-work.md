@@ -98,21 +98,24 @@ origin: Story 3.2 implementation, 2026-07-30
 location: src/modules/discovery/index.ts, src/pages/sitemap.xml.ts
 severity: medium
 reason: Introduce a sitemap index before the catalog approaches 49,998 eligible Polls; the current single sitemap correctly fails closed at capacity. `src/modules/discovery/index.ts`, `src/pages/sitemap.xml.ts` (Taxonomy: 3+, Owner: Winston (Architect))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-sitemap-discovery-hardening
 
 ### DW-65: Add a bounded D1 timeout/abort contract to the sequential sitemap build loop
 origin: Story 3.2 implementation, 2026-07-30
 location: src/pages/sitemap.xml.ts, src/modules/discovery/index.ts
 severity: low
 reason: Add a bounded D1 timeout/abort contract to the sequential sitemap build loop. `src/pages/sitemap.xml.ts`, `src/modules/discovery/index.ts` (Taxonomy: nice, Owner: Amelia (Developer))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-sitemap-discovery-hardening
 
 ### DW-66: Guard extreme expiresAtMs before building the Discovery cache Expires header
 origin: Story 3.2 review, 2026-07-30
 location: src/adapters/cache/discovery.ts
 severity: low
 reason: Guard extreme `expiresAtMs` before building the Discovery cache `Expires` header. `src/adapters/cache/discovery.ts` (Taxonomy: nice, Owner: Amelia (Developer))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-sitemap-discovery-hardening
 
 ### DW-67: Preserve the Delisted explanation if a second creator-lifecycle read fails after ownership already resolved
 origin: Story 3.1 review, 2026-07-30
@@ -435,7 +438,8 @@ origin: Story 3.3 review, 2026-07-30
 location: src/adapters/d1/index.ts
 severity: medium
 reason: Replace `classifyNoChange`'s exhaustiveness throw with a safe outcome if `DISCOVERY_STATES` gains a value. `src/adapters/d1/index.ts` (Taxonomy: 3+, Owner: Amelia (Developer))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-sitemap-discovery-hardening
 
 ### DW-110: Reject corrupt empty Poll questions in the moderation target mapper
 origin: Story 3.3 review, 2026-07-30

@@ -33,10 +33,7 @@ test-results/*
 !test-results/story-3-5-demo-poll-proof/
 !test-results/story-3-5-demo-poll-proof/*.png
 !test-results/story-3-6-presentable-repository-proof/
-!test-results/story-3-6-presentable-repository-proof/results-1280-light.png
-!test-results/story-3-6-presentable-repository-proof/results-375-dark.png
-!test-results/story-3-6-presentable-repository-proof/voting-1280-light.png
-!test-results/story-3-6-presentable-repository-proof/voting-375-dark.png
+!test-results/story-3-6-presentable-repository-proof/*.png
 !test-results/story-4-2-comment-moderation-proof/
 !test-results/story-4-2-comment-moderation-proof/*.png
 !test-results/story-4-3-csv-export-proof/
@@ -54,3 +51,5 @@ playwright/.cache/
 
 # Local Turnstile widget create output (contains secrets)
 .turnstile-widgets.local.json
+
+test-results/story-3-5-demo-poll-proof/fresh-1280-light.png

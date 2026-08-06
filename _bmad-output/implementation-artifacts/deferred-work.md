@@ -474,14 +474,16 @@ origin: code review of spec-4-1-comment-with-your-vote.md, 2026-08-04
 location: src/lib/poll-delivery.ts
 severity: high
 reason: src/lib/poll-delivery.ts persisted the Vote before flash signing at the Story 4.1 baseline; a signing exception falls into the broad retry path and replaces the submission ID.
-status: open
+status: done 2026-08-06
+resolution: resolved by epic-4-followup bundle (spec-epic-4-followup.md); the deterministic flash digest is pre-computed before castVote, so a signing failure precedes the atomic commit and no fallible call remains between commit and the 303.
 
 ### DW-114: Replace the timed in-flight Vote-form restore with a completion-aware recovery contract that cannot mint a fresh submission ID while the original POST may still commit
 origin: code review of spec-4-1-comment-with-your-vote.md, 2026-08-04
 location: src/scripts/vote-form.ts
 severity: high
 reason: src/scripts/vote-form.ts already restored the form after ten seconds at the Story 4.1 baseline; when Session and IP Checks are both off, a slow original request and the fresh-ID retry can both commit Votes.
-status: open
+status: done 2026-08-06
+resolution: resolved by epic-4-followup bundle (spec-epic-4-followup.md); the timed restore keeps the original submission ID and the server-side AD-7 idempotency contract adjudicates every retry (replay returns the stored outcome, an edited resubmit conflicts), so the client never mints submission IDs.
 
 ### DW-50: Follow-up review still recommended for 4-1-comment-with-your-vote after the damping cap was spent
 origin: review-budget-followup

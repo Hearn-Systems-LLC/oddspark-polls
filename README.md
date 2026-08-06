@@ -21,7 +21,8 @@ available yet.
 | Status | Capabilities |
 | --- | --- |
 | Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, and owner CSV export; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
-| Planned / backlog | XLSX export; Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
+| Implemented, release evidence pending | Bounded owner XLSX export through 1,000 accepted Votes, with the existing CSV path retained for larger Polls |
+| Planned / backlog | Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
 
 ## Product tour
 
@@ -30,8 +31,9 @@ available yet.
 2. Browse open Listed Polls at `/discover`, or sign in at `/sign-in` and create
    one at `/creator/new`.
 3. Manage created Polls from `/creator` and their creator detail pages.
-   `EXPORT CSV` downloads accepted Vote rows and the complete server Tally
-   directly; XLSX remains planned.
+   `EXPORT CSV` and `EXPORT XLSX` download accepted Vote rows and the complete
+   server Tally directly, with no configuration dialog. XLSX is available
+   through 1,000 accepted Votes; larger Polls keep the unbounded CSV path.
 4. Open the published canonical `/{reference}` link as a signed-out Voter,
    choose an option, optionally attach a Comment and display name when the
    Creator enabled them, and submit.
@@ -64,12 +66,13 @@ contains the complete decisions and capability map. The evaluator-sized map is:
   Comment list; Voting-owned owner/administrator commands delete only a
   Comment and advance the shared representation version atomically (AD-19,
   AD-21, AD-24).
-- Owner CSV export authorizes a provider-free `ViewerContext` before a
+- Owner CSV/XLSX export authorizes a provider-free `ViewerContext` before a
   type-specific D1 driver reads one snapshot. That driver strips join IDs,
   the required Poll Type strategy projects response/Tally cells, and Results
   assembles separate Vote, Tally, and Summary tables. The same format-neutral
-  dataset feeds hardened CSV now and planned XLSX later (AD-3, AD-8, AD-9,
-  AD-21, AD-23).
+  dataset feeds hardened CSV and a dynamically loaded SheetJS writer. XLSX
+  bounds its snapshot at a 1,001st-Vote sentinel and returns a non-attachment
+  `409` above 1,000 Votes (AD-3, AD-8, AD-9, AD-21, AD-23).
 - Local, staging, and production share code but never state, and production is
   promoted only after the staging gate (AD-14).
 - Telemetry remains voter-blind, and result authorization happens before any
@@ -84,6 +87,7 @@ contains the complete decisions and capability map. The evaluator-sized map is:
 | Database | Cloudflare D1 (forward-only SQL migrations) |
 | Object storage | Cloudflare R2 (configured media infrastructure; Image Polls planned) |
 | Auth | Better Auth + Google/GitHub OAuth |
+| Spreadsheet writer | SheetJS CE 0.20.3 from the official tarball (Apache-2.0; see `THIRD_PARTY_NOTICES.md`) |
 | Abuse floor | Cloudflare Workers Rate Limiting (30 vote submissions/source IP/Poll/minute; shared IPs share the budget) |
 | Tests | Vitest (unit + workerd integration) · Playwright e2e |
 | Package manager | pnpm 11.17.0 · Node 24.18.0 |

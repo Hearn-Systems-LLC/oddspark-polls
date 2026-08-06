@@ -167,9 +167,9 @@ export function telemetryOperationForRoute(
     segments.length === 4 &&
     segments[0] === "creator" &&
     segments[1] === "polls" &&
-    segments[3] === "export.csv"
+    (segments[3] === "export.csv" || segments[3] === "export.xlsx")
   ) {
-    return `${method} /creator/polls/:pollId/export.csv`;
+    return `${method} /creator/polls/:pollId/${segments[3]}`;
   }
 
   // Any present or future nested creator-Poll capability is normalized even

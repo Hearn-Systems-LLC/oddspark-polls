@@ -15,13 +15,18 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Direct owner XLSX export beside CSV on each creator Poll detail. Polls with
+  up to 1,000 accepted Votes receive literal-string/numeric `VOTES`, `TALLY`,
+  and `SUMMARY` worksheets from one bounded snapshot; a 1,001st-Vote sentinel
+  returns a stable non-attachment `409` and leaves CSV available for larger
+  Polls. The workerd writer is dynamically loaded and never truncates or adds
+  continuation sheets.
 - Direct owner CSV export from each creator Poll detail: one snapshot contains
   a deterministic raw row per accepted Vote plus every option and aggregate
   Tally total in disambiguated Tally and Summary sections. The download is
   private, spreadsheet-formula-safe, available
   regardless of Poll status or Results visibility, and excludes internal IDs,
-  duplicate-enforcement identities, and provider/session/network data. XLSX
-  remains planned on the same format-neutral dataset.
+  duplicate-enforcement identities, and provider/session/network data.
 - Complete newest-first Comment lists now follow every authorized Tally.
   Readers see plain text and an `ANONYMOUS` fallback; Poll owners and the live
   Administrator can remove one Comment through an accessible confirmation

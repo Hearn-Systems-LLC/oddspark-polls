@@ -244,6 +244,18 @@ describe("telemetry adapter", () => {
     ],
     [
       "GET",
+      "/creator/polls/11111111-1111-4111-8111-111111111111/export.xlsx",
+      false,
+      "GET /creator/polls/:pollId/export.xlsx",
+    ],
+    [
+      "HEAD",
+      "/creator/polls/11111111-1111-4111-8111-111111111111/export.xlsx/",
+      false,
+      "HEAD /creator/polls/:pollId/export.xlsx",
+    ],
+    [
+      "GET",
       "/creator/polls/11111111-1111-4111-8111-111111111111/private-cell/nested",
       false,
       "GET /creator/polls/:pollId/*",
@@ -278,6 +290,13 @@ describe("telemetry adapter", () => {
         telemetryOperationForRoute(
           method,
           `/creator/polls/${pollId}/export.csv`,
+          false,
+        ),
+      ).not.toContain(pollId);
+      expect(
+        telemetryOperationForRoute(
+          method,
+          `/creator/polls/${pollId}/export.xlsx`,
           false,
         ),
       ).not.toContain(pollId);

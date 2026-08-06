@@ -39,7 +39,7 @@ FR-18: CAPTCHA on the vote action — Cloudflare Turnstile required on submit wh
 FR-19: VPN Blocking — best-effort rejection of Votes from VPN/datacenter IPs with an explanatory message naming the Creator's choice. *(Deferred: built when a real Poll needs it.)*
 FR-20: Visibility Settings — Live, After Close, or Creator-Only per Poll; After Close shows confirmation (never counts) until close; Creator-Only serves the Tally only to the authenticated Creator.
 FR-21: Live-updating charts — bar/pie charts update without manual refresh while a Poll is open; a Vote cast elsewhere appears in an open viewer's charts without reload.
-FR-22: Export — CSV and XLSX export of raw Votes (one row per Vote with options/Ballot/availability, timestamp, Comment) and Tally; creator surface only.
+FR-22: Export — CSV export of raw Votes (one row per Vote with options/Ballot/availability, timestamp, Comment) and Tally for every Poll; equivalent synchronous XLSX through 1,000 accepted Votes, with stable CSV fallback for larger Polls; creator surface only.
 FR-23: Opt-in public discovery — every new Poll starts Unlisted; Creator moves between Unlisted and Listed at any time; Listed Polls appear on Discover and in sitemaps while open; Administrator can Delist and only the Administrator can clear Delisted; Unlisted/Delisted remain reachable by link; delisting changes neither ownership, visibility, nor Vote data.
 FR-24: Vote-attached Comments — one optional Comment (with optional display name) per Vote; visible wherever the Tally is visible; Creator can delete any Comment on their Poll and disable Comments per Poll; Comment submission covered by the same Security Toggles as its Vote.
 FR-25: Landing page — root URL explains the platform and how it's built, links the repository, pins the Demo Poll, and offers clear entries to Discover and creating a Poll (sign-in).
@@ -167,9 +167,9 @@ The platform earns strangers: the opt-in Discover directory with administrator d
 **Implementation notes:** Depends on Epic 2 — the Demo Poll runs with CAPTCHA on (FR-26). Listing state machine and moderation (AD-5), sitemap generation, poll-card/pagination patterns (UX-DR11/12), landing page with inline Demo Poll (UX-DR26). Discovery adds only the separate public cache namespace (AR-17); result-endpoint authorization already exists from Epic 1. FR-27's presentable-repo bar (architecture notes, polished README) closes here; the baseline README exists from Story 1.1. Epics 3 and 4 remain mutually independent and may be swapped if priorities change.
 
 ### Epic 4: Comments & Export (Phase 1)
-Voters humanize known-group polls with vote-attached comments (creator-moderated, per-poll disableable), and creators own their data via CSV/XLSX export.
+Voters humanize known-group polls with vote-attached comments (creator-moderated, per-poll disableable), and creators own their data via CSV plus bounded synchronous XLSX export.
 **FRs covered:** FR-24, FR-22
-**Implementation notes:** The composer joins Epic 1's vote form and fills the Comment contribution port already present in the AD-7 transaction. Export implements per-type row shapes through the AD-3 strategy port, so later Poll Types (Epics 5–7) bring their own export projections without reopening the exporter. XLSX writer selection deferred to the export story (AR-21). Sequences after Epic 2 so the composer joins a finished vote path.
+**Implementation notes:** The composer joins Epic 1's vote form and fills the Comment contribution port already present in the AD-7 transaction. Export implements per-type row shapes through the AD-3 strategy port, so later Poll Types (Epics 5–7) bring their own export projections without reopening the exporter. XLSX writer selection remains in the export story (AR-21), within the ratified 1,000-Vote synchronous boundary and snapshot-safe 1,001st-Vote sentinel. Sequences after Epic 2 so the composer joins a finished vote path.
 
 ### Epic 5: Ranked-Choice Polls (Phase 2)
 Communities run verifiable ranked votes: tap-to-rank ballots with automatic compaction, exact deterministic IRV with every Round displayed, and the Ballot Manifest anyone can recompute the winner from.
@@ -828,7 +828,7 @@ So that the code itself completes the portfolio argument (FR-27, SM-6).
 
 ## Epic 4: Comments & Export
 
-Voters humanize known-group polls with vote-attached comments (creator-moderated, per-poll disableable), and creators own their data via CSV/XLSX export.
+Voters humanize known-group polls with vote-attached comments (creator-moderated, per-poll disableable), and creators own their data via CSV plus bounded synchronous XLSX export.
 
 ### Story 4.1: Comment With Your Vote
 
@@ -907,12 +907,20 @@ So that the data opens cleanly in Excel or Sheets without an import wizard.
 **Acceptance Criteria:**
 
 **Given** the Poll detail's export controls,
+**When** the Creator activates XLSX for a Poll with at most 1,000 accepted Votes,
+**Then** a direct synchronous download produces a valid `.xlsx` containing the same rows and Tally as the CSV — identical data, identical privacy guarantees (FR-22, NFR-4),
+**And** the workbook contains exactly `VOTES`, `TALLY`, and `SUMMARY`; the 1,000-Vote product cap makes worksheet continuation unnecessary.
+
+**Given** an owned Poll with 1,001 or more accepted Votes,
 **When** the Creator activates XLSX,
-**Then** a direct download produces a valid `.xlsx` containing the same rows and Tally as the CSV — identical data, identical privacy guarantees (FR-22, NFR-4).
+**Then** the route returns HTTP `409` with no attachment and the exact plain-text response `XLSX export supports up to 1,000 accepted votes. Download CSV for larger Polls.`,
+**And** no partial canonical dataset or workbook is materialized while CSV remains available with its existing behavior.
 
 **Given** the XLSX writer selected in this story (AR-21),
 **When** it runs,
 **Then** it executes inside workerd behind the export port, changing no domain or persistence rules,
+**And** owner authorization occurs before a single XLSX fact-projection statement reads at most 1,001 accepted Votes from one snapshot, using the extra Vote only as an oversize sentinel and returning no Vote or selection rows when the cap is exceeded,
+**And** any canonical input beyond the ratified Vote, worksheet-row, or worksheet-column boundary fails closed before response bytes begin,
 **And** two plain buttons — CSV and XLSX — sit side by side on the creator surface (UX-DR13's export row).
 
 ## Epic 5: Ranked-Choice Polls

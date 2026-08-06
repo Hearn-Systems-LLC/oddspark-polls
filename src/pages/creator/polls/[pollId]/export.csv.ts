@@ -2,28 +2,14 @@ import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
 import { serializeCsvExport } from "../../../../adapters/csv/index";
 import { queryD1OwnerExport } from "../../../../lib/export-delivery";
+import {
+  exportBaseHeaders,
+  safeExportFilename,
+} from "../../../../lib/export-http";
 import type { PollId, UserId } from "../../../../shared/domain/index";
 
-const NO_STORE = "private, no-store";
-
-function baseHeaders(): Headers {
-  return new Headers({
-    "cache-control": NO_STORE,
-    "x-content-type-options": "nosniff",
-  });
-}
-
-function safeFilename(reference: string): string {
-  const safe = reference
-    .normalize("NFKD")
-    .replace(/[^A-Za-z0-9_-]+/gu, "-")
-    .replace(/^-+|-+$/gu, "")
-    .slice(0, 80);
-  return `oddspark-${safe || "poll"}.csv`;
-}
-
 export const ALL: APIRoute = () => {
-  const headers = baseHeaders();
+  const headers = exportBaseHeaders();
   headers.set("allow", "GET, HEAD");
   return new Response("Method not allowed.", { status: 405, headers });
 };
@@ -31,12 +17,11 @@ export const ALL: APIRoute = () => {
 const handle: APIRoute = async ({ params, locals }) => {
   const principal = locals.requestContext?.principal ?? locals.principal ?? null;
   if (!principal) {
+    const headers = exportBaseHeaders();
+    headers.set("location", "/sign-in?return=%2Fcreator");
     return new Response(null, {
       status: 303,
-      headers: {
-        location: "/sign-in?return=%2Fcreator",
-        "cache-control": NO_STORE,
-      },
+      headers,
     });
   }
   const pollId = (params.pollId ?? "") as PollId;
@@ -49,14 +34,14 @@ const handle: APIRoute = async ({ params, locals }) => {
     if (!result) {
       return new Response("Not found.", {
         status: 404,
-        headers: baseHeaders(),
+        headers: exportBaseHeaders(),
       });
     }
-    const headers = baseHeaders();
+    const headers = exportBaseHeaders();
     headers.set("content-type", "text/csv; charset=utf-8");
     headers.set(
       "content-disposition",
-      `attachment; filename="${safeFilename(result.canonicalReference)}"`,
+      `attachment; filename="${safeExportFilename(result.canonicalReference, "csv")}"`,
     );
     return new Response(serializeCsvExport(result.dataset), {
       status: 200,
@@ -66,7 +51,7 @@ const handle: APIRoute = async ({ params, locals }) => {
     if (locals.requestContext) locals.requestContext.resultsLookupFailed = true;
     return new Response("Export unavailable.", {
       status: 500,
-      headers: baseHeaders(),
+      headers: exportBaseHeaders(),
     });
   }
 };

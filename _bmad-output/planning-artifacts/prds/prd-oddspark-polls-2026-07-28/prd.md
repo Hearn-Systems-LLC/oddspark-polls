@@ -247,10 +247,11 @@ The Tally view shows bar/pie charts that update without manual refresh while a P
 - A Vote cast while another viewer has the Tally open appears in that viewer's charts without a page reload.
 
 #### FR-22: Export
-Creator can export any Poll's raw Votes and Tally as CSV and XLSX.
+Creator can export any Poll's raw Votes and Tally as CSV. A Poll with at most 1,000 accepted Votes can also be exported as a complete synchronous XLSX download; CSV remains the ownership path for larger Polls.
 **Consequences (testable):**
 - Raw export includes one row per Vote (options/Ballot/availability, timestamp, Comment if present).
 - Export is available only on the creator surface.
+- Activating XLSX for a Poll with 1,001 or more accepted Votes returns HTTP `409`, no attachment, and the exact plain-text response `XLSX export supports up to 1,000 accepted votes. Download CSV for larger Polls.` No partial workbook is generated or delivered.
 
 #### FR-23: Opt-in public discovery
 Every new Poll starts Unlisted. The Creator can move a Poll between Unlisted and Listed at any time; Listed Polls appear on the public Discover page and in sitemaps while open. The Administrator can Delist any Poll; only the Administrator can clear Delisted. Realizes UJ-6, UJ-7.

@@ -203,10 +203,6 @@ if (form) {
   }
   syncSelectionState();
 
-  const submissionIdInput = form.querySelector<HTMLInputElement>(
-    'input[name="submission_id"]',
-  );
-
   let restoreTimer = 0;
   const restoreIdleState = (): void => {
     window.clearTimeout(restoreTimer);
@@ -236,20 +232,17 @@ if (form) {
     // Esc/stop mid-POST fires no pageshow. A completed navigation discards
     // this timer with the document; an aborted one restores the usable form.
     // A TIMED restore cannot tell an aborted POST from a slow one — the
-    // request may still commit — so the restored form gets a FRESH
-    // submission_id: an edited resubmit under the original id would dead-end
-    // in IDEMPOTENCY_CONFLICT, while a fresh id turns a committed original
-    // into a clean already_voted and an uncommitted one into a normal vote.
-    // pageshow/bfcache restore keeps the original id: that path only runs
-    // after the response page existed, so exact replay (AD-7) must stay
-    // possible with the id the server saw.
+    // request may still commit — so the restored form keeps the ORIGINAL
+    // submission_id and the server's idempotency contract adjudicates every
+    // retry: an identical resubmit replays to the stored outcome, and an
+    // edited resubmit conflicts so the committed original stands. The client
+    // never mints submission IDs; only server re-renders after certain
+    // rejection do (pageshow/bfcache restore already keeps the original id).
     restoreTimer = window.setTimeout(() => {
       restoreIdleState();
-      if (submissionIdInput) {
-        submissionIdInput.value = crypto.randomUUID();
-      }
-      // Fresh submission ID must couple with a fresh challenge: the prior
-      // one-use token may have been consumed by a slow/lost first request.
+      // The retained submission ID must couple with a fresh challenge: the
+      // prior one-use token may have been consumed by a slow/lost first
+      // request.
       form.dispatchEvent(new CustomEvent("oddspark:vote-retry-reset"));
     }, 10_000);
   };

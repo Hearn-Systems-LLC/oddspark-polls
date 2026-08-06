@@ -1392,7 +1392,7 @@ test.describe("public voting flow", () => {
     expect(postCount).toBe(1);
   });
 
-  test("mints a fresh submission id when the 10s restore fires on a held POST", async ({
+  test("keeps the original submission id on the 10s restore so a resubmission still yields exactly one Vote", async ({
     page,
     context,
     baseURL,
@@ -1425,9 +1425,10 @@ test.describe("public voting flow", () => {
       .toBe(1);
 
     // The response is lost from the page's perspective, so the 10s restore
-    // fires: the form unlocks with a FRESH submission id — an edited
-    // resubmit can never dead-end in IDEMPOTENCY_CONFLICT if the original
-    // request still committed server-side.
+    // fires: the form unlocks with the ORIGINAL submission id byte-identical
+    // — the client never mints ids, and the server's idempotency contract
+    // adjudicates every retry (identical resubmit replays, edited resubmit
+    // conflicts) whether or not the original request committed.
     await page.waitForTimeout(10_500);
     const restored = await page.evaluate(() => {
       const button = document.querySelector('button[type="submit"]');
@@ -1446,12 +1447,19 @@ test.describe("public voting flow", () => {
     });
     expect(restored.inFlight).not.toBe("true");
     assertUuid(restored.submissionId);
-    expect(restored.submissionId).not.toBe(submissionId);
+    expect(restored.submissionId).toBe(submissionId);
+    // The ballot survives the restore unchanged.
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
 
-    // And the restored form's retry actually lands.
+    // And the restored form's retry actually lands — and even though the
+    // first POST's fate was unknown, exactly one Vote is ever counted.
     await page.unroute(`**${created.path}`);
     await page.getByRole("button", { name: "VOTE" }).click();
     await expect(page).toHaveTitle("Counted — Slow count?");
+    const rows = d1Query(
+      sql`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = ${created.pollId}`,
+    );
+    expect(Number(rows[0]?.votes ?? -1)).toBe(1);
   });
 
   test("suppresses the offline line on a rate-limit-locked form and reconciles it on pageshow", async ({

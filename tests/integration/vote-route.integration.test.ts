@@ -872,6 +872,54 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     });
   });
 
+  it("conflicts an edited resubmit under a retained submission id and keeps the counted original", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      ipChecksEnabled: false,
+    });
+    const submittedId = crypto.randomUUID();
+
+    const first = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: formBody(poll.optionA, submittedId),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(first.status).toBe(303);
+
+    // The retained-id client contract sends every retry under the original
+    // submission id; an edited payload must conflict and never count twice.
+    const edited = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: formBody(poll.optionB, submittedId),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(edited.status).toBe(422);
+    const html = await edited.text();
+    expect(html).toContain('data-outcome-code="idempotency_conflict"');
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 0,
+      version: 2,
+    });
+    const stored = await testEnv.DB.prepare(
+      "SELECT poll_option_id AS optionId FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ?1)",
+    )
+      .bind(poll.pollId)
+      .first<{ optionId: string }>();
+    expect(stored?.optionId).toBe(poll.optionA);
+  });
+
   it("orders Counted before closed before Session before IP on GET", async () => {
     const poll = await seedPoll({
       sessionChecksEnabled: true,

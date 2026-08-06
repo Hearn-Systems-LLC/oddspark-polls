@@ -236,8 +236,8 @@ if (form) {
     // submission_id and the server's idempotency contract adjudicates every
     // retry: an identical resubmit replays to the stored outcome, and an
     // edited resubmit conflicts so the committed original stands. The client
-    // never mints submission IDs; only server re-renders after certain
-    // rejection do (pageshow/bfcache restore already keeps the original id).
+    // never mints submission IDs; only server re-renders do (the
+    // pageshow/bfcache restore already keeps the original id).
     restoreTimer = window.setTimeout(() => {
       restoreIdleState();
       // The retained submission ID must couple with a fresh challenge: the

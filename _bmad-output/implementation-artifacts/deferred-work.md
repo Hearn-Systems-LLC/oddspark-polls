@@ -502,3 +502,7 @@ severity: low
 reason: The follow-up-review damping cap (limits.max_followup_reviews = 1) was spent with the story finalized (status: done, verify green) while the review pass still recommended an independent follow-up. The work was committed by bmad-loop run 20260805-100403-00fa; this entry preserves the lingering recommendation for a deliberate later review.
 status: done 2026-08-06
 resolution: resolved by sweep bundle dw-epic-4-followup-reviews
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-epic-4-followup.md`
+  summary: The idempotency-conflict outcome renders an editable form with a fresh server-minted submission ID, so with every Security Toggle off a voter who edits after a committed original can click through the conflict and count a second Vote on the next submit.
+  evidence: src/lib/poll-delivery.ts sets readOnly only for already_voted/already_voted_ip/poll_closed and mints a fresh submission ID on every outcome re-render; with toggles off no voter_claim exists, so the fresh-ID resubmission commits. Pre-existing designed Story 1.5/1.6 conflict behavior — FR-15's all-off mode licenses any fresh render, so closing the conflict-render path specifically is a product-contract decision, not an obvious defect.

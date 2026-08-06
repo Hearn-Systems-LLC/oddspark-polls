@@ -1462,6 +1462,54 @@ test.describe("public voting flow", () => {
     expect(Number(rows[0]?.votes ?? -1)).toBe(1);
   });
 
+  test("commits an edited resubmission cleanly when the held original never committed", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const created = await publishPoll(page, context, baseURL, "Edited retry?");
+    await page.goto(created.path);
+    const submissionId =
+      (await page
+        .locator('input[name="submission_id"]')
+        .getAttribute("value")) ?? "";
+    assertUuid(submissionId);
+    await page.locator("label.poll-option", { hasText: "Alpha" }).click();
+
+    await page.route(`**${created.path}`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      // A 204 answers the POST without committing a navigation: the document
+      // (and its 10s restore timer) stays alive, as with any lost response.
+      await route.fulfill({ status: 204 });
+    });
+
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page.getByRole("button", { name: "COUNTING…" })).toBeDisabled();
+
+    // The restore keeps the original submission id; the voter edits the
+    // ballot before retrying.
+    await page.waitForTimeout(10_500);
+    await expect(page.getByRole("radio", { name: "Alpha" })).toBeChecked();
+    await page.locator("label.poll-option", { hasText: "Beta" }).click();
+
+    // The held original never reached the server, so the edited resubmission
+    // under the retained id commits as the one and only Vote — Beta wins.
+    await page.unroute(`**${created.path}`);
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(page).toHaveTitle("Counted — Edited retry?");
+    const votes = d1Query(
+      sql`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = ${created.pollId}`,
+    );
+    expect(Number(votes[0]?.votes ?? -1)).toBe(1);
+    const stored = d1Query(
+      sql`SELECT o.label AS label FROM vote_selection s JOIN vote v ON s.vote_id = v.id JOIN poll_option o ON o.id = s.poll_option_id WHERE v.poll_id = ${created.pollId}`,
+    );
+    expect(stored[0]?.label).toBe("Beta");
+  });
+
   test("suppresses the offline line on a rate-limit-locked form and reconciles it on pageshow", async ({
     page,
     context,

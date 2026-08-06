@@ -2,7 +2,7 @@
 title: 'Epic 4 Follow-up: Vote Recovery Integrity'
 type: 'bugfix'
 created: '2026-08-06T10:41:36-04:00'
-status: 'in-progress'
+status: 'in-review'
 baseline_revision: '189d8b3ec8f813877a7722fad6c43c68cb99ddfd'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -73,6 +73,17 @@ warnings: []
 
 ## Review Triage Log
 
+### 2026-08-06 — Review pass
+- intent_gap: 0
+- bad_spec: 0
+- patch: 3: (high 0, medium 1, low 2)
+- defer: 1: (high 1, medium 0, low 0)
+- reject: 5: (high 0, medium 1, low 4)
+- addressed_findings:
+  - `[medium]` `[patch]` Added the missing edited-resubmit coverage: a route-level integration test proves an edited payload under a retained submission ID returns 422 `idempotency_conflict` with the counted original and tallies untouched, and an e2e test proves an edited resubmission after the timed restore commits exactly one Vote when the held original never committed.
+  - `[low]` `[patch]` Rewrote the flash pre-compute comment to tell both halves: admission and challenge outcomes stay truthful under a signing outage while castVote-level rejections surface as `vote_failed` — an accepted, now-documented trade-off.
+  - `[low]` `[patch]` Rewrote the vote-form restore comment: grammatically broken and it misdescribed when the server mints IDs.
+
 ## Design Notes
 
 The flash digest is deterministic per Poll (`createVoteDigest(secret, { pollId, checkKind: "session", token: pollId })`), so computing it before `castVote` changes nothing observable except failure ordering: a signing throw now means "not committed" and the existing broad retry path is truthful. The client change generalizes the ratified bfcache rule — the original ID is the recovery identity — to the timed restore; an edited resubmit conflicts only when the original truly committed, which is the truthful "your Vote was already counted" outcome since Votes are final. Fresh IDs remain exactly where Story 1.6 ruled them safe: server re-renders after certain rejection.
@@ -84,10 +95,14 @@ The flash digest is deterministic per Poll (`createVoteDigest(secret, { pollId, 
 
 **Implementation evidence (2026-08-06):** Node 24.18.0; migration guard `12/12`; Vitest `100/100` files and `1,502/1,502` tests passed; `pnpm check` clean; Playwright `165/165` passed; generated binding types with no drift; production build succeeded; `git diff --check` clean. The e2e suite's tracked story-4-2 proof PNGs regenerate with nondeterministic pixels on every run and were restored to HEAD as incidental artifacts of gate execution, not of this change.
 
+**Review-pass evidence (2026-08-06):** after the accepted coverage/comment patches, Vitest integration `35/35` files and `406/406` tests passed (includes the new conflict regression), Playwright `166/166` passed (includes the new edited-resubmission test), and `pnpm check` plus `git diff --check` stayed clean.
+
 **Files changed:**
-- `src/lib/poll-delivery.ts` -- flash digest pre-computed before `castVote`; success path pushes the pre-computed value (commit `9630bda`).
-- `tests/integration/vote-route.integration.test.ts` -- signing-failure regression: zero stored facts, truthful fresh-ID retry, exactly one Vote on resubmission (commit `9630bda`).
-- `src/scripts/vote-form.ts` -- timed restore keeps the original submission ID; challenge reset retained; client mint removed (commit `fd736a2`).
-- `tests/e2e/vote.spec.mjs` -- timed-restore contract flipped to byte-identical ID plus exactly-one-Vote proof (commit `fd736a2`).
-- `_bmad-output/implementation-artifacts/deferred-work.md` -- DW-113/DW-114 marked done with resolutions.
+- `src/lib/poll-delivery.ts` -- flash digest pre-computed before `castVote`; success path pushes the pre-computed value; comment documents the outage trade-off (commit `9630bda` plus review pass).
+- `tests/integration/vote-route.integration.test.ts` -- signing-failure regression: zero stored facts, truthful fresh-ID retry, exactly one Vote on resubmission; plus the review-pass edited-resubmit conflict regression (commit `9630bda` plus review pass).
+- `src/scripts/vote-form.ts` -- timed restore keeps the original submission ID; challenge reset retained; client mint removed; comment corrected (commit `fd736a2` plus review pass).
+- `tests/e2e/vote.spec.mjs` -- timed-restore contract flipped to byte-identical ID plus exactly-one-Vote proof; plus the review-pass edited-resubmission test (commit `fd736a2` plus review pass).
+- `_bmad-output/implementation-artifacts/deferred-work.md` -- DW-113/DW-114 marked done with resolutions; one deferred finding appended from review.
 - `CHANGELOG.md` -- vote-integrity fix entry under `## [Unreleased]`.
+
+**Residual risks:** The idempotency-conflict outcome still renders an editable form with a fresh server-minted submission ID, so a voter who deliberately edits after a committed original can submit once more through the conflict page — a pre-existing, designed Story 1.5/1.6 behavior that FR-15's all-off mode licenses for any fresh render; it is now recorded in the deferred-work ledger as a product-contract decision and was out of this bundle's blocked boundaries. A signing outage masks castVote-level rejections as `vote_failed` (nothing commits either way). Nothing was pushed or deployed.

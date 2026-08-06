@@ -2,12 +2,13 @@ import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 1.12 — close, edit, delete lifecycle on the creator detail surface.
@@ -129,7 +130,7 @@ test.describe("creator poll lifecycle", () => {
   function pollReference(pollId) {
     assertUuid(pollId);
     const rows = d1Query(
-      `SELECT reference FROM poll_reference WHERE poll_id = '${pollId}' AND is_canonical = 1;`,
+      sql`SELECT reference FROM poll_reference WHERE poll_id = ${pollId} AND is_canonical = 1;`,
     );
     return rows[0]?.reference;
   }
@@ -137,7 +138,7 @@ test.describe("creator poll lifecycle", () => {
   function voteCount(pollId) {
     assertUuid(pollId);
     return Number(
-      d1Query(`SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${pollId}';`)[0]
+      d1Query(sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${pollId};`)[0]
         ?.n ?? 0,
     );
   }
@@ -152,15 +153,17 @@ test.describe("creator poll lifecycle", () => {
   function insertAcceptedVote(pollId) {
     assertUuid(pollId);
     const options = d1Query(
-      `SELECT id FROM poll_option WHERE poll_id = '${pollId}' ORDER BY position LIMIT 1;`,
+      sql`SELECT id FROM poll_option WHERE poll_id = ${pollId} ORDER BY position LIMIT 1;`,
     );
     const optionId = options[0]?.id;
     assertUuid(optionId);
     const voteId = randomUUID();
     const submissionId = randomUUID();
     d1Execute(
-      `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${pollId}', '${submissionId}', 'e2e-hash', ${Date.now()});` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteId}', '${optionId}');`,
+      sql.join([
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${submissionId}, 'e2e-hash', ${Date.now()});`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteId}, ${optionId});`,
+      ]),
     );
   }
 
@@ -176,9 +179,7 @@ test.describe("creator poll lifecycle", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   test("round-trips the creator Comment opt-in through create and definition edits", async ({
@@ -205,7 +206,7 @@ test.describe("creator poll lifecycle", () => {
     const reference = pollReference(pollId);
     expect(reference).toBeTruthy();
     expect(
-      d1Query(`SELECT comments_enabled FROM poll WHERE id = '${pollId}'`),
+      d1Query(sql`SELECT comments_enabled FROM poll WHERE id = ${pollId}`),
     ).toEqual([{ comments_enabled: 1 }]);
 
     const editCommentsGroup = page.getByRole("group", {
@@ -226,7 +227,7 @@ test.describe("creator poll lifecycle", () => {
       new RegExp(`/creator/polls/${pollId}\\?outcome=poll-updated`),
     );
     expect(
-      d1Query(`SELECT comments_enabled FROM poll WHERE id = '${pollId}'`),
+      d1Query(sql`SELECT comments_enabled FROM poll WHERE id = ${pollId}`),
     ).toEqual([{ comments_enabled: 0 }]);
     await page.goto(`/${reference}`);
     await expect(page.locator("[data-comment-composer]")).toHaveCount(0);
@@ -239,7 +240,7 @@ test.describe("creator poll lifecycle", () => {
       new RegExp(`/creator/polls/${pollId}\\?outcome=poll-updated`),
     );
     expect(
-      d1Query(`SELECT comments_enabled FROM poll WHERE id = '${pollId}'`),
+      d1Query(sql`SELECT comments_enabled FROM poll WHERE id = ${pollId}`),
     ).toEqual([{ comments_enabled: 1 }]);
     await page.goto(`/${reference}`);
     await expect(page.locator("[data-comment-composer]")).toBeVisible();
@@ -275,7 +276,7 @@ test.describe("creator poll lifecycle", () => {
     insertAcceptedVote(pollId);
     // Confirm the fixture landed in the same local D1 the dev server reads.
     const voteRows = d1Query(
-      `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${pollId}';`,
+      sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${pollId};`,
     );
     expect(Number(voteRows[0]?.n ?? 0)).toBeGreaterThanOrEqual(1);
 
@@ -362,7 +363,7 @@ test.describe("creator poll lifecycle", () => {
     await expect(page.getByText("Rejected question")).toHaveCount(0);
     expect(
       d1Query(
-        `SELECT question, representation_version FROM poll WHERE id = '${voteFirstId}';`,
+        sql`SELECT question, representation_version FROM poll WHERE id = ${voteFirstId};`,
       ),
     ).toEqual([{ question: "Vote wins?", representation_version: 1 }]);
   });
@@ -407,7 +408,7 @@ test.describe("creator poll lifecycle", () => {
       new RegExp(`/creator/polls/${pollId}\\?outcome=description-updated`),
     );
     expect(
-      d1Query(`SELECT description FROM poll WHERE id = '${pollId}';`),
+      d1Query(sql`SELECT description FROM poll WHERE id = ${pollId};`),
     ).toEqual([{ description: "Description remains editable after close" }]);
 
     // The already-rendered ballot is rejected too; UI affordance removal is
@@ -440,7 +441,7 @@ test.describe("creator poll lifecycle", () => {
     const reference = pollReference(pollId);
     const future = Date.now() + 60_000;
     d1Execute(
-      `UPDATE poll SET result_visibility = 'after_close', deadline_ms = ${future} WHERE id = '${pollId}';`,
+      sql`UPDATE poll SET result_visibility = 'after_close', deadline_ms = ${future} WHERE id = ${pollId};`,
     );
 
     const anonymous = await browser.newContext();
@@ -449,7 +450,7 @@ test.describe("creator poll lifecycle", () => {
     await expect(anonymousPage.locator("[data-results-tally]")).toHaveCount(0);
 
     d1Execute(
-      `UPDATE poll SET deadline_ms = ${Date.now() - 1} WHERE id = '${pollId}';`,
+      sql`UPDATE poll SET deadline_ms = ${Date.now() - 1} WHERE id = ${pollId};`,
     );
     await anonymousPage.reload();
     await expect(anonymousPage.locator("[data-results-tally]")).toBeVisible();
@@ -460,7 +461,7 @@ test.describe("creator poll lifecycle", () => {
     ).toHaveCount(0);
 
     d1Execute(
-      `UPDATE poll SET result_visibility = 'creator_only' WHERE id = '${pollId}';`,
+      sql`UPDATE poll SET result_visibility = 'creator_only' WHERE id = ${pollId};`,
     );
     await anonymousPage.goto(`/${reference}/results`);
     await expect(anonymousPage.locator("[data-results-tally]")).toHaveCount(0);

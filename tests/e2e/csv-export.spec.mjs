@@ -3,11 +3,12 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 if (!hasBetterAuthSecret()) {
@@ -20,10 +21,6 @@ const proofDir = "test-results/story-4-3-csv-export-proof";
 
 test.describe.configure({ mode: "serial", timeout: 180_000 });
 
-function sqlText(value) {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
 function seedPoll(ownerUserId, suffix, { rich = false } = {}) {
   for (const value of [ownerUserId]) assertUuid(value);
   const pollId = randomUUID();
@@ -32,10 +29,12 @@ function seedPoll(ownerUserId, suffix, { rich = false } = {}) {
   const reference = `csv-${suffix}-${pollId.slice(0, 8)}`;
   for (const value of [pollId, optionA, optionB]) assertUuid(value);
   d1Execute(
-    `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, multi_select_enabled, min_selections, max_selections, representation_version, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${ownerUserId}', 'multiple_choice', ${sqlText(`CSV ${suffix}`)}, 'creator_only', 1, 1, 1, 2, 1, 0, 0);` +
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionA}', '${pollId}', ${sqlText("Alpha, choice")}, 0, 0);` +
-      `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionB}', '${pollId}', ${sqlText('=Beta "formula"')}, 1, 0);` +
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(reference)}, '${pollId}', 'custom', 1, 0);`,
+    sql.join([
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, comments_enabled, multi_select_enabled, min_selections, max_selections, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerUserId}, 'multiple_choice', ${`CSV ${suffix}`}, 'creator_only', 1, 1, 1, 2, 1, 0, 0);`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionA}, ${pollId}, ${"Alpha, choice"}, 0, 0);`,
+      sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionB}, ${pollId}, ${'=Beta "formula"'}, 1, 0);`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${reference}, ${pollId}, 'custom', 1, 0);`,
+    ]),
   );
   if (rich) {
     const voteLate = randomUUID();
@@ -43,12 +42,14 @@ function seedPoll(ownerUserId, suffix, { rich = false } = {}) {
     const commentId = randomUUID();
     for (const value of [voteLate, voteEarly, commentId]) assertUuid(value);
     d1Execute(
-      `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteLate}', '${pollId}', '${randomUUID()}', 'e2e-private-late', 1800000000001);` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteLate}', '${optionA}');` +
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteEarly}', '${pollId}', '${randomUUID()}', 'e2e-private-early', 1800000000000);` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteEarly}', '${optionB}');` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteEarly}', '${optionA}');` +
-        `INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES ('${commentId}', '${voteEarly}', ${sqlText('=First line, "quoted"\nsecond line')}, ${sqlText("Zoë")}, 1800000000000);`,
+      sql.join([
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteLate}, ${pollId}, ${randomUUID()}, 'e2e-private-late', 1800000000001);`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteLate}, ${optionA});`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteEarly}, ${pollId}, ${randomUUID()}, 'e2e-private-early', 1800000000000);`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteEarly}, ${optionB});`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteEarly}, ${optionA});`,
+        sql`INSERT INTO vote_comment (id, vote_id, body, display_name, created_at_ms) VALUES (${commentId}, ${voteEarly}, ${'=First line, "quoted"\nsecond line'}, ${"Zoë"}, 1800000000000);`,
+      ]),
     );
   }
   return { pollId, reference };
@@ -71,7 +72,7 @@ test.describe("creator CSV export", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of users) cleanupCreator(userId);
+    cleanupCreators(users);
   });
 
   async function signIn(context, baseURL) {
@@ -172,7 +173,7 @@ test.describe("creator CSV export", () => {
     for (const visibility of ["live", "after_close", "creator_only"]) {
       for (const closed of [false, true]) {
         d1Execute(
-          `UPDATE poll SET result_visibility = '${visibility}', closed_at_ms = ${closed ? "1800000000002" : "NULL"} WHERE id = '${fixture.pollId}';`,
+          sql`UPDATE poll SET result_visibility = ${visibility}, closed_at_ms = ${closed ? 1800000000002 : null} WHERE id = ${fixture.pollId};`,
         );
         const response = await page.request.get(
           `/creator/polls/${fixture.pollId}/export.csv`,

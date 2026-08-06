@@ -130,7 +130,8 @@ origin: Story 2.4 review, 2026-07-30
 location: tests/e2e/*, tests/e2e/creator-session.mjs
 severity: low
 reason: Replace copy-pasteable template-literal SQL in E2E Poll seeding with one escaped/parameterized harness seam. Existing callers pass generated fixture values, but the helper pattern is unsafe to reuse. `tests/e2e/*`, `tests/e2e/creator-session.mjs` (Taxonomy: nice, Owner: Quinn (QA))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-e2e-harness-hardening
 
 ### DW-69: Replace brittle walker/source-string assertions in trust-badge and live-indicator tests with structural checks
 origin: Story 2.4 review, 2026-07-30
@@ -144,7 +145,8 @@ origin: Story 2.4 review, 2026-07-30
 location: tests/e2e/*, tests/e2e/creator-session.mjs
 severity: low
 reason: Make every E2E creator-fixture cleanup aggregate failures so one failed deletion cannot skip later fixtures. `tests/e2e/*`, `tests/e2e/creator-session.mjs` (Taxonomy: nice, Owner: Quinn (QA))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-e2e-harness-hardening
 
 ### DW-71: Pluralize the multi-select VOTERS / SELECTIONS summary consistently in SSR and live reconciliation
 origin: Story 1.9 review, 2026-07-30
@@ -353,14 +355,16 @@ origin: Story 1.4 review round 2, 2026-07-30
 location: tests/e2e/create-poll-authed.spec.mjs, tests/e2e/creator-session.mjs
 severity: low
 reason: Make authenticated create-poll E2E retries generate a fresh slug or clean per attempt. `tests/e2e/create-poll-authed.spec.mjs`, `tests/e2e/creator-session.mjs` (Taxonomy: nice, Owner: Quinn (QA))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-e2e-harness-hardening
 
 ### DW-99: Add signed-out seed-based coverage for the case-variant 301/404 contract; CI already provisions auth so present coverage is unconditional there
 origin: Story 1.4 review round 2, 2026-07-30
 location: tests/e2e/create-poll-authed.spec.mjs
 severity: low
 reason: Add signed-out seed-based coverage for the case-variant 301/404 contract; CI already provisions auth so present coverage is unconditional there. `tests/e2e/create-poll-authed.spec.mjs` (Taxonomy: nice, Owner: Quinn (QA))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-e2e-harness-hardening
 
 ### DW-100: Decide whether corrupt orphan reference rows should recheck reachability before a case-fold redirect; foreign-key cascades prevent the state in normal writes
 origin: Story 1.4 review round 3, 2026-07-30

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   d1Query,
   hasBetterAuthSecret,
@@ -13,6 +13,7 @@ import {
   seedCreatorSession,
   setPollDeadline,
   setResultVisibility,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 1.8: the direct Results route end to end — visibility matrix,
@@ -103,10 +104,6 @@ async function stopProcessGroup(child, exitPromise) {
   return outcome;
 }
 
-function sqlText(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
 test.describe("direct results route", () => {
   test.skip(
     !hasBetterAuthSecret(),
@@ -141,20 +138,7 @@ test.describe("direct results route", () => {
   });
 
   test.afterAll(() => {
-    const cleanupErrors = [];
-    for (const userId of seededUserIds) {
-      try {
-        cleanupCreator(userId);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        cleanupErrors,
-        `Failed to clean ${cleanupErrors.length} Results E2E creator fixture(s)`,
-      );
-    }
+    cleanupCreators(seededUserIds);
   });
 
   async function seedOwner() {
@@ -195,34 +179,34 @@ test.describe("direct results route", () => {
     const optionIds = options.map(() => randomUUID());
     const runReference = scopedReference(reference);
     const statements = [
-      `INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES ('${pollId}', '${ownerId}', 'multiple_choice', ${sqlText(question)}, '${visibility}', 1, ${multiSelect ? 1 : 0}, NULL, NULL, NULL, NULL, 1, 0, 0);`,
+      sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerId}, 'multiple_choice', ${question}, ${visibility}, 1, ${multiSelect ? 1 : 0}, NULL, NULL, NULL, NULL, 1, 0, 0);`,
       ...options.map(
         (label, position) =>
-          `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES ('${optionIds[position]}', '${pollId}', ${sqlText(label)}, ${position}, 0);`,
+          sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionIds[position]}, ${pollId}, ${label}, ${position}, 0);`,
       ),
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${sqlText(runReference)}, '${pollId}', '${kind}', 1, 0);`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${runReference}, ${pollId}, ${kind}, 1, 0);`,
     ];
     votes.forEach((selections, index) => {
       const voteId = randomUUID();
       statements.push(
-        `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${pollId}', '${randomUUID()}', 'hash-${index}', 0);`,
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${randomUUID()}, ${`hash-${index}`}, 0);`,
         ...selections.map(
           (optionIndex) =>
-            `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteId}', '${optionIds[optionIndex]}');`,
+            sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteId}, ${optionIds[optionIndex]});`,
         ),
       );
     });
     if (deadlineMs !== null) {
       statements.push(
-        `UPDATE poll SET deadline_ms = ${deadlineMs} WHERE id = '${pollId}';`,
+        sql`UPDATE poll SET deadline_ms = ${deadlineMs} WHERE id = ${pollId};`,
       );
     }
     if (closedAtMs !== null) {
       statements.push(
-        `UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = '${pollId}';`,
+        sql`UPDATE poll SET closed_at_ms = ${closedAtMs} WHERE id = ${pollId};`,
       );
     }
-    d1Execute(statements.join(""));
+    d1Execute(sql.join(statements));
     return {
       pollId,
       optionIds,
@@ -348,7 +332,7 @@ test.describe("direct results route", () => {
 
     // A closed Live Poll still renders the same Tally to all three audiences.
     d1Execute(
-      `UPDATE poll SET closed_at_ms = ${Date.now()} WHERE id = '${poll.pollId}';`,
+      sql`UPDATE poll SET closed_at_ms = ${Date.now()} WHERE id = ${poll.pollId};`,
     );
     await signIn(context, baseURL, owner);
     await page.goto(poll.path);
@@ -429,7 +413,7 @@ test.describe("direct results route", () => {
     ).toBeVisible();
     expect(
       d1Query(
-        `SELECT closed_at_ms, representation_version FROM poll WHERE id = '${poll.pollId}'`,
+        sql`SELECT closed_at_ms, representation_version FROM poll WHERE id = ${poll.pollId}`,
       ),
     ).toEqual([{ closed_at_ms: null, representation_version: 1 }]);
   });
@@ -693,7 +677,7 @@ test.describe("direct results route", () => {
     expect(missing.status()).toBe(404);
     const missingBody = await missing.text();
 
-    d1Execute(`DELETE FROM poll WHERE id = '${poll.pollId}';`);
+    d1Execute(sql`DELETE FROM poll WHERE id = ${poll.pollId};`);
     const deleted = await page.request.get(poll.path);
     expect(deleted.status()).toBe(404);
     const deletedBody = await deleted.text();
@@ -1254,7 +1238,7 @@ test.describe("direct results route", () => {
       closedAtMs: Date.now(),
     });
     d1Execute(
-      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${unavailable.pollId}')`,
+      sql`DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ${unavailable.pollId})`,
     );
     const missingReference = scopedReference("telemetry-missing");
     const missingPath = `/${missingReference}/results`;

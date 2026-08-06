@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 const CREATOR_DELISTED_COPY =
@@ -45,22 +46,9 @@ test.describe("Administrator delisting journey", () => {
   });
 
   test.afterAll(() => {
-    const cleanupErrors = [];
     // Owners go first so deleting their Polls removes Poll-scoped moderation
     // facts before the Administrator's restrictive actor FK is released.
-    for (const userId of seededUserIds) {
-      try {
-        cleanupCreator(userId);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        cleanupErrors,
-        `Failed to clean ${cleanupErrors.length} Story 3.3 E2E fixture(s)`,
-      );
-    }
+    cleanupCreators(seededUserIds);
   });
 
   function observePage(page, label) {
@@ -128,7 +116,7 @@ test.describe("Administrator delisting journey", () => {
     assertUuid(pollId);
     expect(
       d1Query(
-        `SELECT discovery_state FROM poll WHERE id = '${pollId}'`,
+        sql`SELECT discovery_state FROM poll WHERE id = ${pollId}`,
       ),
     ).toEqual([{ discovery_state: expected }]);
   }
@@ -458,7 +446,7 @@ test.describe("Administrator delisting journey", () => {
         "Counted.",
       );
       expect(
-        d1Query(`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = '${listed.pollId}'`),
+        d1Query(sql`SELECT COUNT(*) AS votes FROM vote WHERE poll_id = ${listed.pollId}`),
       ).toEqual([{ votes: 1 }]);
       await expectModerationBlind(noJsVoterPage);
 

@@ -2,12 +2,13 @@ import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 1.13 — Share action on create-confirmation, voting, and results.
@@ -65,7 +66,7 @@ test.describe("share action", () => {
   function pollReference(pollId) {
     assertUuid(pollId);
     const rows = d1Query(
-      `SELECT reference FROM poll_reference WHERE poll_id = '${pollId}' AND is_canonical = 1;`,
+      sql`SELECT reference FROM poll_reference WHERE poll_id = ${pollId} AND is_canonical = 1;`,
     );
     return rows[0]?.reference;
   }
@@ -120,9 +121,7 @@ test.describe("share action", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   test("no-JS floor: URL visible and SHARE hidden on all three surfaces", async ({
@@ -240,7 +239,7 @@ test.describe("share action", () => {
     expect(reference).toBeTruthy();
     const alias = `share-alias-${randomUUID().slice(0, 8)}`;
     d1Execute(
-      `INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('${alias}', '${pollId}', 'custom', 0, ${Date.now()});`,
+      sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${alias}, ${pollId}, 'custom', 0, ${Date.now()});`,
     );
 
     await page.goto(`/${alias}`);

@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Execute,
   d1Query,
   deletePoll,
@@ -12,6 +12,7 @@ import {
   seedCreatorSession,
   setPollDeadline,
   setResultVisibility,
+  sql,
 } from "./creator-session.mjs";
 
 test.describe.configure({ mode: "serial", timeout: 120_000 });
@@ -258,9 +259,7 @@ test.describe("public voting flow", () => {
       .evaluate((marker) => getComputedStyle(marker, "::before").content);
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   test("server-renders accessible option rows and progressively disables Vote", async ({
@@ -640,7 +639,7 @@ test.describe("public voting flow", () => {
     expect(retrySubmissionId).not.toBe(afterMinSubmissionId);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
 
@@ -668,7 +667,7 @@ test.describe("public voting flow", () => {
     expect(replay.status()).toBe(303);
     expect(
       d1Query(
-        `SELECT COUNT(DISTINCT v.id) AS votes, COUNT(vs.poll_option_id) AS selections, p.representation_version FROM poll p LEFT JOIN vote v ON v.poll_id = p.id LEFT JOIN vote_selection vs ON vs.vote_id = v.id WHERE p.id = '${created.pollId}' GROUP BY p.id`,
+        sql`SELECT COUNT(DISTINCT v.id) AS votes, COUNT(vs.poll_option_id) AS selections, p.representation_version FROM poll p LEFT JOIN vote v ON v.poll_id = p.id LEFT JOIN vote_selection vs ON vs.vote_id = v.id WHERE p.id = ${created.pollId} GROUP BY p.id`,
       ),
     ).toEqual([{ votes: 1, selections: 2, representation_version: 2 }]);
 
@@ -844,7 +843,7 @@ test.describe("public voting flow", () => {
 
     expect(
       d1Query(
-        `SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = ${created.pollId}`,
       ),
     ).toEqual([{ votes: 1, representation_version: 2 }]);
   });
@@ -900,7 +899,7 @@ test.describe("public voting flow", () => {
     expect(retrySubmissionId).not.toBe(submissionId);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
   });
@@ -981,7 +980,7 @@ test.describe("public voting flow", () => {
     ).toBeVisible();
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
     await noJsContext.close();
@@ -1044,7 +1043,7 @@ test.describe("public voting flow", () => {
     expect(retrySubmissionId).not.toBe(originalSubmissionId);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
 
@@ -1053,7 +1052,7 @@ test.describe("public voting flow", () => {
     await expect(noJsPage).toHaveTitle(`Counted — ${question}`);
     expect(
       d1Query(
-        `SELECT vc.body, vc.display_name FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = '${created.pollId}'`,
+        sql`SELECT vc.body, vc.display_name FROM vote_comment vc JOIN vote v ON v.id = vc.vote_id WHERE v.poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ body: safeComment, display_name: "No-JS Voter" }]);
     await noJsContext.close();
@@ -1536,7 +1535,7 @@ test.describe("public voting flow", () => {
     expect(second.status()).toBe(303);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
 
@@ -1617,7 +1616,7 @@ test.describe("public voting flow", () => {
 
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
   });
@@ -1708,7 +1707,7 @@ test.describe("public voting flow", () => {
     assertUuid(minted);
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
   });
@@ -1766,7 +1765,7 @@ test.describe("public voting flow", () => {
     );
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 0 }]);
   });
@@ -1903,7 +1902,7 @@ test.describe("public voting flow", () => {
     // selections, exercising the additive Results failure path without a test
     // hook or shared-schema mutation.
     d1Execute(
-      `DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = '${created.pollId}')`,
+      sql`DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ${created.pollId})`,
     );
 
     const countedResponse = await page.goto(created.path);
@@ -2034,7 +2033,7 @@ test.describe("public voting flow", () => {
     await expect(page.getByRole("button", { name: "VOTE" })).toBeDisabled();
     expect(
       d1Query(
-        `SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS votes, p.representation_version FROM vote v JOIN poll p ON p.id = v.poll_id WHERE p.id = ${created.pollId}`,
       ),
     ).toEqual([{ votes: 1, representation_version: 2 }]);
   });
@@ -2125,7 +2124,7 @@ test.describe("public voting flow", () => {
 
     expect(
       d1Query(
-        `SELECT COUNT(*) AS n FROM vote WHERE poll_id = '${created.pollId}'`,
+        sql`SELECT COUNT(*) AS n FROM vote WHERE poll_id = ${created.pollId}`,
       ),
     ).toEqual([{ n: 1 }]);
     await tabB.close();

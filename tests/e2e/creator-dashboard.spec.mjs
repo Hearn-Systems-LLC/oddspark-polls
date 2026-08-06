@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   agePoll,
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   closePoll,
   d1Execute,
   d1Query,
@@ -10,6 +10,7 @@ import {
   requireBaseUrl,
   seedCreatorSession,
   setPollDeadline,
+  sql,
 } from "./creator-session.mjs";
 
 // Story 1.11 — creator dashboard: list, empty state, ownership, two-column
@@ -110,9 +111,7 @@ test.describe("creator dashboard", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) {
-      cleanupCreator(userId);
-    }
+    cleanupCreators(seededUserIds);
   });
 
   test("empty state shows verbatim copy and create action", async ({
@@ -213,7 +212,7 @@ test.describe("creator dashboard", () => {
     await signIn(context, baseURL);
     const pollId = await publishPoll(page, "One vote poll");
     const options = d1Query(
-      `SELECT id FROM poll_option WHERE poll_id = '${pollId}' ORDER BY position`,
+      sql`SELECT id FROM poll_option WHERE poll_id = ${pollId} ORDER BY position`,
     );
     const optionId = options[0]?.id;
     expect(optionId).toBeTruthy();
@@ -221,8 +220,10 @@ test.describe("creator dashboard", () => {
     const voteId = crypto.randomUUID();
     assertUuid(voteId);
     d1Execute(
-      `INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES ('${voteId}', '${pollId}', 'sub-${voteId}', 'hash', ${Date.now()});` +
-        `INSERT INTO vote_selection (vote_id, poll_option_id) VALUES ('${voteId}', '${optionId}');`,
+      sql.join([
+        sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${`sub-${voteId}`}, 'hash', ${Date.now()});`,
+        sql`INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (${voteId}, ${optionId});`,
+      ]),
     );
 
     await page.goto("/creator");

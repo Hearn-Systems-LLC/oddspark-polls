@@ -2,11 +2,12 @@ import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import {
   assertUuid,
-  cleanupCreator,
+  cleanupCreators,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
   seedCreatorSession,
+  sql,
 } from "./creator-session.mjs";
 
 if (!hasBetterAuthSecret()) {
@@ -37,7 +38,7 @@ test.describe("listing control", () => {
   });
 
   test.afterAll(() => {
-    for (const userId of seededUserIds) cleanupCreator(userId);
+    cleanupCreators(seededUserIds);
   });
 
   async function signIn(context, baseURL) {
@@ -126,7 +127,7 @@ test.describe("listing control", () => {
 
     expect(
       d1Query(
-        `SELECT discovery_state, representation_version FROM poll WHERE id = '${defaultPollId}'`,
+        sql`SELECT discovery_state, representation_version FROM poll WHERE id = ${defaultPollId}`,
       ),
     ).toEqual([{ discovery_state: "unlisted", representation_version: 1 }]);
 
@@ -157,7 +158,7 @@ test.describe("listing control", () => {
     await expect(page.locator("[data-detail-status]")).toContainText("LISTED");
     expect(
       d1Query(
-        `SELECT discovery_state, representation_version FROM poll WHERE id = '${defaultPollId}'`,
+        sql`SELECT discovery_state, representation_version FROM poll WHERE id = ${defaultPollId}`,
       ),
     ).toEqual([{ discovery_state: "listed", representation_version: 1 }]);
 
@@ -168,7 +169,7 @@ test.describe("listing control", () => {
     await page.getByRole("button", { name: "PUBLISH POLL" }).click();
     await expect(page.locator("[data-detail-status]")).toContainText("LISTED");
     const listedRows = d1Query(
-      `SELECT p.discovery_state FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = '${listedReference}'`,
+      sql`SELECT p.discovery_state FROM poll p JOIN poll_reference r ON r.poll_id = p.id AND r.is_canonical = 1 WHERE r.reference = ${listedReference}`,
     );
     expect(listedRows).toEqual([{ discovery_state: "listed" }]);
 

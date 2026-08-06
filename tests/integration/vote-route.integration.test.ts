@@ -442,7 +442,9 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     expect(html).toContain("Keep &lt;this&gt; context");
     expect(html).toContain("Jo &amp; Co");
     expect(html).toContain("data-comment-composer");
-    expect(purposes).toEqual(["ip", "rate_limit"]);
+    // The response flash is signed ahead of the commit so a failure there
+    // can never leave a committed Vote behind a retry outcome.
+    expect(purposes).toEqual(["ip", "rate_limit", "session"]);
     expect(await counts(poll.pollId)).toEqual({
       votes: 0,
       selections: 0,
@@ -536,7 +538,7 @@ describe("POST /:reference IP Checks delivery boundary", () => {
     const html = await response.text();
     expect(html).toContain('data-outcome-code="ip_check_unavailable"');
     expect(html).toMatch(new RegExp(`value="${poll.optionA}"[^>]*checked`));
-    expect(purposes).toEqual(["ip", "rate_limit"]);
+    expect(purposes).toEqual(["ip", "rate_limit", "session"]);
     expect(await counts(poll.pollId)).toEqual({
       votes: 0,
       selections: 0,
@@ -783,6 +785,89 @@ describe("POST /:reference IP Checks delivery boundary", () => {
       votes: 1,
       selections: 1,
       claims: 1,
+      version: 2,
+    });
+  });
+
+  it("stores nothing and renders a truthful fresh-ID retry when flash signing fails", async () => {
+    const poll = await seedPoll({
+      sessionChecksEnabled: false,
+      ipChecksEnabled: false,
+      commentsEnabled: true,
+    });
+    const submittedId = crypto.randomUUID();
+    const purposes: Array<string | null> = [];
+    mockDigestSigning(async (purpose, sign) => {
+      purposes.push(purpose);
+      if (purpose === "session") {
+        throw new Error("flash signing unavailable");
+      }
+      return sign();
+    });
+    const body = formBody(poll.optionA, submittedId);
+    body.set("comment", "must never persist");
+    body.set("display_name", "Ghost");
+
+    const response = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body,
+        }),
+      ),
+      poll.reference,
+    );
+
+    // The signing failure precedes the atomic commit, so the broad retry
+    // render is truthful: nothing was stored and the re-rendered ID is fresh.
+    expect(response.status).toBe(500);
+    const html = await response.text();
+    expect(html).toContain('data-outcome-code="vote_failed"');
+    expect(html).toMatch(new RegExp(`value="${poll.optionA}"[^>]*checked`));
+    expect(html).toContain("must never persist");
+    expect(html).toContain("Ghost");
+    expect(purposes).toEqual(["session"]);
+    const renderedId = /name="submission_id" value="([^"]+)"/u.exec(html)?.[1];
+    expect(renderedId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
+    );
+    expect(renderedId).not.toBe(submittedId);
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 0,
+      selections: 0,
+      claims: 0,
+      version: 1,
+    });
+    const comments = await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS n FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ?1)",
+    )
+      .bind(poll.pollId)
+      .first<{ n: number }>();
+    expect(comments?.n ?? 0).toBe(0);
+
+    // And resubmitting after that failure commits exactly one Vote, with the
+    // pre-computed flash still set on the success path.
+    vi.restoreAllMocks();
+    const retry = await runVoteRoute(
+      makeContext(
+        new Request(`https://polls.example.test/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: formBody(
+            poll.optionA,
+            (renderedId ?? crypto.randomUUID()) as typeof submittedId,
+          ),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(retry.status).toBe(303);
+    expect(retry.headers.get("set-cookie")).toContain("oddspark.vote_flash=");
+    expect(await counts(poll.pollId)).toEqual({
+      votes: 1,
+      selections: 1,
+      claims: 0,
       version: 2,
     });
   });

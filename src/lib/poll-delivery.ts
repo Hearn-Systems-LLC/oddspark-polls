@@ -410,6 +410,11 @@ export async function deliverPollVotingSurface(
             const { validateSubmission, persistFacts } = multipleChoiceStrategy;
             return persistFacts ? { validateSubmission, persistFacts } : null;
           };
+          // Pre-compute the deterministic flash digest BEFORE the commit so
+          // no fallible call sits between castVote and the 303: a signing
+          // throw here escapes into the broad catch with nothing stored, and
+          // that retry render's fresh submission ID is truthful and safe.
+          const flashDigest = await flashDigestFor(poll.pollId);
           const result = await castVote(
             {
               findPoll: votePersistence.findPoll,
@@ -436,7 +441,7 @@ export async function deliverPollVotingSurface(
             cookies.push({
               kind: "set",
               name: VOTE_FLASH_COOKIE_NAME,
-              value: await flashDigestFor(poll.pollId),
+              value: flashDigest,
               options: { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure },
             });
             response = immediate(null, 303, { location: input.successRedirect });

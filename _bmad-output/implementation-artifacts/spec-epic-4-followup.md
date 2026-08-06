@@ -2,8 +2,9 @@
 title: 'Epic 4 Follow-up: Vote Recovery Integrity'
 type: 'bugfix'
 created: '2026-08-06T10:41:36-04:00'
-status: 'in-review'
+status: 'done'
 baseline_revision: '189d8b3ec8f813877a7722fad6c43c68cb99ddfd'
+final_revision: '49437b69f16c2413a487a4638aa98cf4828f4d52'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -106,3 +107,41 @@ The flash digest is deterministic per Poll (`createVoteDigest(secret, { pollId, 
 - `CHANGELOG.md` -- vote-integrity fix entry under `## [Unreleased]`.
 
 **Residual risks:** The idempotency-conflict outcome still renders an editable form with a fresh server-minted submission ID, so a voter who deliberately edits after a committed original can submit once more through the conflict page — a pre-existing, designed Story 1.5/1.6 behavior that FR-15's all-off mode licenses for any fresh render; it is now recorded in the deferred-work ledger as a product-contract decision and was out of this bundle's blocked boundaries. A signing outage masks castVote-level rejections as `vote_failed` (nothing commits either way). Nothing was pushed or deployed.
+
+## Auto Run Result
+
+Status: done
+
+### Summary
+
+Closed the two remaining Epic 4 follow-up defects. DW-113: the deterministic vote-flash digest is now pre-computed before `castVote`, so a signing failure precedes the atomic commit and no fallible call remains between commit and the 303 — a committed Vote can never again hide behind a fresh-ID retry. DW-114: the 10-second timed form restore keeps the original submission ID; the client never mints IDs, and the server-side AD-7 idempotency contract adjudicates every retry (identical resubmits replay to the stored outcome, edited resubmits conflict with the counted original standing). DW-113/DW-114 are marked done in the deferred-work ledger and the fix is recorded in CHANGELOG [Unreleased].
+
+### Files changed
+
+- `src/lib/poll-delivery.ts` -- flash digest pre-computed before the atomic commit; outage trade-off documented (commit `9630bda` + review pass).
+- `src/scripts/vote-form.ts` -- client-side fresh-ID mint removed from the timed restore; challenge reset kept; contract comment corrected (commit `fd736a2` + review pass).
+- `tests/integration/vote-route.integration.test.ts` -- signing-failure zero-facts regression and edited-resubmit conflict regression (commit `9630bda` + review pass).
+- `tests/e2e/vote.spec.mjs` -- timed-restore contract flipped to byte-identical ID with exactly-one-Vote proof, plus edited-resubmission coverage (commit `fd736a2` + review pass).
+- `_bmad-output/implementation-artifacts/deferred-work.md` -- DW-113/DW-114 done; one deferred finding appended.
+- `CHANGELOG.md` -- vote-integrity fix under [Unreleased].
+- `_bmad-output/implementation-artifacts/spec-epic-4-followup.md` -- this spec.
+
+### Review
+
+- Patches applied: `3` (0 high, 1 medium, 2 low)
+- Items deferred: `1` (1 high) -- editable idempotency-conflict render with fresh server ID; pre-existing designed behavior, a product-contract decision recorded in the deferred-work ledger.
+- Items rejected: `5` (0 high, 1 medium, 4 low)
+- Follow-up review recommended: `false`
+
+### Verification
+
+- Pinned Node `24.18.0`; `pnpm migrations:guard` (12/12) ok.
+- Vitest `100/100` files, `1,502/1,502` tests; post-review integration `35/35` files, `406/406` tests.
+- Playwright `166/166` (including the flipped timed-restore test and the new edited-resubmission test).
+- `pnpm check` clean; `pnpm types` with no binding drift; `pnpm build:production` succeeded; `git diff --check` clean.
+
+### Residual risks
+
+- The idempotency-conflict render still hands a fresh editable form (deferred as a product-contract decision; FR-15's all-off mode licenses fresh renders regardless).
+- A signing outage masks castVote-level rejections as `vote_failed`; nothing commits in that state either way.
+- Nothing was pushed or deployed.

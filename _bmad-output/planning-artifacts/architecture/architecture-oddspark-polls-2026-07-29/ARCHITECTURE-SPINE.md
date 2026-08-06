@@ -21,6 +21,7 @@ sources:
   - 'Story 4.1 Comment With Your Vote implementation, ratified 2026-08-04'
   - 'Story 4.2 Comment List and Moderation implementation, ratified 2026-08-05'
   - 'Story 4.3 CSV Export implementation, ratified 2026-08-05'
+  - 'Story 4.4 Bounded Synchronous XLSX Export implementation, ratified 2026-08-05'
   - '../../prds/prd-oddspark-polls-2026-07-28/prd.md'
   - '../../prds/prd-oddspark-polls-2026-07-28/addendum.md'
   - '../../ux-designs/ux-oddspark-polls-2026-07-28/DESIGN.md'
@@ -224,6 +225,8 @@ sequenceDiagram
   and delivery maps the capacity result to HTTP `409` with the stable FR-22
   CSV-fallback response. The cap makes worksheet continuation unreachable;
   row or column overflow is an invariant failure before response bytes begin.
+  Pinned SheetJS CE 0.20.3 loads dynamically after request startup and writes
+  only validated literal string/numeric cells to one complete in-memory buffer.
 
 ### AD-10 — Live results use versioned conditional polling
 
@@ -527,7 +530,7 @@ scaffolding.
 
 ```text
 src/
-  pages/                 # Astro inbound adapters, including owner /creator/polls/:pollId/export.csv
+  pages/                 # Astro inbound adapters, including owner export.csv and export.xlsx routes
   middleware.ts          # request context → telemetry → session → CSRF → creator guard
   components/            # server-rendered UI bound to DESIGN.md
   scripts/               # isolated progressive-enhancement TypeScript
@@ -548,6 +551,7 @@ src/
     auth/                # Better Auth and OAuth
     cache/               # isolated public Discovery projections
     csv/                 # generic RFC-style CSV transport hardening
+    xlsx/                # dynamically loaded bounded literal-cell XLSX transport
     d1/                  # generic repositories/batches and type fact drivers
       export/            # ID-stripping Poll Type-specific export snapshots
       demo-poll.ts       # purpose-shaped Demo aggregate replacement batch
@@ -635,7 +639,7 @@ flowchart LR
 | FR-11 | `polls/types/image`, R2 media adapter | AD-3, AD-12 |
 | FR-12–FR-14 | `polls/types/meeting`, Meeting availability repository | AD-3, AD-6, AD-9, AD-20 |
 | FR-15–FR-19 | `voting/security`, D1 claims/codes, provider adapters | AD-7, AD-8, AD-16, AD-22 |
-| FR-20–FR-22 | `results`, D1/CSV export adapters, result endpoints, `/creator/polls/:pollId/export.csv` | AD-3, AD-6, AD-8, AD-9, AD-10, AD-21, AD-23 |
+| FR-20–FR-22 | `results`, D1/CSV/XLSX export adapters, result endpoints, `/creator/polls/:pollId/export.{csv,xlsx}` | AD-3, AD-6, AD-8, AD-9, AD-10, AD-21, AD-23 |
 | FR-24 | `modules/comments`, `voting` / `CastVote`, D1 `vote_comment`, creator definition and voter delivery surfaces | AD-6, AD-7, AD-15, AD-17, AD-19, AD-21, AD-22, AD-24 |
 | FR-25–FR-27 | Astro landing/demo pages, shared presentation-only public-repository entry, public repository | AD-1, AD-2, AD-10, AD-14 |
 | FR-26, CAP-DEMO-POLL | `polls/demo-poll` owns designation; `ResetDemoPoll`; D1 Demo replacement adapter; landing and creator Poll detail routes | AD-1, AD-6, AD-7, AD-14, AD-19, AD-22, AD-24 |
@@ -651,6 +655,6 @@ flowchart LR
 | Discovery ranking and search | The listed catalog is large enough that newest-first pagination is no longer useful. |
 | Email, passkeys, or additional OAuth providers | Creator research shows Google and GitHub exclude a material part of the target audience. |
 | Voter Codes and VPN Blocking implementation | The first real Poll needs them, per the PRD phase gate. |
-| XLSX writer implementation | Story 4.4; it must run inside workerd behind the export port, prove the 1,000-Vote maximum with worst-shaped boundary data, enforce the 1,001st-Vote sentinel in the snapshot-consistent D1 fact statement, and preserve CSV behavior. Revisit the product cap only with new measured Worker evidence and a reconciled FR-22/UX contract. |
+| XLSX capacity model | New measured Worker evidence justifies revisiting the shipped 1,000-Vote synchronous cap and the reconciled FR-22/UX contract selects another safe architecture. |
 | Separate Workers or service bindings | A capability needs an independent deployment cadence or the modular monolith breaches a measured platform limit. |
 | Analytics vendor | Success metrics require durable product analytics beyond privacy-safe Workers operational telemetry. |

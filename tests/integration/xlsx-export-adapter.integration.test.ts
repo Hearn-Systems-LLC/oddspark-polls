@@ -11,6 +11,7 @@ import {
   XLSX_ACCEPTED_VOTE_LIMIT,
 } from "../../src/adapters/d1/export/multiple-choice";
 import { createOwnerExportPersistence } from "../../src/adapters/d1/index";
+import { serializeXlsxExport } from "../../src/adapters/xlsx/index";
 import { multipleChoiceStrategy } from "../../src/modules/polls/types/multiple-choice";
 import {
   bindBoundedExportDriver,
@@ -207,5 +208,14 @@ describe("bounded owner XLSX export D1 adapter", () => {
     ]);
     expect(result.export.dataset.votes.rows[0]?.[1]).toBe("N".repeat(80));
     expect(result.export.dataset.votes.rows[0]?.[2]).toBe("C".repeat(500));
+    const bytes = await serializeXlsxExport(result.export.dataset);
+    const xlsx = await import("xlsx");
+    const workbook = xlsx.read(bytes, { type: "array", cellFormula: true });
+    expect(workbook.SheetNames).toEqual(["VOTES", "TALLY", "SUMMARY"]);
+    expect(workbook.Sheets.VOTES?.AG1001).toMatchObject({
+      t: "s",
+      v: result.export.dataset.votes.rows[999]?.[32],
+    });
+    expect(workbook.Sheets.SUMMARY?.B3).toMatchObject({ t: "n", v: 30_000 });
   });
 });

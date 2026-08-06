@@ -80,11 +80,11 @@ development_status:
   3-6-presentable-repository: done
   epic-3-retrospective: done
 
-  epic-4: in-progress
+  epic-4: done
   4-1-comment-with-your-vote: done
   4-2-comment-list-moderation: done
   4-3-csv-export: done
-  4-4-xlsx-export: review
+  4-4-xlsx-export: done
   epic-4-retrospective: optional
 
   epic-5: backlog

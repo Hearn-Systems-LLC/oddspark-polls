@@ -5,6 +5,8 @@
 import type { Result } from "../../shared/application/index";
 import { POLL_CAPS } from "./caps";
 import { multipleChoiceStrategy } from "./types/multiple-choice";
+import { rankedChoiceStrategy } from "./types/ranked-choice";
+import type { RegisteredPollType } from "./types/registry";
 
 // Voice-and-Tone catalog for definition failures — shared with create so
 // edit surfaces render the same exact field copy.
@@ -26,6 +28,8 @@ export const DEFINITION_COPY = {
   boundsWithoutMultiSelect: "Bounds only apply when multi-select is on.",
   rowsTooMany: "That's too many rows. Clear the blank ones first.",
   commentsInvalid: "Choose whether Comments are enabled or disabled.",
+  rankedBoundsInvalid:
+    "Ranked Choice uses ordered preferences, not multi-select bounds.",
 } as const;
 
 export type PollDefinitionDraft = {
@@ -81,6 +85,7 @@ export function normalizePollDescription(
 
 export function validatePollDefinition(
   draft: PollDefinitionDraft,
+  pollType: RegisteredPollType = "multiple_choice",
 ): Result<ValidatedPollDefinition> {
   const fieldErrors: Record<string, string> = {};
   const reasonCodes: Record<string, string> = {};
@@ -117,7 +122,8 @@ export function validatePollDefinition(
     fail("options", "options_duplicate", DEFINITION_COPY.optionsDuplicate);
   }
 
-  const multiSelect = draft.multiSelect === "true";
+  const requestedMultiSelect = draft.multiSelect === "true";
+  const multiSelect = pollType === "multiple_choice" && requestedMultiSelect;
   if (
     draft.commentsEnabled !== undefined &&
     draft.commentsEnabled !== "true" &&
@@ -134,7 +140,19 @@ export function validatePollDefinition(
   let minSelections: number | null = null;
   let maxSelections: number | null = null;
 
-  if (!multiSelect) {
+  if (pollType === "ranked_choice") {
+    if (
+      requestedMultiSelect ||
+      rawMinSelections.length > 0 ||
+      rawMaxSelections.length > 0
+    ) {
+      fail(
+        "multiSelect",
+        "ranked_bounds_invalid",
+        DEFINITION_COPY.rankedBoundsInvalid,
+      );
+    }
+  } else if (!multiSelect) {
     if (rawMinSelections.length > 0 || rawMaxSelections.length > 0) {
       fail(
         "multiSelect",
@@ -233,15 +251,18 @@ export function validatePollDefinition(
     };
   }
 
-  const facts = multipleChoiceStrategy.create(
-    {
-      optionLabels: labels,
-      multiSelect,
-      minSelections,
-      maxSelections,
-    },
-    { nowMs: 0 },
-  );
+  const facts =
+    pollType === "ranked_choice"
+      ? rankedChoiceStrategy.create({ optionLabels: labels }, { nowMs: 0 })
+      : multipleChoiceStrategy.create(
+          {
+            optionLabels: labels,
+            multiSelect,
+            minSelections,
+            maxSelections,
+          },
+          { nowMs: 0 },
+        );
   if (!facts.ok) {
     return facts;
   }

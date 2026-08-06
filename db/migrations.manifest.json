@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-05T03:30:07.200Z",
+  "generatedAt": "2026-08-06T21:27:08.425Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -49,6 +49,10 @@
     {
       "file": "0012_vote_comments.sql",
       "sha256": "9438913c0b561e9f248dec80ef337b16805361a294ee6902e79c7e1afeb14725"
+    },
+    {
+      "file": "0013_ranked_ballots.sql",
+      "sha256": "6fc3653d590d555f7c2f154d026bc3462176d2566126a29d940b43eeeb347a36"
     }
   ]
 }

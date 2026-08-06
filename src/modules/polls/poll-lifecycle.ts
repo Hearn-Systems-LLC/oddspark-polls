@@ -32,7 +32,7 @@ export const LIFECYCLE_COPY = {
   editFailed: "That didn't save. Nothing changed — try again.",
   deleteFailed: "That didn't delete. Nothing changed — try again.",
   unsupportedPollType:
-    "Only Multiple Choice is editable here. Poll Type can't be changed.",
+    "This Poll Type isn't editable here. Poll Type can't be changed.",
   definitionConflict:
     "This Poll changed in another tab. Review the current definition and try again.",
   // Exact AC wording for delete confirmation is assembled by the route from
@@ -116,6 +116,7 @@ export type UpdateDefinitionPort = (input: {
   pollId: PollId;
   ownerUserId: UserId;
   definition: ValidatedPollDefinition;
+  pollType: "multiple_choice" | "ranked_choice";
   options: { id: PollOptionId; label: string; position: number }[];
   expectedRepresentationVersion: number;
   version: RepresentationVersionIncrement;
@@ -428,9 +429,11 @@ export async function updatePollDefinition(
   ownerUserId: UserId,
   draft: PollDefinitionDraft,
 ): Promise<Result<DefinitionUpdateOutcome>> {
-  const validated = validatePollDefinition(draft);
-  if (!validated.ok) {
-    return validated;
+  // Run type-neutral validation before I/O; the authoritative stored Poll
+  // Type is applied after the owner-qualified load below.
+  const preliminary = validatePollDefinition(draft);
+  if (!preliminary.ok) {
+    return preliminary;
   }
 
   let existing: PollLifecycleSnapshot | null;
@@ -450,8 +453,16 @@ export async function updatePollDefinition(
   if (!existing) {
     return { ok: false, error: notFoundError() };
   }
-  if (existing.pollType !== "multiple_choice") {
+  if (
+    existing.pollType !== "multiple_choice" &&
+    existing.pollType !== "ranked_choice"
+  ) {
     return { ok: false, error: unsupportedPollTypeError() };
+  }
+
+  const validated = validatePollDefinition(draft, existing.pollType);
+  if (!validated.ok) {
+    return validated;
   }
 
   const delta = definitionsEqual(existing, validated.value);
@@ -509,6 +520,7 @@ export async function updatePollDefinition(
       pollId,
       ownerUserId,
       definition: validated.value,
+      pollType: existing.pollType,
       options,
       expectedRepresentationVersion: existing.representationVersion,
       version,

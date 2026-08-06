@@ -11,6 +11,7 @@ import {
   type DiscoveryState,
   type PollId,
   type PollOptionId,
+  type PollType,
   type ResultVisibility,
   type UserId,
 } from "../../shared/domain/index";
@@ -18,7 +19,10 @@ import {
   DISCOVERY_COPY,
   parseListingDraft,
 } from "../discovery/index";
-import { multipleChoiceStrategy } from "./types/multiple-choice";
+import {
+  isRegisteredPollType,
+  type RegisteredPollType,
+} from "./types/registry";
 import { isReservedSlug } from "./reserved-slugs";
 import { POLL_CAPS } from "./caps";
 import {
@@ -48,6 +52,8 @@ export { POLL_CAPS, RENDER_OPTION_CEILING } from "./caps";
 // Raw form values exactly as the delivery boundary hands them over —
 // blank option rows included (blank = removed).
 export type CreatePollDraft = {
+  /** Omitted legacy forms remain Multiple Choice. */
+  pollType?: string;
   question: string;
   description: string;
   options: string[];
@@ -83,6 +89,7 @@ export function isUuidShape(value: string): boolean {
 }
 
 export type ValidatedCreatePoll = {
+  pollType: RegisteredPollType;
   question: string;
   description: string | null;
   options: { label: string; position: number }[];
@@ -106,6 +113,7 @@ export type ValidatedCreatePoll = {
 export const CREATE_POLL_COPY = {
   ...DEFINITION_COPY,
   visibilityInvalid: "Pick a Visibility Setting.",
+  pollTypeInvalid: "Pick a supported Poll Type.",
   deadlinePast:
     "That Deadline has already passed. The Poll would close before anyone saw it.",
   deadlineUnparseable: "That Deadline didn't parse. Check the date and time.",
@@ -293,7 +301,17 @@ export function validateCreatePoll(
     reasonCodes[field] = reason;
   };
 
-  const definition = validatePollDefinition(draft);
+  const rawPollType = draft.pollType ?? "multiple_choice";
+  const pollType = isRegisteredPollType(rawPollType)
+    ? rawPollType
+    : null;
+  if (pollType === null) {
+    fail("pollType", "poll_type_invalid", CREATE_POLL_COPY.pollTypeInvalid);
+  }
+  const definition = validatePollDefinition(
+    draft,
+    pollType ?? "multiple_choice",
+  );
   if (!definition.ok) {
     // Merge so create can still attach visibility/deadline/customLink errors.
     Object.assign(fieldErrors, definition.error.fieldErrors ?? {});
@@ -374,6 +392,7 @@ export function validateCreatePoll(
   return {
     ok: true,
     value: {
+      pollType: pollType as RegisteredPollType,
       question: definition.value.question,
       description: definition.value.description,
       options: definition.value.options,
@@ -400,7 +419,7 @@ export type PollPersistenceRows = {
   poll: {
     id: PollId;
     ownerUserId: UserId;
-    pollType: "multiple_choice";
+    pollType: RegisteredPollType;
     question: string;
     description: string | null;
     resultVisibility: ResultVisibility;
@@ -458,6 +477,8 @@ export class ReferenceTakenError extends Error {
 // colliding ID, scoped to its owner. Structurally satisfied by the D1
 // adapter's `findPollForOwner`; the module stays provider-free (AD-1).
 export type ExistingPollSnapshot = {
+  /** Optional only for pre-Ranked test/adapter compatibility. */
+  pollType?: PollType;
   question: string;
   description: string | null;
   resultVisibility: ResultVisibility;
@@ -527,6 +548,7 @@ function matchesExistingPoll(
   const effectiveMax = (value: number | null): number => value ?? optionCount;
   return (
     referenceMatches &&
+    validated.pollType === (existing.pollType ?? "multiple_choice") &&
     validated.question === existing.question &&
     validated.description === existing.description &&
     validated.resultVisibility === existing.resultVisibility &&
@@ -587,6 +609,10 @@ function draftContentForCompare(
   const rawMinSelections = draft.minSelections.trim();
   const rawMaxSelections = draft.maxSelections.trim();
   return {
+    pollType:
+      draft.pollType !== undefined && isRegisteredPollType(draft.pollType)
+        ? draft.pollType
+        : "multiple_choice",
     question: draft.question.trim(),
     description: description.length > 0 ? description : null,
     options: draft.options
@@ -730,7 +756,7 @@ export async function createPoll(
     poll: {
       id: pollId,
       ownerUserId,
-      pollType: "multiple_choice",
+      pollType: validated.value.pollType,
       question: validated.value.question,
       description: validated.value.description,
       resultVisibility: validated.value.resultVisibility,

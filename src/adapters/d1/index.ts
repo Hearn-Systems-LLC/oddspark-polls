@@ -49,6 +49,7 @@ import {
   PollGoneError,
   SubmissionReplayError,
   type StoredVoteOutcome,
+  type RankedPreferenceContribution,
   type VotePersistenceBatch,
   type VoteSelectionContribution,
   type VoterClaimCheckKind,
@@ -739,6 +740,7 @@ export function createPollPersistence(db: D1Database) {
       pollId: PollId;
       ownerUserId: UserId;
       definition: ValidatedPollDefinition;
+      pollType?: "multiple_choice" | "ranked_choice";
       options: { id: PollOptionId; label: string; position: number }[];
       expectedRepresentationVersion: number;
       version: RepresentationVersionIncrement;
@@ -761,7 +763,7 @@ export function createPollPersistence(db: D1Database) {
                  SELECT 1 FROM poll
                  WHERE poll.id = ?1
                    AND poll.owner_user_id = ?2
-                   AND poll.poll_type = 'multiple_choice'
+                   AND poll.poll_type = ?4
                    AND poll.representation_version = ?3
                    AND ${noVoteGuard}
                )`,
@@ -770,16 +772,17 @@ export function createPollPersistence(db: D1Database) {
             version.pollId,
             input.ownerUserId,
             input.expectedRepresentationVersion,
+            input.pollType ?? "multiple_choice",
           ),
         ...input.options.map((option) =>
           db
             .prepare(
               `INSERT INTO poll_option (id, poll_id, label, position, created_at_ms)
-               SELECT ?4, poll.id, ?5, ?6, ?7
+               SELECT ?5, poll.id, ?6, ?7, ?8
                FROM poll
                WHERE poll.id = ?1
                  AND poll.owner_user_id = ?2
-                 AND poll.poll_type = 'multiple_choice'
+                 AND poll.poll_type = ?4
                  AND poll.representation_version = ?3
                  AND ${noVoteGuard}`,
             )
@@ -787,6 +790,7 @@ export function createPollPersistence(db: D1Database) {
               version.pollId,
               input.ownerUserId,
               input.expectedRepresentationVersion,
+              input.pollType ?? "multiple_choice",
               option.id,
               option.label,
               option.position,
@@ -796,17 +800,17 @@ export function createPollPersistence(db: D1Database) {
         db
           .prepare(
             `UPDATE poll
-             SET question = ?4,
-                 description = ?5,
-                 multi_select_enabled = ?6,
-                 min_selections = ?7,
-                 max_selections = ?8,
-                 comments_enabled = ?9,
-                 updated_at_ms = ?10,
+                 SET question = ?5,
+                 description = ?6,
+                 multi_select_enabled = ?7,
+                 min_selections = ?8,
+                 max_selections = ?9,
+                 comments_enabled = ?10,
+                 updated_at_ms = ?11,
                  representation_version = representation_version + 1
              WHERE id = ?1
                AND owner_user_id = ?2
-               AND poll_type = 'multiple_choice'
+               AND poll_type = ?4
                AND representation_version = ?3
                AND ${noVoteGuard}`,
           )
@@ -814,6 +818,7 @@ export function createPollPersistence(db: D1Database) {
             version.pollId,
             input.ownerUserId,
             input.expectedRepresentationVersion,
+            input.pollType ?? "multiple_choice",
             input.definition.question,
             input.definition.description,
             input.definition.multiSelect ? 1 : 0,
@@ -837,7 +842,10 @@ export function createPollPersistence(db: D1Database) {
       if (!existing) {
         return "not_found";
       }
-      if (existing.pollType !== "multiple_choice") {
+      if (
+        existing.pollType !== "multiple_choice" &&
+        existing.pollType !== "ranked_choice"
+      ) {
         return "unsupported";
       }
       if (existing.voterCount > 0) {
@@ -1024,10 +1032,15 @@ export function createVotePersistence(db: D1Database) {
       const payloadHash = rawBatch.vote.payloadHash;
       const createdAtMs = rawBatch.vote.createdAtMs;
       const selectionOptionIds = new Set<string>();
+      const rankedOptionIds = new Set<string>();
+      const rankedRanks = new Set<number>();
       const claimKinds = new Set<VoterClaimCheckKind>();
       let commentCount = 0;
       const contributions: Array<
-        VoteSelectionContribution | VoterClaimContribution | VoteCommentContribution
+        | VoteSelectionContribution
+        | RankedPreferenceContribution
+        | VoterClaimContribution
+        | VoteCommentContribution
       > = [];
 
       for (let index = 0; index < rawBatch.contributions.length; index += 1) {
@@ -1050,6 +1063,34 @@ export function createVotePersistence(db: D1Database) {
           selectionOptionIds.add(contribution.pollOptionId);
           contributions.push(
             contribution as unknown as VoteSelectionContribution,
+          );
+          continue;
+        }
+        if (
+          isExactRecord(contribution, [
+            "kind",
+            "voteId",
+            "pollOptionId",
+            "rank",
+          ]) &&
+          contribution.kind === "ranked_preference"
+        ) {
+          if (
+            contribution.voteId !== voteId ||
+            typeof contribution.pollOptionId !== "string" ||
+            contribution.pollOptionId.length === 0 ||
+            typeof contribution.rank !== "number" ||
+            !Number.isSafeInteger(contribution.rank) ||
+            contribution.rank < 1 ||
+            rankedOptionIds.has(contribution.pollOptionId) ||
+            rankedRanks.has(contribution.rank)
+          ) {
+            throw new Error("invalid ranked preference contribution");
+          }
+          rankedOptionIds.add(contribution.pollOptionId);
+          rankedRanks.add(contribution.rank);
+          contributions.push(
+            contribution as unknown as RankedPreferenceContribution,
           );
           continue;
         }
@@ -1140,9 +1181,17 @@ export function createVotePersistence(db: D1Database) {
         throw new Error("invalid vote contribution");
       }
 
+      const hasSelections = selectionOptionIds.size > 0;
+      const hasPreferences = rankedOptionIds.size > 0;
       if (
-        selectionOptionIds.size === 0 ||
-        selectionOptionIds.size > POLL_CAPS.maxOptions
+        hasSelections === hasPreferences ||
+        selectionOptionIds.size > POLL_CAPS.maxOptions ||
+        rankedOptionIds.size > POLL_CAPS.maxOptions ||
+        (hasPreferences &&
+          !Array.from(
+            { length: rankedRanks.size },
+            (_, index) => index + 1,
+          ).every((rank) => rankedRanks.has(rank)))
       ) {
         throw new Error("invalid vote persistence batch");
       }
@@ -1155,7 +1204,20 @@ export function createVotePersistence(db: D1Database) {
           .bind(voteId, pollId, submissionId, payloadHash, createdAtMs),
       ];
 
-      for (const contribution of contributions) {
+      const statementContributions = hasPreferences
+        ? [
+            ...contributions
+              .filter(
+                (contribution): contribution is RankedPreferenceContribution =>
+                  contribution.kind === "ranked_preference",
+              )
+              .sort((left, right) => left.rank - right.rank),
+            ...contributions.filter(
+              (contribution) => contribution.kind !== "ranked_preference",
+            ),
+          ]
+        : contributions;
+      for (const contribution of statementContributions) {
         if (contribution.kind === "vote_selection") {
           statements.push(
             db
@@ -1163,6 +1225,20 @@ export function createVotePersistence(db: D1Database) {
                 "INSERT INTO vote_selection (vote_id, poll_option_id) VALUES (?1, ?2)",
               )
               .bind(contribution.voteId, contribution.pollOptionId),
+          );
+          continue;
+        }
+        if (contribution.kind === "ranked_preference") {
+          statements.push(
+            db
+              .prepare(
+                "INSERT INTO ranked_vote_preference (vote_id, poll_option_id, preference_rank) VALUES (?1, ?2, ?3)",
+              )
+              .bind(
+                contribution.voteId,
+                contribution.pollOptionId,
+                contribution.rank,
+              ),
           );
           continue;
         }
@@ -1263,6 +1339,12 @@ export function createVotePersistence(db: D1Database) {
         }
         if (
           error instanceof Error &&
+          /ranked_preference_option_invalid/.test(error.message)
+        ) {
+          throw new PollDefinitionChangedError();
+        }
+        if (
+          error instanceof Error &&
           /FOREIGN KEY constraint failed/i.test(error.message)
         ) {
           // Distinguish deleted Poll vs edited options (Story 1.12). Re-read
@@ -1274,15 +1356,12 @@ export function createVotePersistence(db: D1Database) {
           if (!pollStillExists) {
             throw new PollGoneError();
           }
-          const selectedOptionIds = contributions
-            .filter(
-              (contribution): contribution is {
-                kind: "vote_selection";
-                voteId: string;
-                pollOptionId: PollOptionId;
-              } => contribution.kind === "vote_selection",
-            )
-            .map((contribution) => contribution.pollOptionId);
+          const selectedOptionIds = contributions.flatMap((contribution) =>
+            contribution.kind === "vote_selection" ||
+            contribution.kind === "ranked_preference"
+              ? [contribution.pollOptionId]
+              : [],
+          );
           if (selectedOptionIds.length > 0) {
             const placeholders = selectedOptionIds
               .map((_, index) => `?${index + 2}`)
@@ -1577,12 +1656,13 @@ export function createResultsPersistence(db: D1Database) {
     ): Promise<ResultsAccessEnvelope | null> {
       const row = await db
         .prepare(
-          "SELECT p.id, p.question, p.result_visibility, p.owner_user_id, p.deadline_ms, p.closed_at_ms, p.multi_select_enabled, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
+          "SELECT p.id, p.question, p.poll_type, p.result_visibility, p.owner_user_id, p.deadline_ms, p.closed_at_ms, p.multi_select_enabled, p.session_checks_enabled, p.ip_checks_enabled, p.voter_codes_enabled, p.captcha_enabled, p.vpn_blocking_enabled, canonical.reference AS canonical_reference FROM poll_reference requested JOIN poll p ON p.id = requested.poll_id JOIN poll_reference canonical ON canonical.poll_id = p.id AND canonical.is_canonical = 1 WHERE requested.reference = ?1",
         )
         .bind(reference)
         .first<{
           id: PollId;
           question: string;
+          poll_type: PollType;
           result_visibility: ResultVisibility;
           owner_user_id: UserId;
           deadline_ms: number | null;
@@ -1598,9 +1678,13 @@ export function createResultsPersistence(db: D1Database) {
       if (!row) {
         return null;
       }
+      if (!POLL_TYPES.includes(row.poll_type)) {
+        throw new Error("Malformed Results Poll Type");
+      }
       return {
         pollId: row.id,
         question: row.question,
+        pollType: row.poll_type,
         resultVisibility: row.result_visibility,
         ownerUserId: row.owner_user_id,
         deadlineMs: row.deadline_ms,

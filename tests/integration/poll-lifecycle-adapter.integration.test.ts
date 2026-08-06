@@ -572,7 +572,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
 
     await persistence.insertPoll(pollRows(POLL_B, OWNER_A));
     await testEnv.DB.prepare(
-      "UPDATE poll SET poll_type = 'ranked_choice' WHERE id = ?1",
+      "UPDATE poll SET poll_type = 'image' WHERE id = ?1",
     )
       .bind(POLL_B)
       .run();

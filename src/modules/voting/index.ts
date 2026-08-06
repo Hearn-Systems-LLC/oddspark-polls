@@ -17,6 +17,7 @@ import {
   type PollType,
 } from "../../shared/domain/index";
 import { MULTIPLE_CHOICE_VOTE_COPY } from "../polls/types/multiple-choice";
+import type { RankedPreferenceInput } from "../polls/types/ranked-choice";
 import {
   COMMENT_COPY,
   makeVoteCommentContribution,
@@ -148,15 +149,55 @@ export type VotingPollSnapshot = {
   closedAtMs: number | null;
 };
 
-export type VoteSubmission = {
+export type MultipleChoiceVoteSubmission = {
+  kind?: "multiple_choice";
   selectedOptionIds: readonly string[];
+  rankedPreferences?: never;
 };
 
-export type ValidatedVoteSubmission = {
-  selectedOptionIds: readonly PollOptionId[];
+export type RankedChoiceVoteSubmission = {
+  kind: "ranked_choice";
+  selectedOptionIds: readonly string[];
+  rankedPreferences: readonly RankedPreferenceInput[];
 };
+
+export type VoteSubmission =
+  | MultipleChoiceVoteSubmission
+  | RankedChoiceVoteSubmission;
+
+export type MultipleChoiceValidatedVoteSubmission = {
+  kind?: "multiple_choice";
+  selectedOptionIds: readonly PollOptionId[];
+  rankedPreferences?: never;
+};
+
+export type RankedChoiceValidatedVoteSubmission = {
+  kind: "ranked_choice";
+  selectedOptionIds: readonly PollOptionId[];
+  rankedPreferences: readonly {
+    pollOptionId: PollOptionId;
+    rank: number;
+  }[];
+};
+
+export type ValidatedVoteSubmission =
+  | MultipleChoiceValidatedVoteSubmission
+  | RankedChoiceValidatedVoteSubmission;
+
+export type PersistedVoteFacts =
+  | {
+      kind?: "multiple_choice";
+      selections: { pollOptionId: PollOptionId }[];
+      preferences?: never;
+    }
+  | {
+      kind: "ranked_choice";
+      preferences: { pollOptionId: PollOptionId; rank: number }[];
+      selections?: never;
+    };
 
 export type VotingPollTypeStrategy = {
+  readonly type?: "multiple_choice" | "ranked_choice";
   validateSubmission: (
     submission: VoteSubmission,
     facts: Pick<
@@ -167,15 +208,20 @@ export type VotingPollTypeStrategy = {
       | "maxSelections"
     >,
   ) => Result<ValidatedVoteSubmission>;
-  persistFacts: (validated: ValidatedVoteSubmission) => {
-    selections: { pollOptionId: PollOptionId }[];
-  };
+  persistFacts: (validated: ValidatedVoteSubmission) => PersistedVoteFacts;
 };
 
 export type VoteSelectionContribution = {
   kind: "vote_selection";
   voteId: string;
   pollOptionId: PollOptionId;
+};
+
+export type RankedPreferenceContribution = {
+  kind: "ranked_preference";
+  voteId: string;
+  pollOptionId: PollOptionId;
+  rank: number;
 };
 
 export type VoterClaimContribution = {
@@ -194,6 +240,7 @@ export type VoteExtensionContribution = {
 
 export type VotePersistenceContribution =
   | VoteSelectionContribution
+  | RankedPreferenceContribution
   | VoterClaimContribution
   | VoteCommentContribution
   | VoteExtensionContribution;
@@ -256,10 +303,9 @@ export type CastVoteDeps = {
   contributors?: readonly VoteFactContributor[];
 };
 
-export type CastVoteInput = {
+type CastVoteInputBase = {
   pollId: PollId;
   submissionId: string;
-  selectedOptionIds: readonly string[];
   comment?: CommentDraft;
   browserToken: string | null;
   /**
@@ -276,6 +322,22 @@ export type CastVoteInput = {
    */
   humanChallenge: HumanChallengeProof;
 };
+
+export type CastVoteInput = CastVoteInputBase &
+  (
+    | {
+        /** Omitted preserves the pre-Ranked Multiple-Choice transport. */
+        pollType?: "multiple_choice";
+        selectedOptionIds: readonly string[];
+        rankedPreferences?: never;
+      }
+    | {
+        pollType: "ranked_choice";
+        /** Kept explicit and empty so legacy delivery code cannot infer rank. */
+        selectedOptionIds: readonly string[];
+        rankedPreferences: readonly RankedPreferenceInput[];
+      }
+  );
 
 export type CastVoteOutcome = {
   acceptedAtMs: number;
@@ -301,6 +363,23 @@ export function normalizeVotePayload(
   // before Story 4.1 must remain byte-for-byte replay-compatible.
   return JSON.stringify(
     comment === null ? legacy : { ...legacy, comment },
+  );
+}
+
+export function normalizeRankedVotePayload(
+  pollId: PollId,
+  rankedPreferences: readonly RankedPreferenceInput[],
+  comment: CanonicalComment | null = null,
+): string {
+  const ranked = {
+    pollId,
+    pollType: "ranked_choice" as const,
+    rankedPreferences: [...rankedPreferences]
+      .sort((left, right) => left.rank - right.rank)
+      .map(({ optionId, rank }) => ({ optionId, rank })),
+  };
+  return JSON.stringify(
+    comment === null ? ranked : { ...ranked, comment },
   );
 }
 
@@ -405,11 +484,23 @@ export async function castVote(
   } catch {
     return failure("vote_failed", VOTE_COPY.retry);
   }
-  const normalizedPayload = normalizeVotePayload(
-    input.pollId,
-    input.selectedOptionIds,
-    comment,
-  );
+  let normalizedPayload: string;
+  try {
+    normalizedPayload =
+      input.pollType === "ranked_choice"
+        ? normalizeRankedVotePayload(
+            input.pollId,
+            input.rankedPreferences,
+            comment,
+          )
+        : normalizeVotePayload(
+            input.pollId,
+            input.selectedOptionIds,
+            comment,
+          );
+  } catch {
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
 
   let payloadHash: string;
   let existing: StoredVoteOutcome | null;
@@ -469,8 +560,18 @@ export async function castVote(
   }
   let validated: Result<ValidatedVoteSubmission>;
   try {
+    const submission: VoteSubmission =
+      input.pollType === "ranked_choice"
+        ? {
+            kind: "ranked_choice",
+            selectedOptionIds: input.selectedOptionIds,
+            rankedPreferences: input.rankedPreferences,
+          }
+        : {
+            selectedOptionIds: input.selectedOptionIds,
+          };
     validated = strategy.validateSubmission(
-      { selectedOptionIds: input.selectedOptionIds },
+      submission,
       {
         options: poll.options,
         multiSelectEnabled: poll.multiSelectEnabled,
@@ -497,6 +598,12 @@ export async function castVote(
     };
     if (strategyError.code === "selection_required") {
       return failure("selection_required", VOTE_COPY.selectionRequired, detail);
+    }
+    if (strategyError.code === "ranking_required") {
+      return failure("ranking_required", strategyError.message, detail);
+    }
+    if (strategyError.code === "invalid_ranking") {
+      return failure("invalid_ranking", strategyError.message, detail);
     }
     const message =
       strategyError.message.trim().length > 0
@@ -561,19 +668,25 @@ export async function castVote(
   } catch {
     return failure("vote_failed", VOTE_COPY.retry);
   }
-  let selections: { pollOptionId: PollOptionId }[];
+  let persistedFacts: PersistedVoteFacts;
   try {
-    selections = strategy.persistFacts(validated.value).selections;
+    persistedFacts = strategy.persistFacts(validated.value);
   } catch {
     return failure("vote_failed", VOTE_COPY.retry);
   }
-  const contributions: VotePersistenceContribution[] = selections.map(
-    ({ pollOptionId }) => ({
-      kind: "vote_selection",
-      voteId,
-      pollOptionId,
-    }),
-  );
+  const contributions: VotePersistenceContribution[] =
+    persistedFacts.kind === "ranked_choice"
+      ? persistedFacts.preferences.map(({ pollOptionId, rank }) => ({
+          kind: "ranked_preference" as const,
+          voteId,
+          pollOptionId,
+          rank,
+        }))
+      : persistedFacts.selections.map(({ pollOptionId }) => ({
+          kind: "vote_selection" as const,
+          voteId,
+          pollOptionId,
+        }));
   if (comment !== null) {
     let commentId: string;
     try {

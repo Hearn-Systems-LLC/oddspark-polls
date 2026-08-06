@@ -4,8 +4,11 @@ import {
   type MultipleChoiceExportFacts,
 } from "../../src/modules/polls/types/multiple-choice";
 import {
+  bindBoundedExportDriver,
   bindExportDriver,
+  queryBoundedOwnerExport,
   queryOwnerExport,
+  type BoundedExportFactDriver,
   type ExportFactDriver,
   type ExportPorts,
   type SharedExportVoteFacts,
@@ -325,5 +328,65 @@ describe("owner export query", () => {
     await expect(
       queryOwnerExport(deps().ports, POLL, { userId: OWNER }, [driver]),
     ).rejects.toThrow("Malformed Poll Type export totals");
+  });
+});
+
+describe("bounded owner export query", () => {
+  it("returns oversize before invoking the Poll Type strategy", async () => {
+    const value = deps();
+    const projectExport = vi.fn(multipleChoiceStrategy.projectExport);
+    const factDriver: BoundedExportFactDriver<MultipleChoiceExportFacts> = {
+      type: "multiple_choice",
+      projectFacts: vi.fn(async () => ({ status: "oversize" as const })),
+    };
+
+    await expect(
+      queryBoundedOwnerExport(value.ports, POLL, { userId: OWNER }, [
+        bindBoundedExportDriver(factDriver, {
+          type: "multiple_choice",
+          projectExport,
+        }),
+      ]),
+    ).resolves.toEqual({ status: "oversize" });
+    expect(projectExport).not.toHaveBeenCalled();
+  });
+
+  it("reuses the canonical validator and materializer for ready facts", async () => {
+    const value = deps();
+    const factDriver: BoundedExportFactDriver<MultipleChoiceExportFacts> = {
+      type: "multiple_choice",
+      projectFacts: vi.fn(async () => ({
+        status: "ready" as const,
+        facts: facts(),
+      })),
+    };
+    const bounded = await queryBoundedOwnerExport(
+      value.ports,
+      POLL,
+      { userId: OWNER },
+      [bindBoundedExportDriver(factDriver, multipleChoiceStrategy)],
+    );
+    const unbounded = await queryOwnerExport(
+      value.ports,
+      POLL,
+      { userId: OWNER },
+      [value.driver],
+    );
+    expect(bounded).toEqual({ status: "ready", export: unbounded });
+  });
+
+  it("conceals missing ownership before the bounded fact reader", async () => {
+    const value = deps();
+    vi.mocked(value.ports.findOwnerEnvelope).mockResolvedValue(null);
+    const factDriver: BoundedExportFactDriver<MultipleChoiceExportFacts> = {
+      type: "multiple_choice",
+      projectFacts: vi.fn(async () => ({ status: "oversize" as const })),
+    };
+    await expect(
+      queryBoundedOwnerExport(value.ports, POLL, { userId: OWNER }, [
+        bindBoundedExportDriver(factDriver, multipleChoiceStrategy),
+      ]),
+    ).resolves.toBeNull();
+    expect(factDriver.projectFacts).not.toHaveBeenCalled();
   });
 });

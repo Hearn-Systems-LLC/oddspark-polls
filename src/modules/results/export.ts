@@ -42,6 +42,17 @@ export type ExportFactDriver<TTypeFacts> = {
   ) => Promise<ExportDriverFacts<TTypeFacts> | null>;
 };
 
+export type BoundedExportFactResult<TTypeFacts> =
+  | { status: "ready"; facts: ExportDriverFacts<TTypeFacts> }
+  | { status: "oversize" };
+
+export type BoundedExportFactDriver<TTypeFacts> = {
+  readonly type: PollType;
+  projectFacts: (
+    pollId: PollId,
+  ) => Promise<BoundedExportFactResult<TTypeFacts> | null>;
+};
+
 export type ExportDriver = {
   readonly type: PollType;
   project: (
@@ -50,6 +61,19 @@ export type ExportDriver = {
     sharedVotes: readonly SharedExportVoteFacts[];
     projection: PollTypeExportProjection;
   } | null>;
+};
+
+export type BoundedExportDriverResult =
+  | {
+      status: "ready";
+      sharedVotes: readonly SharedExportVoteFacts[];
+      projection: PollTypeExportProjection;
+    }
+  | { status: "oversize" };
+
+export type BoundedExportDriver = {
+  readonly type: PollType;
+  project: (pollId: PollId) => Promise<BoundedExportDriverResult | null>;
 };
 
 /**
@@ -81,6 +105,35 @@ export function bindExportDriver<TTypeFacts>(
   };
 }
 
+/** Bind a capacity-aware fact reader without invoking Poll Type policy when oversized. */
+export function bindBoundedExportDriver<TTypeFacts>(
+  factDriver: BoundedExportFactDriver<TTypeFacts>,
+  strategy: {
+    readonly type: PollType;
+    readonly projectExport: (
+      facts: TTypeFacts,
+    ) => Result<PollTypeExportProjection>;
+  },
+): BoundedExportDriver {
+  if (factDriver.type !== strategy.type) {
+    throw new Error("Mismatched Poll Type export driver");
+  }
+  return {
+    type: factDriver.type,
+    async project(pollId) {
+      const result = await factDriver.projectFacts(pollId);
+      if (!result || result.status === "oversize") return result;
+      const projected = strategy.projectExport(result.facts.typeFacts);
+      if (!projected.ok) throw new Error(projected.error.code);
+      return {
+        status: "ready",
+        sharedVotes: result.facts.sharedVotes,
+        projection: projected.value,
+      };
+    },
+  };
+}
+
 export type CanonicalExportTable = PollTypeExportTable;
 
 export type CanonicalExportDataset = {
@@ -93,6 +146,10 @@ export type OwnerExport = {
   canonicalReference: string;
   dataset: CanonicalExportDataset;
 };
+
+export type BoundedOwnerExport =
+  | { status: "ready"; export: OwnerExport }
+  | { status: "oversize" };
 
 export type ExportPorts = {
   findOwnerEnvelope: (
@@ -206,6 +263,63 @@ function validateProjection(
   validateTable(projection.tally, "Poll Type Tally", false);
 }
 
+function materializeCanonicalExport(
+  canonicalReference: string,
+  sharedVotes: readonly SharedExportVoteFacts[],
+  projection: PollTypeExportProjection,
+): OwnerExport {
+  validateSharedVoteFacts(sharedVotes);
+  validateProjection(sharedVotes, projection);
+
+  const voteColumns = [
+    "TIMESTAMP",
+    "DISPLAY NAME",
+    "COMMENT",
+    ...projection.votes.columns,
+  ];
+  if (new Set(voteColumns).size !== voteColumns.length) {
+    throw new Error("Conflicting Poll Type export columns");
+  }
+
+  return {
+    canonicalReference,
+    dataset: {
+      votes: {
+        columns: voteColumns,
+        rows: sharedVotes.map((vote, index) => [
+          new Date(vote.createdAtMs).toISOString(),
+          vote.comment?.displayName ?? "",
+          vote.comment?.body ?? "",
+          ...(projection.votes.rows[index]?.cells ?? []),
+        ]),
+      },
+      tally: projection.tally,
+      summary: {
+        columns: ["METRIC", "VALUE"],
+        rows: [
+          ["VOTERS", projection.voterCount],
+          ["SELECTIONS", projection.selectionCount],
+        ],
+      },
+    },
+  };
+}
+
+function matchingDriver<T extends { readonly type: PollType }>(
+  pollType: PollType,
+  drivers: readonly T[],
+): T {
+  const matchingDrivers = drivers.filter(({ type }) => type === pollType);
+  if (matchingDrivers.length !== 1) {
+    throw new Error(
+      matchingDrivers.length === 0
+        ? "Unsupported Poll Type export projection"
+        : "Duplicate Poll Type export projection",
+    );
+  }
+  return matchingDrivers[0]!;
+}
+
 export async function queryOwnerExport(
   ports: ExportPorts,
   pollId: PollId,
@@ -220,52 +334,39 @@ export async function queryOwnerExport(
     throw new Error("Mismatched export owner envelope");
   }
 
-  const matchingDrivers = drivers.filter(
-    ({ type }) => type === envelope.pollType,
-  );
-  if (matchingDrivers.length !== 1) {
-    throw new Error(
-      matchingDrivers.length === 0
-        ? "Unsupported Poll Type export projection"
-        : "Duplicate Poll Type export projection",
-    );
-  }
-  const driver = matchingDrivers[0]!;
+  const driver = matchingDriver(envelope.pollType, drivers);
   const driven = await driver.project(envelope.pollId);
   if (!driven) throw new Error("Export projection unavailable");
-  validateSharedVoteFacts(driven.sharedVotes);
-  validateProjection(driven.sharedVotes, driven.projection);
+  return materializeCanonicalExport(
+    envelope.canonicalReference,
+    driven.sharedVotes,
+    driven.projection,
+  );
+}
 
-  const voteColumns = [
-    "TIMESTAMP",
-    "DISPLAY NAME",
-    "COMMENT",
-    ...driven.projection.votes.columns,
-  ];
-  if (new Set(voteColumns).size !== voteColumns.length) {
-    throw new Error("Conflicting Poll Type export columns");
+export async function queryBoundedOwnerExport(
+  ports: ExportPorts,
+  pollId: PollId,
+  viewer: ViewerContext,
+  drivers: readonly BoundedExportDriver[],
+): Promise<BoundedOwnerExport | null> {
+  if (viewer.userId === null) return null;
+  const envelope = await ports.findOwnerEnvelope(pollId, viewer.userId);
+  if (!envelope) return null;
+  if (envelope.pollId !== pollId) {
+    throw new Error("Mismatched export owner envelope");
   }
 
+  const driver = matchingDriver(envelope.pollType, drivers);
+  const driven = await driver.project(envelope.pollId);
+  if (!driven) throw new Error("Export projection unavailable");
+  if (driven.status === "oversize") return driven;
   return {
-    canonicalReference: envelope.canonicalReference,
-    dataset: {
-      votes: {
-        columns: voteColumns,
-        rows: driven.sharedVotes.map((vote, index) => [
-          new Date(vote.createdAtMs).toISOString(),
-          vote.comment?.displayName ?? "",
-          vote.comment?.body ?? "",
-          ...(driven.projection.votes.rows[index]?.cells ?? []),
-        ]),
-      },
-      tally: driven.projection.tally,
-      summary: {
-        columns: ["METRIC", "VALUE"],
-        rows: [
-          ["VOTERS", driven.projection.voterCount],
-          ["SELECTIONS", driven.projection.selectionCount],
-        ],
-      },
-    },
+    status: "ready",
+    export: materializeCanonicalExport(
+      envelope.canonicalReference,
+      driven.sharedVotes,
+      driven.projection,
+    ),
   };
 }

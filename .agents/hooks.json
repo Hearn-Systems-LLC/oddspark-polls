@@ -1,0 +1,11 @@
+{
+  "bmad-loop": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 /Volumes/fast/Github/oddspark-polls/.bmad-loop/bmad_loop_hook.py Stop",
+        "timeout": 60
+      }
+    ]
+  }
+}

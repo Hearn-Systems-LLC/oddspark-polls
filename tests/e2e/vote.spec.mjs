@@ -175,7 +175,7 @@ test.describe("public voting flow", () => {
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
     await page.getByRole("textbox", { name: "OPTION 3" }).fill("Gamma");
-    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await page.locator('label[for="multi-select-true"]').click();
     await page.getByLabel("MIN (OPTIONAL)").fill("2");
     await page.getByLabel("MAX (OPTIONAL)").fill("2");
     await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill(reference);

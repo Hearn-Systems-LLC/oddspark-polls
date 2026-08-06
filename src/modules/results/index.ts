@@ -9,6 +9,7 @@ import {
   effectivePollStatus,
   type PollId,
   type PollOptionId,
+  type PollType,
   type PollSecurityToggles,
   type PollStatus,
   type ResultVisibility,
@@ -39,6 +40,7 @@ export type ViewerContext = {
 export type ResultsAccessEnvelope = {
   pollId: PollId;
   question: string;
+  pollType: PollType;
   resultVisibility: ResultVisibility;
   ownerUserId: UserId;
   deadlineMs: number | null;
@@ -107,6 +109,8 @@ export const RESULTS_COPY = {
   empty: "No Votes yet. Yours would be the first, which is a kind of power.",
   tied: "TIED",
   unavailable: "Results are unavailable right now.",
+  rankedUnavailable:
+    "Ranked-choice results aren't available yet. Ballots are recorded without showing a misleading Tally.",
   yourBallot: "YOUR BALLOT",
 } as const;
 
@@ -171,6 +175,12 @@ export type ResultsView =
       question: string;
       canonicalReference: string;
     }
+  | {
+      kind: "ranked_unavailable";
+      pollId: PollId;
+      question: string;
+      canonicalReference: string;
+    }
   | { kind: "not_found" };
 
 // The live query owns a narrower outward union than the full page query.
@@ -201,6 +211,11 @@ export type LiveResultsView =
     }
   | {
       kind: "creator_only_hidden";
+      pollId: PollId;
+      canonicalReference: string;
+    }
+  | {
+      kind: "ranked_unavailable";
       pollId: PollId;
       canonicalReference: string;
     }
@@ -317,6 +332,18 @@ export async function queryResults(
         };
   }
 
+  // Story 5.1 persists normalized Ballots but deliberately does not invent a
+  // first-choice or multi-select pseudo-Tally before the IRV projector lands
+  // in Story 5.2. This branch runs before any private result-fact read.
+  if (envelope.pollType === "ranked_choice") {
+    return {
+      kind: "ranked_unavailable",
+      pollId: envelope.pollId,
+      question: envelope.question,
+      canonicalReference: envelope.canonicalReference,
+    };
+  }
+
   const includeOwnerModeration =
     viewer.userId !== null && viewer.userId === envelope.ownerUserId;
   const projection = await ports.projectResults(
@@ -363,6 +390,14 @@ export async function queryLiveResults(
         envelope.resultVisibility === "after_close"
           ? "after_close_hidden"
           : "creator_only_hidden",
+      pollId: envelope.pollId,
+      canonicalReference: envelope.canonicalReference,
+    };
+  }
+
+  if (envelope.pollType === "ranked_choice") {
+    return {
+      kind: "ranked_unavailable",
       pollId: envelope.pollId,
       canonicalReference: envelope.canonicalReference,
     };

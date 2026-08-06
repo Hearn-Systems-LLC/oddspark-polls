@@ -59,7 +59,11 @@ const DEFINITION_FORM_KEYS = new Set([
   ...DEFINITION_KEYS,
   "description",
 ]);
-const DESCRIPTION_FORM_KEYS = new Set([...COMMON_KEYS, "description"]);
+const DESCRIPTION_FORM_KEYS = new Set([
+  ...COMMON_KEYS,
+  "description",
+  "pollType",
+]);
 const SECURITY_FORM_KEYS = new Set([...COMMON_KEYS, ...SECURITY_KEYS]);
 const LISTING_FORM_KEYS = new Set([...COMMON_KEYS, "listing"]);
 

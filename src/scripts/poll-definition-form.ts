@@ -53,6 +53,25 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
   const maxSelections = form.querySelector<HTMLInputElement>(
     'input[name="maxSelections"]',
   );
+  const pollTypeChoices = Array.from(
+    form.querySelectorAll<HTMLInputElement>('input[name="pollType"]'),
+  );
+  const multipleChoiceFields = form.querySelector<HTMLElement>(
+    "[data-multiple-choice-fields]",
+  );
+
+  function syncPollTypeFields(): void {
+    if (!multipleChoiceFields) return;
+    const ranked = pollTypeChoices.some(
+      (choice) => choice.value === "ranked_choice" && choice.checked,
+    );
+    multipleChoiceFields.hidden = ranked;
+    for (const input of multipleChoiceFields.querySelectorAll<HTMLInputElement>(
+      'input[name="multiSelect"], input[name="minSelections"], input[name="maxSelections"]',
+    )) {
+      input.disabled = ranked;
+    }
+  }
 
   function optionRows(): HTMLElement[] {
     return Array.from(
@@ -228,8 +247,15 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
   multiSelectChoices.forEach((choice) => {
     choice.addEventListener("change", syncMultiSelectBounds);
   });
+  pollTypeChoices.forEach((choice) => {
+    choice.addEventListener("change", () => {
+      syncPollTypeFields();
+      syncMultiSelectBounds();
+    });
+  });
   minSelections?.addEventListener("input", syncMultiSelectBounds);
   maxSelections?.addEventListener("input", syncMultiSelectBounds);
+  syncPollTypeFields();
   syncMultiSelectBounds();
 
   const primary = form.querySelector<HTMLButtonElement>(options.primarySelector);
@@ -250,6 +276,7 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
       button.disabled = false;
     });
     syncAddButton();
+    syncPollTypeFields();
     syncMultiSelectBounds();
   };
 

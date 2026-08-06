@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Ranked-Choice Poll creation and accessible ordered partial Ballots. Voters
+  can rank, unrank, and compact options by tap, Enter, or Space, with the same
+  complete flow available through server forms without JavaScript. Accepted
+  preferences commit atomically as normalized Vote facts; Ranked Results and
+  export remain explicitly unavailable until the IRV and trust-surface stories.
 - Large Discover catalogs now publish a bounded sitemap index whose opaque
   keyset-range children reapply fresh D1 eligibility without crossing their
   encoded ranges; smaller catalogs keep the byte-compatible single

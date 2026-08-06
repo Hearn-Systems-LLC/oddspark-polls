@@ -20,8 +20,8 @@ available yet.
 
 | Status | Capabilities |
 | --- | --- |
-| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, owner CSV export, and bounded owner XLSX export through 1,000 accepted Votes (larger Polls keep CSV); Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
-| Planned / backlog | Ranked-Choice, Image, and Meeting Polls; Voter Codes; VPN Blocking |
+| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, owner CSV export, and bounded owner XLSX export through 1,000 accepted Votes (larger Polls keep CSV); Ranked-Choice Poll creation and ordered partial Ballots; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Multiple-Choice Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Planned / backlog | Ranked-Choice IRV Results, round display, Ballot Manifest, and export; Image and Meeting Polls; Voter Codes; VPN Blocking |
 
 ## Product tour
 
@@ -34,8 +34,11 @@ available yet.
    server Tally directly, with no configuration dialog. XLSX is available
    through 1,000 accepted Votes; larger Polls keep the unbounded CSV path.
 4. Open the published canonical `/{reference}` link as a signed-out Voter,
-   choose an option, optionally attach a Comment and display name when the
-   Creator enabled them, and submit.
+   choose an option for Multiple Choice or build any non-empty ordered partial
+   ranking for Ranked Choice, optionally attach a Comment and display name when
+   the Creator enabled them, and submit. Ranking works through ordinary server
+   forms without JavaScript and receives tap, Enter, and Space enhancement when
+   JavaScript is available.
 5. Follow the same Poll to `/{reference}/results`; its visibility policy decides
    whether the Tally is live, opens after close, or remains creator-only. The
    complete newest-first Comment list follows every visible Tally. Owners can
@@ -61,6 +64,10 @@ contains the complete decisions and capability map. The evaluator-sized map is:
 - Vote acceptance is one constrained transaction, including an optional typed
   Comment contribution; duplicate identities become secret-keyed, Poll-scoped
   digests rather than stored raw identifiers (AD-7, AD-8, AD-19).
+- Ranked Choice is registered behind the shared Poll Type contract. Accepted
+  preferences are normalized, contiguous one-based facts committed atomically
+  with the Vote; pre-IRV Results and export fail closed without projecting a
+  Multiple-Choice Tally (AD-3, AD-7, AD-9).
 - Results authorizes before coherently projecting a Tally and its complete
   Comment list; Voting-owned owner/administrator commands delete only a
   Comment and advance the shared representation version atomically (AD-19,

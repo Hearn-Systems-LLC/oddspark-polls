@@ -69,6 +69,7 @@ const VISIBILITY_CHOICES = [
 const INITIAL_OPTION_ROWS = 4;
 
 const formSchema = z.object({
+  pollType: z.string().default(""),
   question: z.string().default(""),
   description: z.string().default(""),
   options: z.array(z.string()).default([]),
@@ -98,6 +99,7 @@ let formPollId = crypto.randomUUID() as PollId;
 // Fresh GET: Session Checks on, every other Toggle off (FR-15). Defaults live
 // in the render only — absent POST checkboxes still mean off.
 let values: CreatePollDraft = {
+  pollType: "multiple_choice",
   question: "",
   description: "",
   options: Array.from({ length: INITIAL_OPTION_ROWS }, () => ""),
@@ -132,6 +134,9 @@ if (Astro.request.method === "POST") {
     const text = (entry: FormDataEntryValue | null): string =>
       typeof entry === "string" ? entry : "";
     parsed = formSchema.parse({
+      // Story 5.1 adds an explicit chooser, while preserving the established
+      // Multiple-Choice POST contract for old clients and integration callers.
+      pollType: text(formData.get("pollType")) || "multiple_choice",
       question: text(formData.get("question")),
       description: text(formData.get("description")),
       options: formData
@@ -177,6 +182,7 @@ if (Astro.request.method === "POST") {
     raw === "true" ? "true" : "false";
 
   values = {
+    pollType: parsed.pollType,
     question: parsed.question,
     description: parsed.description,
     options: parsed.options,
@@ -299,7 +305,8 @@ while (values.options.length < 2) {
         values={values}
         fieldErrors={fieldErrors}
         optionNote={optionNote}
-        showPollType={false}
+        showPollType={true}
+        pollTypeEditable={true}
         showDescription={false}
       />
 

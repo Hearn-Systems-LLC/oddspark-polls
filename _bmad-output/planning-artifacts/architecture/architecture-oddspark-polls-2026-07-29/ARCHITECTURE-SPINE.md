@@ -83,6 +83,13 @@ flowchart LR
   fields, asks exactly one Poll Type strategy for normalized creation facts, and
   commits the Poll, type facts, options or slots, slug reservation, and adopted
   media records in one D1 batch. A failed batch leaves no reachable Poll.
+  The first-class registry currently resolves Multiple Choice and Ranked Choice.
+  Ranked creation stores no Multiple-Choice bounds, and Ranked vote persistence
+  writes a non-empty contiguous ordered subset to `ranked_vote_preference` in
+  the same batch as its Vote and shared contributions. Until the later IRV and
+  export stories supply their complete projectors, Ranked Results and export
+  return explicit unavailable outcomes rather than borrowing a
+  Multiple-Choice projection.
 
 ### AD-4 — Creator identity is separate from Poll ownership [ADOPTED]
 
@@ -224,6 +231,11 @@ sequenceDiagram
   pure deterministic tabulator shared by the live view, closed result, export,
   and tests. A closed Ballot Manifest exposes only canonically ordered,
   anonymized rankings.
+  Story 5.1 supplies only the normalized Ranked source facts: projection checks
+  visibility first, then returns a private no-store unavailable state without
+  reading Ballot rows or representation versions. The deterministic tabulator,
+  round presentation, Manifest, and complete Ranked export remain owned by
+  Stories 5.2–5.3.
   Owner exports resolve a provider-free `ViewerContext` before any private
   read. One type-specific D1 driver reads raw rows and their complete Tally in
   one statement/snapshot, uses IDs only for joins and bytewise tie ordering,
@@ -628,7 +640,7 @@ erDiagram
 | Poll lifecycle, type, options, Deadline, result visibility | Polls | Poll commands |
 | Designated Demo aggregate replacement | Polls + Voting coordination | `ResetDemoPoll` through the D1 Demo replacement adapter; no Discovery fact may exist |
 | Listing state and ordered moderation actions | Discovery | Owner listing commands or guarded `delist` / `clear_delisted` transaction |
-| Votes, selections, availability, claims, code redemptions, Comments | Voting | `CastVote` maps typed `modules/comments` contributions into the Vote-owned `vote_comment` row; later moderation commands may delete Comments |
+| Votes, selections, ranked preferences, availability, claims, code redemptions, Comments | Voting | `CastVote` maps typed Poll Type persistence facts and `modules/comments` contributions into one batch; Ranked preferences live in `ranked_vote_preference`, and later moderation commands may delete Comments |
 | Media records and cleanup outbox | Media | Media adoption and deletion commands |
 | Tallies, Manifests, exports | Results | Read-only projections; no mutation path |
 
@@ -652,7 +664,8 @@ flowchart LR
 | FR-2–FR-5, FR-28, CAP-SHARE | `polls`, D1 Poll repository, public routes and Share action | AD-3, AD-6, AD-11, AD-13, AD-17 |
 | FR-23, CAP-DISCOVER | `discovery`, catalog projection, `/discover`, `/creator/moderation` | AD-4, AD-5, AD-6, AD-13, AD-15, AD-16, AD-19, AD-22, AD-24 |
 | FR-6–FR-7 | `polls/types/multiple-choice`, `voting` | AD-3, AD-7, AD-9 |
-| FR-8–FR-10 | `polls/types/ranked-choice`, `results/tabulate-irv` | AD-3, AD-9 |
+| FR-8 | `polls/types/ranked-choice`, `voting`, D1 `ranked_vote_preference`, server-first `rank-builder` | AD-2, AD-3, AD-7, AD-9 |
+| FR-9–FR-10 | `results/tabulate-irv`, Ranked rounds and Ballot Manifest (planned) | AD-3, AD-9 |
 | FR-11 | `polls/types/image`, R2 media adapter | AD-3, AD-12 |
 | FR-12–FR-14 | `polls/types/meeting`, Meeting availability repository | AD-3, AD-6, AD-9, AD-20 |
 | FR-15–FR-19 | `voting/security`, D1 claims/codes, provider adapters | AD-7, AD-8, AD-16, AD-22 |

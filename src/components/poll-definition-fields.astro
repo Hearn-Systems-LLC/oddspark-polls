@@ -1,6 +1,6 @@
 ---
 /**
- * Shared Multiple-Choice definition fields for create + edit (Story 1.12).
+ * Shared Poll definition fields for create + edit (Stories 1.12 / 5.1).
  * Parent form owns CSRF, intent, and non-definition fields.
  */
 import Input from "./input.astro";
@@ -10,6 +10,7 @@ import { RENDER_OPTION_CEILING } from "../modules/polls/caps";
 
 interface Props {
   values: {
+    pollType?: string;
     question: string;
     description: string;
     options: string[];
@@ -22,6 +23,7 @@ interface Props {
   optionNote?: string | null;
   pollTypeLabel?: string;
   showPollType?: boolean;
+  pollTypeEditable?: boolean;
   showDescription?: boolean;
   /** When true, question/options/multi-select render read-only. */
   locked?: boolean;
@@ -37,6 +39,7 @@ const {
   optionNote = null,
   pollTypeLabel = "MULTIPLE CHOICE",
   showPollType = true,
+  pollTypeEditable = false,
   showDescription = true,
   locked = false,
   lockMessage = null,
@@ -48,6 +51,20 @@ const MULTI_SELECT_CHOICES = [
   { value: "false", label: "ONE" },
   { value: "true", label: "SEVERAL" },
 ] as const;
+const POLL_TYPE_CHOICES = [
+  {
+    value: "multiple_choice",
+    label: "MULTIPLE CHOICE",
+    description: "Voters pick one option, or several when enabled.",
+  },
+  {
+    value: "ranked_choice",
+    label: "RANKED CHOICE",
+    description: "Voters rank any non-empty subset in preference order.",
+  },
+] as const;
+const pollType = values.pollType ?? "multiple_choice";
+const rankedChoice = pollType === "ranked_choice";
 ---
 
 {
@@ -73,8 +90,32 @@ const MULTI_SELECT_CHOICES = [
 {
   showPollType && (
     <div class="field-block">
-      <p class="group-label">POLL TYPE</p>
-      <p class="read-only-value" data-poll-type>{pollTypeLabel}</p>
+      {pollTypeEditable ? (
+        <fieldset aria-describedby={fieldErrors.pollType ? "poll-type-error" : undefined}>
+          <legend class="group-label">POLL TYPE</legend>
+          <div class="multi-select-choices" data-poll-type-choices>
+            {POLL_TYPE_CHOICES.map((choice) => (
+              <PollOption
+                id={`poll-type-${choice.value}`}
+                name="pollType"
+                value={choice.value}
+                label={choice.label}
+                description={choice.description}
+                checked={pollType === choice.value}
+              />
+            ))}
+          </div>
+          {fieldErrors.pollType && (
+            <p class="field-error" id="poll-type-error">{fieldErrors.pollType}</p>
+          )}
+        </fieldset>
+      ) : (
+        <>
+          <p class="group-label">POLL TYPE</p>
+          <p class="read-only-value" data-poll-type>{pollTypeLabel}</p>
+          <input type="hidden" name="pollType" value={pollType} />
+        </>
+      )}
     </div>
   )
 }
@@ -103,19 +144,21 @@ const MULTI_SELECT_CHOICES = [
             ))}
         </ol>
       </div>
-      <div class="field-block">
-        <p class="group-label">HOW MANY OPTIONS CAN A VOTER PICK</p>
-        <p class="read-only-value">
-          {values.multiSelect === "true" ? "SEVERAL" : "ONE"}
-          {values.multiSelect === "true" && (
-              <span>
-                {" "}
-                (min {values.minSelections || "1"}, max{" "}
-                {values.maxSelections || values.options.filter((option) => option.trim().length > 0).length})
-              </span>
-            )}
-        </p>
-      </div>
+      {!rankedChoice && (
+        <div class="field-block">
+          <p class="group-label">HOW MANY OPTIONS CAN A VOTER PICK</p>
+          <p class="read-only-value">
+            {values.multiSelect === "true" ? "SEVERAL" : "ONE"}
+            {values.multiSelect === "true" && (
+                <span>
+                  {" "}
+                  (min {values.minSelections || "1"}, max{" "}
+                  {values.maxSelections || values.options.filter((option) => option.trim().length > 0).length})
+                </span>
+              )}
+          </p>
+        </div>
+      )}
       <div class="field-block">
         <p class="group-label">COMMENTS WITH VOTES</p>
         <p class="read-only-value">
@@ -177,6 +220,8 @@ const MULTI_SELECT_CHOICES = [
 
       <fieldset
         class="field-block"
+        data-multiple-choice-fields
+        hidden={rankedChoice}
         aria-invalid={fieldErrors.multiSelect ? "true" : undefined}
         aria-describedby={
           fieldErrors.multiSelect ? "multi-select-error" : undefined
@@ -191,6 +236,7 @@ const MULTI_SELECT_CHOICES = [
               value={choice.value}
               label={choice.label}
               checked={values.multiSelect === choice.value}
+              disabled={rankedChoice}
             />
           ))}
         </div>
@@ -213,6 +259,7 @@ const MULTI_SELECT_CHOICES = [
               label="MIN (OPTIONAL)"
               type="number"
               value={values.minSelections}
+              disabled={rankedChoice}
               error={Boolean(fieldErrors.minSelections)}
               describedby={
                 fieldErrors.minSelections
@@ -233,6 +280,7 @@ const MULTI_SELECT_CHOICES = [
               label="MAX (OPTIONAL)"
               type="number"
               value={values.maxSelections}
+              disabled={rankedChoice}
               error={Boolean(fieldErrors.maxSelections)}
               describedby={
                 fieldErrors.maxSelections
@@ -308,6 +356,10 @@ const MULTI_SELECT_CHOICES = [
   .field-block {
     display: grid;
     gap: var(--space-2);
+  }
+
+  .field-block[hidden] {
+    display: none;
   }
 
   .group-label {

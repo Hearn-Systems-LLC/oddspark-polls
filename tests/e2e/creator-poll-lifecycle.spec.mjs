@@ -257,7 +257,7 @@ test.describe("creator poll lifecycle", () => {
     await page.getByLabel("QUESTION").fill("Lifecycle edited question");
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
-    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await page.locator('label[for="multi-select-true"]').click();
     await page.getByLabel("MIN (OPTIONAL)").fill("2");
     await page.getByLabel("MAX (OPTIONAL)").fill("2");
     await page.getByLabel("DESCRIPTION (OPTIONAL)").fill("Edited notes");

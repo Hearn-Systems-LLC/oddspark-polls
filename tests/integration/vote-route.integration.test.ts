@@ -1460,7 +1460,7 @@ describe("Comment With Your Vote", () => {
     expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 1 });
   });
 
-  it("rejects ambiguous or non-text Comment fields without committing", async () => {
+  it("rejects ambiguous or non-text Comment fields symmetrically without committing", async () => {
     const poll = await seedPoll({
       commentsEnabled: true,
       sessionChecksEnabled: false,
@@ -1498,6 +1498,61 @@ describe("Comment With Your Vote", () => {
       poll.reference,
     );
     expect(fileResponse.status).toBe(422);
+
+    const duplicateName = formBody(poll.optionA);
+    duplicateName.set("comment", "Context");
+    duplicateName.append("display_name", "Attacker One");
+    duplicateName.append("display_name", "Attacker Two");
+    const duplicateNameResponse = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: duplicateName,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(duplicateNameResponse.status).toBe(422);
+    expect(duplicateNameResponse.headers.get("cache-control")).toBe(
+      "private, no-store",
+    );
+    expect(duplicateNameResponse.headers.get("x-request-id")).toBeTruthy();
+    const duplicateNameHtml = await duplicateNameResponse.text();
+    expect(duplicateNameHtml).not.toContain("Attacker One");
+    expect(duplicateNameHtml).not.toContain("Attacker Two");
+    expect(duplicateNameHtml).not.toContain("[object File]");
+
+    const fileNameBody = new FormData();
+    fileNameBody.set("submission_id", crypto.randomUUID());
+    fileNameBody.set("option_id", poll.optionA);
+    fileNameBody.set("comment", "Context");
+    fileNameBody.set(
+      "display_name",
+      new File(["Attacker File"], "display-name.txt"),
+    );
+    const fileNameResponse = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: {
+            origin: ORIGIN,
+            "sec-fetch-site": "same-origin",
+          },
+          body: fileNameBody,
+        }),
+      ),
+      poll.reference,
+    );
+    expect(fileNameResponse.status).toBe(422);
+    expect(fileNameResponse.headers.get("cache-control")).toBe(
+      "private, no-store",
+    );
+    expect(fileNameResponse.headers.get("x-request-id")).toBeTruthy();
+    const fileNameHtml = await fileNameResponse.text();
+    expect(fileNameHtml).not.toContain("Attacker File");
+    expect(fileNameHtml).not.toContain("display-name.txt");
+    expect(fileNameHtml).not.toContain("[object File]");
     expect(await counts(poll.pollId)).toMatchObject({ votes: 0, version: 1 });
   });
 

@@ -260,4 +260,27 @@ describe("creator CSV export route", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(await response.text()).toBe("Export unavailable.");
   });
+
+  it("returns a safe no-partial 500 for malformed persisted Comment facts", async () => {
+    const owner = await authenticated();
+    const pollId = await poll(owner.userId);
+    await testEnv.DB.prepare(
+      `UPDATE vote_comment
+       SET created_at_ms = created_at_ms + 1
+       WHERE vote_id IN (SELECT id FROM vote WHERE poll_id = ?1)`,
+    )
+      .bind(pollId)
+      .run();
+
+    const response = await requestRoute(GET, pollId, {
+      headers: { cookie: owner.cookie },
+    });
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-disposition")).toBeNull();
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-request-id")).toBeTruthy();
+    expect(await response.text()).toBe("Export unavailable.");
+  });
 });

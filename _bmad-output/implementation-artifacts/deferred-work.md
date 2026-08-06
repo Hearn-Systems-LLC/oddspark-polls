@@ -478,7 +478,8 @@ location: n/a
 source_spec: `spec-4-1-comment-with-your-vote.md`
 severity: low
 reason: The follow-up-review damping cap (limits.max_followup_reviews = 1) was spent with the story finalized (status: done, verify green) while the review pass still recommended an independent follow-up. The work was committed by bmad-loop run 20260804-223921-acae; this entry preserves the lingering recommendation for a deliberate later review.
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 
 ### DW-51: Follow-up review still recommended for 4-3-csv-export after the damping cap was spent
 origin: review-budget-followup
@@ -486,4 +487,5 @@ location: n/a
 source_spec: `spec-4-3-csv-export.md`
 severity: low
 reason: The follow-up-review damping cap (limits.max_followup_reviews = 1) was spent with the story finalized (status: done, verify green) while the review pass still recommended an independent follow-up. The work was committed by bmad-loop run 20260805-100403-00fa; this entry preserves the lingering recommendation for a deliberate later review.
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-epic-4-followup-reviews

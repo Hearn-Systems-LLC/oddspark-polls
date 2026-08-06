@@ -5,6 +5,7 @@
 
 import {
   DuplicatePollIdError,
+  POLL_CAPS,
   ReferenceTakenError,
   isCanonicalCustomReference,
   type PollPersistenceRows,
@@ -893,69 +894,205 @@ export function createPollPersistence(db: D1Database) {
   };
 }
 
+const MAX_RFC3339_TIMESTAMP_MS = 253_402_300_799_999;
+
+function isVotePersistenceTimestamp(value: unknown): value is number {
+  return (
+    isCommentTimestamp(value) && value <= MAX_RFC3339_TIMESTAMP_MS
+  );
+}
+
 export function createVotePersistence(db: D1Database) {
   return {
     async insertVote(batch: VotePersistenceBatch): Promise<void> {
       // Validate and sanitize the complete contribution set before touching
-      // D1. A malformed claim anywhere in the batch must cause zero
-      // prepare/bind/batch calls, including when it follows valid facts.
+      // D1. Every contribution and the shared version increment must belong
+      // to this Vote/Poll/timestamp; a malformed fact anywhere in the batch
+      // causes zero prepare/bind/batch calls, even after valid facts.
+      let rawBatch: unknown;
+      try {
+        // Snapshot once so accessor-backed or externally mutated inputs
+        // cannot change after validation but before statement binding.
+        rawBatch = structuredClone(batch);
+      } catch {
+        throw new Error("invalid vote persistence batch");
+      }
+      if (
+        !isExactRecord(rawBatch, [
+          "vote",
+          "contributions",
+          "representationVersion",
+        ]) ||
+        !isExactRecord(rawBatch.vote, [
+          "id",
+          "pollId",
+          "submissionId",
+          "payloadHash",
+          "createdAtMs",
+        ]) ||
+        typeof rawBatch.vote.id !== "string" ||
+        rawBatch.vote.id.length === 0 ||
+        typeof rawBatch.vote.pollId !== "string" ||
+        rawBatch.vote.pollId.length === 0 ||
+        typeof rawBatch.vote.submissionId !== "string" ||
+        rawBatch.vote.submissionId.length === 0 ||
+        typeof rawBatch.vote.payloadHash !== "string" ||
+        rawBatch.vote.payloadHash.length === 0 ||
+        !isVotePersistenceTimestamp(rawBatch.vote.createdAtMs) ||
+        !Array.isArray(rawBatch.contributions) ||
+        rawBatch.contributions.length > POLL_CAPS.maxOptions + 3 ||
+        !isExactRecord(rawBatch.representationVersion, [
+          "kind",
+          "pollId",
+          "updatedAtMs",
+        ]) ||
+        rawBatch.representationVersion.kind !==
+          "increment_representation_version" ||
+        rawBatch.representationVersion.pollId !== rawBatch.vote.pollId ||
+        !isVotePersistenceTimestamp(
+          rawBatch.representationVersion.updatedAtMs,
+        ) ||
+        rawBatch.representationVersion.updatedAtMs !==
+          rawBatch.vote.createdAtMs
+      ) {
+        throw new Error("invalid vote persistence batch");
+      }
+
+      const voteId = rawBatch.vote.id;
+      const pollId = rawBatch.vote.pollId;
+      const submissionId = rawBatch.vote.submissionId;
+      const payloadHash = rawBatch.vote.payloadHash;
+      const createdAtMs = rawBatch.vote.createdAtMs;
+      const selectionOptionIds = new Set<string>();
+      const claimKinds = new Set<VoterClaimCheckKind>();
+      let commentCount = 0;
       const contributions: Array<
         VoteSelectionContribution | VoterClaimContribution | VoteCommentContribution
-      > = batch.contributions.map((contribution) => {
-        if (contribution.kind === "vote_selection") {
-          return contribution;
+      > = [];
+
+      for (let index = 0; index < rawBatch.contributions.length; index += 1) {
+        if (!Object.hasOwn(rawBatch.contributions, index)) {
+          throw new Error("invalid vote contribution array");
         }
-        if (contribution.kind === "voter_claim") {
+        const contribution: unknown = rawBatch.contributions[index];
+        if (
+          isExactRecord(contribution, ["kind", "voteId", "pollOptionId"]) &&
+          contribution.kind === "vote_selection"
+        ) {
+          if (
+            contribution.voteId !== voteId ||
+            typeof contribution.pollOptionId !== "string" ||
+            contribution.pollOptionId.length === 0 ||
+            selectionOptionIds.has(contribution.pollOptionId)
+          ) {
+            throw new Error("invalid vote selection contribution");
+          }
+          selectionOptionIds.add(contribution.pollOptionId);
+          contributions.push(
+            contribution as unknown as VoteSelectionContribution,
+          );
+          continue;
+        }
+        if (
+          isExactRecord(contribution, [
+            "kind",
+            "pollId",
+            "checkKind",
+            "digest",
+            "voteId",
+            "createdAtMs",
+          ]) &&
+          contribution.kind === "voter_claim"
+        ) {
           const digest = asVoterClaimDigest(contribution.digest);
           if (
             digest === null ||
+            typeof contribution.checkKind !== "string" ||
             !isVoterClaimCheckKind(contribution.checkKind)
           ) {
             throw new Error("invalid voter claim digest");
           }
-          return {
+          if (
+            contribution.pollId !== pollId ||
+            contribution.voteId !== voteId ||
+            !isVotePersistenceTimestamp(contribution.createdAtMs) ||
+            contribution.createdAtMs !== createdAtMs ||
+            claimKinds.has(contribution.checkKind)
+          ) {
+            throw new Error("invalid voter claim contribution");
+          }
+          claimKinds.add(contribution.checkKind);
+          contributions.push({
             ...contribution,
             checkKind: contribution.checkKind,
             digest,
-          };
+          } as VoterClaimContribution);
+          continue;
         }
-        if (contribution.kind === "vote_comment") {
+        if (
+          isExactRecord(contribution, [
+            "kind",
+            "id",
+            "voteId",
+            "body",
+            "displayName",
+            "createdAtMs",
+          ]) &&
+          contribution.kind === "vote_comment"
+        ) {
           if (
-            contribution.id.trim().length === 0 ||
-            contribution.voteId !== batch.vote.id ||
-            contribution.createdAtMs !== batch.vote.createdAtMs ||
+            !isCommentId(contribution.id) ||
+            contribution.voteId !== voteId ||
+            typeof contribution.body !== "string" ||
+            !isVotePersistenceTimestamp(contribution.createdAtMs) ||
+            contribution.createdAtMs !== createdAtMs ||
             contribution.body.length < 1 ||
-            contribution.body.length > 500 ||
+            contribution.body.length > COMMENT_CAPS.body ||
             contribution.body !== contribution.body.trim() ||
             contribution.body.includes("\r") ||
             contribution.body.includes("\0") ||
             (contribution.displayName !== null &&
+              typeof contribution.displayName !== "string") ||
+            (typeof contribution.displayName === "string" &&
               (contribution.displayName.length < 1 ||
-                contribution.displayName.length > 80 ||
+                contribution.displayName.length > COMMENT_CAPS.displayName ||
                 contribution.displayName !== contribution.displayName.trim() ||
-                /[\0\r\n]/.test(contribution.displayName)))
+                /[\0\r\n]/.test(contribution.displayName))) ||
+            commentCount !== 0
           ) {
             throw new Error("invalid vote comment contribution");
           }
-          return contribution;
+          commentCount += 1;
+          contributions.push(
+            contribution as unknown as VoteCommentContribution,
+          );
+          continue;
         }
-        throw new Error(
-          `Unsupported vote contribution kind: ${contribution.kind}`,
-        );
-      });
+        if (
+          isExactRecord(contribution, ["kind", "payload"]) &&
+          typeof contribution.kind === "string" &&
+          contribution.kind.startsWith("extension:")
+        ) {
+          throw new Error(
+            `Unsupported vote contribution kind: ${contribution.kind}`,
+          );
+        }
+        throw new Error("invalid vote contribution");
+      }
+
+      if (
+        selectionOptionIds.size === 0 ||
+        selectionOptionIds.size > POLL_CAPS.maxOptions
+      ) {
+        throw new Error("invalid vote persistence batch");
+      }
 
       const statements: D1PreparedStatement[] = [
         db
           .prepare(
             "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
           )
-          .bind(
-            batch.vote.id,
-            batch.vote.pollId,
-            batch.vote.submissionId,
-            batch.vote.payloadHash,
-            batch.vote.createdAtMs,
-          ),
+          .bind(voteId, pollId, submissionId, payloadHash, createdAtMs),
       ];
 
       for (const contribution of contributions) {
@@ -1005,10 +1142,7 @@ export function createVotePersistence(db: D1Database) {
           .prepare(
             "UPDATE poll SET representation_version = representation_version + 1, updated_at_ms = ?2 WHERE id = ?1",
           )
-          .bind(
-            batch.representationVersion.pollId,
-            batch.representationVersion.updatedAtMs,
-          ),
+          .bind(pollId, createdAtMs),
       );
 
       try {
@@ -1075,7 +1209,7 @@ export function createVotePersistence(db: D1Database) {
           // the Poll and selected option reachability before classifying.
           const pollStillExists = await db
             .prepare("SELECT 1 AS found FROM poll WHERE id = ?1")
-            .bind(batch.vote.pollId)
+            .bind(pollId)
             .first<{ found: number }>();
           if (!pollStillExists) {
             throw new PollGoneError();
@@ -1098,7 +1232,7 @@ export function createVotePersistence(db: D1Database) {
                 `SELECT COUNT(*) AS count FROM poll_option
                  WHERE poll_id = ?1 AND id IN (${placeholders})`,
               )
-              .bind(batch.vote.pollId, ...selectedOptionIds)
+              .bind(pollId, ...selectedOptionIds)
               .first<{ count: number }>();
             if ((reachable?.count ?? 0) !== selectedOptionIds.length) {
               throw new PollDefinitionChangedError();
@@ -1272,8 +1406,15 @@ function isExactRecord(
   if (typeof value !== "object" || value === null) {
     return false;
   }
-  const actual = Object.keys(value);
-  return actual.length === keys.length && keys.every((key) => key in value);
+  const actual = Reflect.ownKeys(value);
+  return (
+    actual.length === keys.length &&
+    keys.every(
+      (key) =>
+        Object.hasOwn(value, key) &&
+        Object.prototype.propertyIsEnumerable.call(value, key),
+    )
+  );
 }
 
 function mapCommentJson(value: unknown): CommentView {

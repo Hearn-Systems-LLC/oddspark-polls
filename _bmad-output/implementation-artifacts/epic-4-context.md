@@ -4,7 +4,7 @@
 
 ## Goal
 
-Humanize known-group Polls by letting a Voter attach one short, optional Comment and display name to the Vote, with visibility and moderation that follow the Poll's existing trust boundaries. Complete creator data ownership by providing direct CSV and XLSX downloads of raw accepted Votes and the computed Tally without exposing duplicate-enforcement identities or other private voter data.
+Humanize known-group Polls by letting a Voter attach one short, optional Comment and display name to the Vote, with visibility and moderation that follow the Poll's existing trust boundaries. Complete creator data ownership by providing direct CSV downloads for every Poll and bounded synchronous XLSX downloads through 1,000 accepted Votes without exposing duplicate-enforcement identities or other private voter data.
 
 ## Stories
 
@@ -20,7 +20,8 @@ Humanize known-group Polls by letting a Voter attach one short, optional Comment
 - Comments follow result visibility exactly: anyone permitted to see the Tally may see Comments, while After-Close and Creator-Only restrictions withhold both together. Comments are newest first and are never part of public discovery projections.
 - The owning Creator may delete Comments on their Poll. The single Administrator may delete a Comment on any Poll through a separate explicit capability; ownership must never imply administrator authority.
 - Comment bodies and display names are plain text and must be escaped wherever rendered. They must not enter operational telemetry.
-- CSV and XLSX are direct creator-surface downloads with no configuration dialog. Both contain equivalent data: one row per accepted Vote with the Poll Type's raw response, timestamp, and Comment/display name when present, plus the server-computed Tally.
+- CSV and XLSX are direct creator-surface downloads with no configuration dialog. For Polls with at most 1,000 accepted Votes, both contain equivalent data: one row per accepted Vote with the Poll Type's raw response, timestamp, and Comment/display name when present, plus the server-computed Tally. CSV retains its existing behavior for larger Polls.
+- XLSX is synchronously bounded at 1,000 accepted Votes. At 1,001 or more the route returns HTTP `409`, no attachment, and the exact plain-text response `XLSX export supports up to 1,000 accepted votes. Download CSV for larger Polls.` It never emits a partial workbook.
 - Export authorization is enforced server-side against the authenticated internal creator identity and Poll ownership. Exports must omit IP addresses, browser/session identifiers, HMAC digests, duplicate claims, and every other enforcement datum. PDF export is out of scope.
 - The voter surface remains server-rendered and lightweight. Comment entry, failure recovery, moderation, and export controls must work within the established keyboard, focus, and no-heavy-client-framework constraints.
 
@@ -34,7 +35,9 @@ Humanize known-group Polls by letting a Voter attach one short, optional Comment
 - Authorize the viewer before reading or projecting Comments, Tallies, or exports. Private and not-yet-visible result responses are non-shareable and non-cacheable; discovery caching never contains Comments or result details.
 - Deleting a Comment increments the Poll's single representation version in the same transaction so conditional result refreshes cannot retain stale visible Comments. Denied, failed, or no-op mutations must not advance it.
 - Browser mutations cross the shared same-origin CSRF boundary; authenticated creator and administrator deletions additionally require the session-bound CSRF token and application-layer ownership or role checks.
-- Select an XLSX writer that executes inside workerd behind the export port. It must not change domain or persistence rules, and both file formats must be generated from the same canonical export dataset.
+- Select an XLSX writer that executes inside workerd behind the export port. It must not change domain or persistence rules, and in-range CSV and XLSX files must be generated from the same canonical export dataset.
+- After owner authorization, the XLSX fact projection uses one D1 statement and one snapshot to read at most 1,001 accepted Votes. The extra Vote is only an oversize sentinel; when present, no Vote or selection rows, canonical dataset, or workbook are materialized. CSV does not inherit the XLSX cap.
+- An in-range workbook contains exactly `VOTES`, `TALLY`, and `SUMMARY`. The 1,000-Vote cap makes worksheet continuation unnecessary; a violated Vote, row, or column boundary fails closed before delivery begins.
 - Preserve the established HTTP conventions: boundary validation, stable safe errors, POST followed by `303` on success, and `422` re-rendering with safe submitted Comment values on validation failure.
 
 ## UX & Interaction Patterns
@@ -43,12 +46,12 @@ Humanize known-group Polls by letting a Voter attach one short, optional Comment
 - Preserve the complete ballot, Comment text, and display name through validation, CAPTCHA, rate-limit, offline, and operational failures. During submission they stay visible but non-interactive while the Vote action reads `COUNTING…`.
 - Render Comment bodies as the 16px reading-text style, with the display name above in the uppercase label style or `ANONYMOUS` when absent. Separate entries with a top hairline. Provide no avatars, bubbles, threading, reactions, or reply affordances.
 - Creator deletion uses the standard confirmation overlay: visible text action, trapped focus, `Esc` close, dismissible confirmation scrim, locked background scroll, and focus returned to the invoking control.
-- On creator Poll detail, show two plain controls side by side: CSV and XLSX. Each starts its download immediately.
+- On creator Poll detail, show two plain controls side by side: CSV and XLSX. Each starts its download immediately when available; an oversized XLSX request instead returns the stable CSV-fallback response without an attachment.
 - The shipped creator Poll detail currently shows the plain `EXPORT CSV` direct-download control; Story 4.4 adds the sibling XLSX control without a dialog.
 
 ## Cross-Story Dependencies
 
 - Story 4.1 extends the existing Vote form, retry model, security stack, and atomic Vote transaction completed by the core polling and vote-security epics.
 - Story 4.2 depends on persisted Comments from Story 4.1 and the existing result-visibility and representation-version contracts.
-- Story 4.3 establishes the canonical export dataset and Poll Type projection seam; Story 4.4 must reuse that dataset and add only the workerd-compatible XLSX adapter and matching control.
+- Story 4.3 establishes the canonical export dataset and Poll Type projection seam; Story 4.4 reuses its semantics while adding the 1,001st-Vote D1 sentinel, bounded XLSX adapter, and matching control without changing CSV behavior.
 - Future Poll Type epics must supply their own export projections while inheriting the shared Comment, visibility, authorization, and privacy rules.

@@ -215,7 +215,15 @@ sequenceDiagram
   and strips them before the required Poll Type projector. Identifier-free
   alignment keys let Results detect response-row swaps even when Vote
   timestamps tie; Results combines the aligned cells with distinct Tally/Summary
-  tables in one format-neutral dataset shared by CSV and XLSX.
+  tables in one format-neutral dataset shared by CSV and XLSX. CSV retains the
+  complete existing projection. XLSX is a bounded synchronous projection for
+  Polls with at most 1,000 accepted Votes: after owner authorization, its single
+  D1 fact statement reads at most 1,001 accepted Votes from one snapshot. The
+  extra Vote is an oversize sentinel; when present, the statement returns no
+  Vote or selection rows, no canonical dataset or workbook is materialized,
+  and delivery maps the capacity result to HTTP `409` with the stable FR-22
+  CSV-fallback response. The cap makes worksheet continuation unreachable;
+  row or column overflow is an invariant failure before response bytes begin.
 
 ### AD-10 — Live results use versioned conditional polling
 
@@ -643,6 +651,6 @@ flowchart LR
 | Discovery ranking and search | The listed catalog is large enough that newest-first pagination is no longer useful. |
 | Email, passkeys, or additional OAuth providers | Creator research shows Google and GitHub exclude a material part of the target audience. |
 | Voter Codes and VPN Blocking implementation | The first real Poll needs them, per the PRD phase gate. |
-| XLSX writer selection | The export epic; it must implement the export port and run inside workerd without changing domain or persistence rules. |
+| XLSX writer implementation | Story 4.4; it must run inside workerd behind the export port, prove the 1,000-Vote maximum with worst-shaped boundary data, enforce the 1,001st-Vote sentinel in the snapshot-consistent D1 fact statement, and preserve CSV behavior. Revisit the product cap only with new measured Worker evidence and a reconciled FR-22/UX contract. |
 | Separate Workers or service bindings | A capability needs an independent deployment cadence or the modular monolith breaches a measured platform limit. |
 | Analytics vendor | Success metrics require durable product analytics beyond privacy-safe Workers operational telemetry. |

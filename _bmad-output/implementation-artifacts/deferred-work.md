@@ -122,7 +122,8 @@ origin: Story 3.1 review, 2026-07-30
 location: src/pages/creator/polls/[pollId].astro
 severity: low
 reason: Preserve the Delisted explanation if a second creator-lifecycle read fails after ownership already resolved. `src/pages/creator/polls/[pollId].astro` (Taxonomy: nice, Owner: Amelia (Developer))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-d1-moderation-mapper-defense
 
 ### DW-68: Replace copy-pasteable template-literal SQL in E2E Poll seeding with one escaped/parameterized harness seam
 origin: Story 2.4 review, 2026-07-30
@@ -446,14 +447,16 @@ origin: Story 3.3 review, 2026-07-30
 location: src/adapters/d1/index.ts
 severity: low
 reason: Reject corrupt empty Poll questions in the moderation target mapper. `src/adapters/d1/index.ts` (Taxonomy: nice, Owner: Amelia (Developer))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-d1-moderation-mapper-defense
 
 ### DW-111: Reject corrupt empty canonical references in the moderation target mapper
 origin: Story 3.3 review, 2026-07-30
 location: src/adapters/d1/index.ts
 severity: low
 reason: Reject corrupt empty canonical references in the moderation target mapper. `src/adapters/d1/index.ts` (Taxonomy: nice, Owner: Amelia (Developer))
-status: open
+status: done 2026-08-06
+resolution: resolved by sweep bundle dw-d1-moderation-mapper-defense
 
 ### DW-112: Make the no-JavaScript mode-toggle pressed state reflect OS preference or remove the misleading pressed state from the static baseline
 origin: Story 3.4 review, 2026-07-30

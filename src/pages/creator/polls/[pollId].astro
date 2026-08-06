@@ -113,6 +113,8 @@ let forceLockedView = false;
 /** Rejected security draft must never re-render as truth (1.12 lock race). */
 let securityDraft: PollSecurityToggles | null = null;
 let forceSecurityFromPersisted = false;
+/** Established only by the owner-qualified listing command policy result. */
+let listingPolicyResolvedDelisted = false;
 
 const DELISTED_CREATOR_COPY =
   "Delisted by the Administrator. The link still works and Votes still count; the Poll no longer appears on Discover. Only the Administrator can reverse this.";
@@ -510,14 +512,19 @@ if (Astro.request.method === "POST") {
         // Policy rejection renders owner-qualified persisted truth, never the
         // rejected creator draft (the administrator owns delisted). Keep the
         // known owner-qualified Poll if a concurrent reference read is
-        // temporarily unavailable; the fresh lifecycle snapshot below still
-        // provides the authoritative Discovery state.
+        // temporarily unavailable. This resolved policy state may also supply
+        // only the Delisted presentation if the final lifecycle read fails.
+        listingPolicyResolvedDelisted = true;
         formError = null;
         Astro.response.status = 422;
-        const refreshedPoll = await persistence.findPollForOwner(
-          pollId,
-          ownerId,
-        );
+        let refreshedPoll = null;
+        try {
+          refreshedPoll = await persistence.findPollForOwner(pollId, ownerId);
+        } catch {
+          // The owner-qualified policy result already established the safe
+          // Delisted presentation. The final lifecycle read below still gets
+          // the next opportunity to provide fresh persisted truth.
+        }
         if (refreshedPoll) {
           poll = refreshedPoll;
         }
@@ -563,10 +570,17 @@ const confirmDelete = Astro.url.searchParams.get("confirm") === "delete";
 // The lifecycle snapshot is the last owner-qualified existence check before
 // rendering. If a concurrent delete won after the initial detail read, render
 // the ordinary missing state instead of stale Poll data.
-const lifecycleSnapshot = poll
-  ? await persistence.loadLifecycleForOwner(pollId, ownerId)
-  : null;
-if (poll && !lifecycleSnapshot) {
+let lifecycleSnapshot: Awaited<ReturnType<typeof loadLifecycle>> = null;
+if (poll) {
+  try {
+    lifecycleSnapshot = await persistence.loadLifecycleForOwner(pollId, ownerId);
+  } catch (error) {
+    if (!listingPolicyResolvedDelisted) {
+      throw error;
+    }
+  }
+}
+if (poll && !lifecycleSnapshot && !listingPolicyResolvedDelisted) {
   poll = null;
   Astro.response.status = 404;
 }
@@ -688,7 +702,9 @@ const outcomeCopy: Record<Exclude<OutcomeKind, null>, string> = {
   "demo-reset": demoResetOutcomeBody,
 };
 
-const listingState = lifecycleSnapshot?.discoveryState ?? poll?.discoveryState;
+const listingState =
+  lifecycleSnapshot?.discoveryState ??
+  (listingPolicyResolvedDelisted ? "delisted" : poll?.discoveryState);
 
 const persistedSecurity: PollSecurityToggles | null = lifecycleSnapshot
   ? snapshotSecurityToggles(lifecycleSnapshot)

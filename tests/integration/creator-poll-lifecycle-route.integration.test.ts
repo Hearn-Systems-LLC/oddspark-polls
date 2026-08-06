@@ -879,6 +879,275 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
     }
   });
 
+  it.each(["returns null", "throws"] as const)(
+    "preserves the authoritative Delisted refusal when the final lifecycle read %s",
+    async (failureKind) => {
+      const { cookie, userId } = await createAuthenticatedCookie();
+      const pollId = await seedPoll(userId);
+      const realCreatePollPersistence = d1Adapter.createPollPersistence;
+      let detailReads = 0;
+      let lifecycleReads = 0;
+      const persistenceSpy = vi
+        .spyOn(d1Adapter, "createPollPersistence")
+        .mockImplementation((db) => {
+          const persistence = realCreatePollPersistence(db);
+          return {
+            ...persistence,
+            async findPollForOwner(...args) {
+              detailReads += 1;
+              if (detailReads === 2) return null;
+              return persistence.findPollForOwner(...args);
+            },
+            async loadLifecycleForOwner(...args) {
+              lifecycleReads += 1;
+              if (lifecycleReads === 2) {
+                if (failureKind === "throws") {
+                  throw new Error("forced final lifecycle read failure");
+                }
+                return null;
+              }
+              return persistence.loadLifecycleForOwner(...args);
+            },
+            async updateListingForOwner(input) {
+              // Preserve the real D1 state transition while simulating the
+              // Administrator winning the owner-qualified command race.
+              await testEnv.DB.prepare(
+                "UPDATE poll SET discovery_state = 'delisted' WHERE id = ?1",
+              )
+                .bind(input.pollId)
+                .run();
+              return "delisted";
+            },
+          };
+        });
+      const csrfToken = await csrfFor(cookie);
+      const context = makeContext(
+        new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+          method: "POST",
+          headers: {
+            cookie,
+            "content-type": "application/x-www-form-urlencoded",
+            origin: "https://polls.example.test",
+            "sec-fetch-site": "same-origin",
+          },
+          body: listingBody(csrfToken, "listed"),
+        }),
+      );
+
+      try {
+        const response = await runRealRoute(context, pollId);
+        const html = await response.text();
+        const detail = renderedDetail(html);
+        const listing = readOnlyListing(detail);
+
+        expect(lifecycleReads).toBe(2);
+        expect(response.status).toBe(422);
+        expect(response.headers.get("cache-control")).toBe("private, no-store");
+        expect(html).toContain("Route truth?");
+        expect(html).not.toMatch(/This Poll (?:doesn't|doesn&#39;t) exist\./);
+        expect(html.split(DELISTED_CREATOR_COPY)).toHaveLength(2);
+        expect(listing).toContain("DELISTED");
+        expect(listing).not.toContain("<form");
+        expect(listing).not.toContain("<input");
+        expect(listing).not.toContain("<button");
+        expect(detail).not.toContain("data-listing-control");
+        expect(detail).not.toContain('name="listing"');
+        expect(detail).not.toContain("SAVE LISTING");
+        expect(await listingRow(pollId)).toEqual({
+          discovery_state: "delisted",
+          representation_version: 1,
+        });
+      } finally {
+        persistenceSpy.mockRestore();
+      }
+    },
+  );
+
+  it("preserves the Delisted refusal when the immediate owner-detail refresh throws", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    await testEnv.DB.prepare(
+      "UPDATE poll SET discovery_state = 'delisted' WHERE id = ?1",
+    )
+      .bind(pollId)
+      .run();
+    const realCreatePollPersistence = d1Adapter.createPollPersistence;
+    let detailReads = 0;
+    const persistenceSpy = vi
+      .spyOn(d1Adapter, "createPollPersistence")
+      .mockImplementation((db) => {
+        const persistence = realCreatePollPersistence(db);
+        return {
+          ...persistence,
+          async findPollForOwner(...args) {
+            detailReads += 1;
+            if (detailReads === 2) {
+              throw new Error("forced owner-detail refresh failure");
+            }
+            return persistence.findPollForOwner(...args);
+          },
+        };
+      });
+    const csrfToken = await csrfFor(cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: listingBody(csrfToken, "listed"),
+      }),
+    );
+
+    try {
+      const response = await runRealRoute(context, pollId);
+      const html = await response.text();
+      const listing = readOnlyListing(renderedDetail(html));
+
+      expect(response.status).toBe(422);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(html.split(DELISTED_CREATOR_COPY)).toHaveLength(2);
+      expect(listing).not.toContain("<form");
+      expect(listing).not.toContain("<input");
+      expect(listing).not.toContain("<button");
+      expect(await listingRow(pollId)).toEqual({
+        discovery_state: "delisted",
+        representation_version: 1,
+      });
+    } finally {
+      persistenceSpy.mockRestore();
+    }
+  });
+
+  it("renders a successful final lifecycle clear instead of a stale Delisted fallback", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const realCreatePollPersistence = d1Adapter.createPollPersistence;
+    let lifecycleReads = 0;
+    const persistenceSpy = vi
+      .spyOn(d1Adapter, "createPollPersistence")
+      .mockImplementation((db) => {
+        const persistence = realCreatePollPersistence(db);
+        return {
+          ...persistence,
+          async loadLifecycleForOwner(...args) {
+            lifecycleReads += 1;
+            if (lifecycleReads === 2) {
+              await testEnv.DB.prepare(
+                "UPDATE poll SET discovery_state = 'unlisted' WHERE id = ?1",
+              )
+                .bind(pollId)
+                .run();
+            }
+            return persistence.loadLifecycleForOwner(...args);
+          },
+          async updateListingForOwner(input) {
+            await testEnv.DB.prepare(
+              "UPDATE poll SET discovery_state = 'delisted' WHERE id = ?1",
+            )
+              .bind(input.pollId)
+              .run();
+            return "delisted";
+          },
+        };
+      });
+    const csrfToken = await csrfFor(cookie);
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: listingBody(csrfToken, "listed"),
+      }),
+    );
+
+    try {
+      const response = await runRealRoute(context, pollId);
+      const detail = renderedDetail(await response.text());
+
+      expect(lifecycleReads).toBe(2);
+      expect(response.status).toBe(422);
+      expect(detail).toContain("data-listing-control");
+      expect(detail).not.toContain("data-listing-readonly");
+      expect(detail).not.toContain(DELISTED_CREATOR_COPY);
+      expect(listingInput(detail, "detail-listing-unlisted")).toMatch(
+        /\schecked(?:[=\s/>])/,
+      );
+      expect(await listingRow(pollId)).toEqual({
+        discovery_state: "unlisted",
+        representation_version: 1,
+      });
+    } finally {
+      persistenceSpy.mockRestore();
+    }
+  });
+
+  it("keeps the ordinary missing state when a final lifecycle read returns null", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const realCreatePollPersistence = d1Adapter.createPollPersistence;
+    const persistenceSpy = vi
+      .spyOn(d1Adapter, "createPollPersistence")
+      .mockImplementation((db) => ({
+        ...realCreatePollPersistence(db),
+        async loadLifecycleForOwner() {
+          return null;
+        },
+      }));
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        headers: { cookie },
+      }),
+    );
+
+    try {
+      const response = await runRealRoute(context, pollId);
+      const html = await response.text();
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(html).toContain("This Poll doesn't exist.");
+      expect(html).not.toContain(DELISTED_CREATOR_COPY);
+      expect(html).not.toContain("data-listing-readonly");
+    } finally {
+      persistenceSpy.mockRestore();
+    }
+  });
+
+  it("keeps the ordinary thrown lifecycle failure outside the Delisted fallback", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedPoll(userId);
+    const realCreatePollPersistence = d1Adapter.createPollPersistence;
+    const persistenceSpy = vi
+      .spyOn(d1Adapter, "createPollPersistence")
+      .mockImplementation((db) => ({
+        ...realCreatePollPersistence(db),
+        async loadLifecycleForOwner() {
+          throw new Error("forced ordinary lifecycle failure");
+        },
+      }));
+    const context = makeContext(
+      new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+        headers: { cookie },
+      }),
+    );
+
+    try {
+      await expect(runRealRoute(context, pollId)).rejects.toThrow(
+        "forced ordinary lifecycle failure",
+      );
+    } finally {
+      persistenceSpy.mockRestore();
+    }
+  });
+
   it("restores the ordinary creator listing form after an Administrator clear", async () => {
     const { cookie, userId } = await createAuthenticatedCookie();
     const pollId = await seedPoll(userId);

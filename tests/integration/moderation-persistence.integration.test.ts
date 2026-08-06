@@ -169,6 +169,35 @@ describe("Administrator moderation D1 transaction", () => {
     ).toBeNull();
   });
 
+  it.each([
+    {
+      field: "question",
+      corrupt: (id: PollId) =>
+        testEnv.DB.prepare("UPDATE poll SET question = '' WHERE id = ?1")
+          .bind(id)
+          .run(),
+    },
+    {
+      field: "canonical reference",
+      corrupt: (id: PollId) =>
+        testEnv.DB.prepare(
+          "UPDATE poll_reference SET reference = '' WHERE poll_id = ?1 AND is_canonical = 1",
+        )
+          .bind(id)
+          .run(),
+    },
+  ])("rejects an empty persisted $field", async ({ field: _field, corrupt }) => {
+    const id = pollId(`empty-${_field.replace(" ", "-")}`);
+    await insertPoll(id, "listed");
+    await corrupt(id);
+
+    await expect(
+      createModerationPersistence(testEnv.DB).findTargetByReference(
+        `alias-${id}`,
+      ),
+    ).rejects.toThrow("Malformed moderation target projection");
+  });
+
   it.each(["listed", "unlisted"] as const)(
     "captures and restores the immediately prior %s state in sequence order",
     async (priorState) => {

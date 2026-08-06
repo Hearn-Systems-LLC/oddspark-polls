@@ -2404,7 +2404,9 @@ export function createModerationPersistence(
       if (
         typeof row.id !== "string" ||
         typeof row.question !== "string" ||
+        row.question.length === 0 ||
         typeof row.canonical_reference !== "string" ||
+        row.canonical_reference.length === 0 ||
         !isDiscoveryState(row.discovery_state) ||
         !validTimestamp(row.deadline_ms) ||
         !validTimestamp(row.closed_at_ms)

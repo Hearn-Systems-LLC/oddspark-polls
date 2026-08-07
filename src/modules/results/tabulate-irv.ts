@@ -68,6 +68,64 @@ export type TabulateIrvInput = {
 
 type MutableCounts = Map<PollOptionId, number>;
 
+/**
+ * Snapshot a counts map as a mutation-resistant ReadonlyMap.
+ * A plain Map is still mutable via set/delete/clear even after Object.freeze;
+ * this wrapper exposes the ReadonlyMap surface and rejects mutation attempts.
+ */
+function freezeCounts(
+  counts: ReadonlyMap<PollOptionId, number>,
+): ReadonlyMap<PollOptionId, number> {
+  const snapshot = new Map(counts);
+  const rejectMutation = (): never => {
+    throw new TypeError("Irv counts maps are immutable");
+  };
+  const immutable = {
+    get size() {
+      return snapshot.size;
+    },
+    get(key: PollOptionId) {
+      return snapshot.get(key);
+    },
+    has(key: PollOptionId) {
+      return snapshot.has(key);
+    },
+    keys() {
+      return snapshot.keys();
+    },
+    values() {
+      return snapshot.values();
+    },
+    entries() {
+      return snapshot.entries();
+    },
+    forEach(
+      callback: (
+        value: number,
+        key: PollOptionId,
+        map: ReadonlyMap<PollOptionId, number>,
+      ) => void,
+      thisArg?: unknown,
+    ) {
+      snapshot.forEach((value, key) => {
+        callback.call(
+          thisArg,
+          value,
+          key,
+          immutable as ReadonlyMap<PollOptionId, number>,
+        );
+      });
+    },
+    [Symbol.iterator]() {
+      return snapshot[Symbol.iterator]();
+    },
+    set: rejectMutation,
+    delete: rejectMutation,
+    clear: rejectMutation,
+  };
+  return Object.freeze(immutable) as ReadonlyMap<PollOptionId, number>;
+}
+
 function countActiveBallots(
   ballots: readonly IrvBallot[],
   remaining: ReadonlySet<PollOptionId>,
@@ -193,7 +251,7 @@ function emptyUnresolved(): IrvOutcome {
     resolved: false,
     tiedOptionIds: [],
     tiedOptionLabels: [],
-    standingCounts: new Map(),
+    standingCounts: freezeCounts(new Map()),
     rounds: [],
   };
 }
@@ -235,7 +293,7 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
     if (winnerId !== null) {
       const round: IrvRound = {
         roundNumber,
-        counts: new Map(counts),
+        counts: freezeCounts(counts),
         exhaustedCount,
         activeBallotCount,
         eliminated: null,
@@ -256,7 +314,7 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
       const lastId = [...remaining][0];
       const round: IrvRound = {
         roundNumber,
-        counts: new Map(counts),
+        counts: freezeCounts(counts),
         exhaustedCount,
         activeBallotCount,
         eliminated: null,
@@ -299,7 +357,7 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
       } else {
         const round: IrvRound = {
           roundNumber,
-          counts: new Map(counts),
+          counts: freezeCounts(counts),
           exhaustedCount,
           activeBallotCount,
           eliminated: null,
@@ -312,7 +370,7 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
           tiedOptionLabels: sortedTied.map(
             (id) => optionMap.get(id)?.label ?? "",
           ),
-          standingCounts: new Map(counts),
+          standingCounts: freezeCounts(counts),
           rounds,
         };
       }
@@ -326,7 +384,7 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
     const sortedEliminated = [...eliminationDecision.eliminated].sort();
     const round: IrvRound = {
       roundNumber,
-      counts: new Map(counts),
+      counts: freezeCounts(counts),
       exhaustedCount,
       activeBallotCount,
       eliminated: {

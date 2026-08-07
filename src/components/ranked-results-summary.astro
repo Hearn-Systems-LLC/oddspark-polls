@@ -25,12 +25,19 @@ const {
   initialRenderAtMs,
 } = Astro.props;
 
+const winnerLabel =
+  ranked.winnerLabel && ranked.winnerLabel.trim().length > 0
+    ? ranked.winnerLabel
+    : "—";
+const tiedLabels = ranked.tiedOptionLabels.map((label) =>
+  label && label.trim().length > 0 ? label : "—",
+);
 const outcomeLine = ranked.empty
   ? RESULTS_COPY.empty
   : ranked.resolved
-    ? `Winner: ${ranked.winnerLabel ?? "—"}`
-    : ranked.tiedOptionLabels.length > 0
-      ? `Unresolved tie: ${ranked.tiedOptionLabels.join(", ")}`
+    ? `Winner: ${winnerLabel}`
+    : tiedLabels.length > 0
+      ? `Unresolved tie: ${tiedLabels.join(", ")}`
       : "Unresolved";
 ---
 
@@ -43,9 +50,10 @@ const outcomeLine = ranked.empty
   data-live-endpoint={liveEndpoint}
   data-initial-validator={initialValidator}
   data-initial-render-at={initialRenderAtMs}
+  aria-label="Ranked-choice results"
 >
   {toggles && <TrustBadge toggles={toggles} />}
-  <p class="ranked-outcome" data-ranked-outcome>
+  <p class="ranked-outcome" data-ranked-outcome aria-live="polite">
     {outcomeLine}
   </p>
   <p class="ranked-meta" data-ranked-meta>

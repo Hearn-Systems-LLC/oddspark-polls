@@ -167,9 +167,26 @@ describe("queryResults visibility matrix", () => {
       expect(view.ranked.resolved).toBe(true);
       expect(view.ranked.winnerId).toBe(OPTION_A);
       expect(view.validator).toBe('"1:open"');
+      // Version stays on the validator only — never on the outward ranked body.
+      expect(view.ranked).not.toHaveProperty("representationVersion");
     }
     expect(rankedPorts.projectRankedResults).toHaveBeenCalledWith(POLL_ID);
     expect(rankedPorts.projectResults).not.toHaveBeenCalled();
+  });
+
+  it("returns ranked_unavailable when the ranked projection port is missing", async () => {
+    const rankedPorts = ports(envelope({ pollType: "ranked_choice" }));
+    const withoutPort = {
+      findAccessEnvelope: rankedPorts.findAccessEnvelope,
+      projectResults: rankedPorts.projectResults,
+    } as unknown as ResultsPorts;
+    const view = await queryResults(
+      withoutPort,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+    );
+    expect(view.kind).toBe("ranked_unavailable");
   });
 
   it("keeps a hidden ranked Poll hidden before reading ballots", async () => {
@@ -602,6 +619,7 @@ describe("queryLiveResults authorization and projection", () => {
       expect(view.representationVersion).toBe(17);
       expect(view.ranked.winnerId).toBe(OPTION_A);
       expect(view.validator).toBe('"17:open"');
+      expect(view.ranked).not.toHaveProperty("representationVersion");
     }
     expect(rankedPorts.readRepresentationVersion).toHaveBeenCalled();
     expect(rankedPorts.projectVersionedRankedResults).toHaveBeenCalledWith(

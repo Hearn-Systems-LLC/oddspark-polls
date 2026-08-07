@@ -1,0 +1,260 @@
+---
+import { env } from "cloudflare:workers";
+import PublicRepositoryLink from "../../components/public-repository-link.astro";
+import BaseLayout from "../../layouts/base-layout.astro";
+import { formatUtc } from "../../lib/datetime";
+import {
+  isCustomSlugCaseVariant,
+  POLL_CAPS,
+} from "../../modules/polls/index";
+import { isReservedSlug } from "../../modules/polls/reserved-slugs";
+import {
+  createPollPersistence,
+  createResultsPersistence,
+} from "../../adapters/d1/index";
+import {
+  queryBallotManifest,
+  RESULTS_COPY,
+} from "../../modules/results/index";
+import type { UserId } from "../../shared/domain/index";
+
+const reference = Astro.params.reference ?? "";
+const method = Astro.request.method;
+
+Astro.response.headers.set("cache-control", "private, no-store");
+
+if (method !== "GET" && method !== "HEAD") {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: {
+      allow: "GET, HEAD",
+      "cache-control": "private, no-store",
+    },
+  });
+}
+
+Astro.response.headers.set("x-robots-tag", "noindex");
+
+const reserved = isReservedSlug(reference);
+const resultsPersistence = createResultsPersistence(env.DB);
+
+const principalId = Astro.locals.principal?.userId;
+const nowMs = Date.now();
+const view = reserved
+  ? ({ kind: "not_found" } as const)
+  : await queryBallotManifest(
+      resultsPersistence,
+      reference,
+      { userId: principalId === undefined ? null : (principalId as UserId) },
+      nowMs,
+    );
+
+if (view.kind === "not_found" && !reserved && isCustomSlugCaseVariant(reference)) {
+  const canonical = await createPollPersistence(
+    env.DB,
+  ).findCanonicalCustomReference(reference);
+  if (
+    canonical &&
+    canonical.length <= POLL_CAPS.maxCustomLinkLength &&
+    /^[a-z0-9-]+$/.test(canonical)
+  ) {
+    return new Response(null, {
+      status: 301,
+      headers: {
+        location: `/${canonical}/manifest${Astro.url.search}`,
+        "cache-control": "private, no-store",
+      },
+    });
+  }
+}
+
+if (view.kind === "not_found") {
+  return new Response("Not found.", {
+    status: 404,
+    headers: { "cache-control": "private, no-store" },
+  });
+}
+
+// Telemetry carries the internal Poll ID after a real Poll resolved.
+if (Astro.locals.requestContext) {
+  Astro.locals.requestContext.pollId = view.pollId;
+}
+
+const pollLink = view.kind !== "not_found" && view.kind !== "hidden"
+  ? `/${encodeURIComponent(view.canonicalReference)}`
+  : null;
+const title = view.kind === "not_found"
+  ? "Not found — Oddspark Polls"
+  : view.kind === "hidden"
+    ? "Ballot Manifest — Oddspark Polls"
+    : `Ballot Manifest — ${view.question}`;
+---
+
+<BaseLayout title={title}>
+  <main class="manifest-page">
+    {view.kind !== "hidden" && view.kind !== "not_found" && (
+      <h1 class="manifest-question">{view.question}</h1>
+    )}
+
+    {view.kind === "published" && (
+      <>
+        <p class="manifest-count">
+          {view.ballots.length === 0
+            ? "0 BALLOTS"
+            : view.ballots.length === 1
+              ? "1 BALLOT GROUP"
+              : `${view.ballots.length} BALLOT GROUPS`}
+        </p>
+        <ol class="manifest-ballots">
+          {view.ballots.map((ballot, index) => (
+            <li class="manifest-ballot-row">
+              <span class="manifest-ballot-index">{index + 1}</span>
+              <span class="manifest-ballot-rankings">
+                {ballot.rankedOptionLabels.join(" > ")}
+              </span>
+              <span class="manifest-ballot-count">
+                {ballot.count === 1
+                  ? "1 BALLOT"
+                  : `${ballot.count} BALLOTS`}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </>
+    )}
+
+    {view.kind === "not_yet" && (
+      <p class="manifest-not-yet">
+        {view.deadlineMs !== null ? (
+          <>
+            {RESULTS_COPY.manifestNotYet.split("{deadline}")[0]}
+            <time
+              datetime={new Date(view.deadlineMs).toISOString()}
+              data-deadline={view.deadlineMs}
+            >
+              {formatUtc(view.deadlineMs)}
+            </time>
+            {RESULTS_COPY.manifestNotYet.split("{deadline}")[1] ?? "."}
+          </>
+        ) : (
+          RESULTS_COPY.manifestNotYetNoDeadline
+        )}
+      </p>
+    )}
+
+    {view.kind === "hidden" && (
+      <p class="manifest-hidden">{RESULTS_COPY.creatorOnlyHidden}</p>
+    )}
+
+    {pollLink && (
+    <a class="manifest-back-link" href={pollLink}>Back to Poll</a>
+  )}
+    <PublicRepositoryLink />
+  </main>
+</BaseLayout>
+
+<script src="../../scripts/manifest-page.ts"></script>
+
+<style>
+  .manifest-page {
+    width: min(100%, var(--space-measure));
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-margin-mobile) var(--space-section-gap);
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .manifest-question {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--type-heading-lg-size);
+    line-height: var(--type-heading-lg-lh);
+    color: var(--color-ink);
+  }
+
+  .manifest-count {
+    margin: 0;
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+  }
+
+  .manifest-ballots {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0;
+  }
+
+  .manifest-ballot-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: var(--space-3);
+    align-items: baseline;
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--color-rule);
+  }
+
+  .manifest-ballot-index {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+    min-width: 2ch;
+    text-align: right;
+  }
+
+  .manifest-ballot-rankings {
+    font-family: var(--font-machine);
+    font-size: var(--type-data-size);
+    font-weight: 700;
+    line-height: var(--type-data-lh);
+    color: var(--color-ink);
+  }
+
+  .manifest-ballot-count {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+    text-align: right;
+    min-width: 6ch;
+  }
+
+  .manifest-not-yet {
+    margin: 0;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-ink);
+  }
+
+  .manifest-hidden {
+    margin: 0;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-dim);
+  }
+
+  .manifest-back-link {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-entropy);
+    text-decoration: none;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .manifest-back-link:focus-visible {
+    outline: 2px solid var(--color-entropy);
+    outline-offset: 2px;
+  }
+</style>

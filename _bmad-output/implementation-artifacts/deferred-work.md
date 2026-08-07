@@ -527,4 +527,9 @@ resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 - Browser live-poller e2e for ranked DOM refresh and ranked 204 visibility journeys — SSR/HTTP coverage exists; full poller e2e is polish.
 - Ranked live exact-key validator unit suite parity with MC — shallow client checks sufficient for 5.2 minimal poller.
 - Post-vote CSS grid placement for `.ranked-results` under `data-post-vote` — visual polish, not AC fail.
-- Round-table / elimination trail / YOUR BALLOT / Comment list on ranked surfaces — intentionally Story 5.3.
+- ~~Round-table / elimination trail / YOUR BALLOT / Comment list on ranked surfaces~~ — resolved by Story 5.3.
+
+## Deferred from: code review of 5-3-per-round-display-ballot-manifest (2026-08-07)
+
+- Unbounded Manifest / in-memory sort for large polls [src/adapters/d1/index.ts:projectBallotManifest, src/pages/[reference]/manifest.astro] — loads all votes+preferences into Map/array and renders one `<li>` per ballot with no LIMIT; 50k ballots OOMs Worker / multi-MB HTML. Spec says “Rounds never collapse or paginate” for completeness, but no memory guard specified. Monitor; consider streaming/size cap if observed.
+- Zero-preference / orphan vote undercounts ballotCount [src/adapters/d1/index.ts:projectBallotManifest] — `ballotMap` only from `prefRows`; a vote with zero `ranked_vote_preference` rows is invisible so ballotCount diverges from vote table/exhaustedCount. Requires product decision on manifest exhausted-ballot representation.

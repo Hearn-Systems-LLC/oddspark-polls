@@ -70,6 +70,7 @@ describe("Results Comment authorization and projection", () => {
       findAccessEnvelope: async () => envelope(visibility),
       projectResults,
       projectRankedResults: vi.fn(async () => null),
+      projectRankedComments: vi.fn(async () => ({ comments: [], ownerComments: null })),
     };
     const view = await queryResults(ports, "comments", viewer, NOW);
     expect(view.kind).not.toBe("visible");
@@ -86,6 +87,7 @@ describe("Results Comment authorization and projection", () => {
       findAccessEnvelope: async () => envelope(),
       projectResults,
       projectRankedResults: vi.fn(async () => null),
+      projectRankedComments: vi.fn(async () => ({ comments: [], ownerComments: null })),
     };
 
     const publicView = await queryResults(ports, "comments", { userId: null }, NOW);
@@ -116,6 +118,7 @@ describe("Results Comment authorization and projection", () => {
       readRepresentationVersion: async () => 2,
       projectVersionedResults,
       projectVersionedRankedResults: async () => null,
+      projectRankedComments: async () => ({ comments: [], ownerComments: null }),
     };
     const view = await queryLiveResults(
       ports,

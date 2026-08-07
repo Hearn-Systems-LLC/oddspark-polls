@@ -5,8 +5,13 @@ import {
   createBoundedMultipleChoiceExportFactDriver,
   createMultipleChoiceExportFactDriver,
 } from "../adapters/d1/export/multiple-choice";
+import {
+  createBoundedRankedChoiceExportFactDriver,
+  createRankedChoiceExportFactDriver,
+} from "../adapters/d1/export/ranked-choice";
 import { createOwnerExportPersistence } from "../adapters/d1/index";
 import { multipleChoiceStrategy } from "../modules/polls/types/multiple-choice";
+import { rankedChoiceStrategy } from "../modules/polls/types/ranked-choice";
 import {
   bindBoundedExportDriver,
   bindExportDriver,
@@ -32,6 +37,10 @@ export function queryD1OwnerExport(
         createMultipleChoiceExportFactDriver(db),
         multipleChoiceStrategy,
       ),
+      bindExportDriver(
+        createRankedChoiceExportFactDriver(db),
+        rankedChoiceStrategy,
+      ),
     ],
   );
 }
@@ -49,6 +58,10 @@ export function queryD1BoundedOwnerExport(
       bindBoundedExportDriver(
         createBoundedMultipleChoiceExportFactDriver(db),
         multipleChoiceStrategy,
+      ),
+      bindBoundedExportDriver(
+        createBoundedRankedChoiceExportFactDriver(db),
+        rankedChoiceStrategy,
       ),
     ],
   );

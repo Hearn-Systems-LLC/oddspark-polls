@@ -93,7 +93,7 @@ test.describe("Story 5.2 Ranked IRV Results", () => {
     if (owner?.userId) cleanupCreator(owner.userId);
   });
 
-  test("renders ranked winner summary without Comments on open Results", async ({
+  test("renders ranked winner summary with empty Comment list on open Results", async ({
     page,
   }) => {
     const fixture = seedRankedResultsPoll(
@@ -111,7 +111,7 @@ test.describe("Story 5.2 Ranked IRV Results", () => {
     await expect(page.locator("[data-ranked-results-unavailable]")).toHaveCount(
       0,
     );
-    // Comment list is omitted on ranked surfaces until Story 5.3.
+    // No comments seeded — CommentList renders nothing when empty.
     await expect(page.locator("[data-comment-list]")).toHaveCount(0);
     await page.screenshot({
       path: `${PROOF_DIR}/open-winner.png`,

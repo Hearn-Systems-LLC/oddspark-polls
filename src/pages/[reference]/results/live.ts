@@ -81,7 +81,7 @@ const handle: APIRoute = async ({ request, params, locals }) => {
           ...view.ranked,
           status: view.status,
           pollType: "ranked_choice",
-          comments: [],
+          comments: view.comments,
         }
       : {
           ...view.tally,

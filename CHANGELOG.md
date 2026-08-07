@@ -15,6 +15,27 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Per-round IRV table on Ranked-Choice Results. Every Round shows per-option
+  counts, elimination statements (fewest votes, safe batch, backward tie-break),
+  and exhausted-Ballot counts. Eliminated options are struck through from their
+  elimination Round onward; the winner's final-Round cell is gold; unresolved
+  ties mark tied options with an entropy border. The table scrolls horizontally
+  on narrow viewports without collapsing or paginating.
+- Ballot Manifest at `/{link}/manifest`. After a Ranked-Choice Poll closes,
+  every anonymized Ballot's rankings are published in canonical order — no voter
+  data, no timestamps, no internal identifiers — sufficient to independently
+  recompute every Round and the outcome. Before close, the route renders a
+  not-yet shape with the deadline.
+- Comments on Ranked-Choice Results surfaces. Public Comment lists now appear
+  on ranked Results pages, live payloads, and post-vote surfaces, matching the
+  Multiple-Choice behavior. Owner moderation controls are included on owned
+  views.
+- YOUR BALLOT line on ranked post-vote. Voters who just cast a ranked Ballot
+  see their options in rank order on the post-vote Tally. Claim-lookup failure
+  remains fail-open.
+- Ranked-Choice CSV and XLSX export. Ballot rows arrive through the type's
+  projection port with one row per Vote and its full ranking. The XLSX
+  1,000-Vote bound and 409 CSV-fallback behavior apply unchanged.
 - Deterministic instant-runoff (IRV) tabulation for Ranked-Choice Polls. After
   authorization, live and closed Results, post-vote surfaces, and the live JSON
   endpoint compute the same pure IRV outcome from accepted Ballots — majority

@@ -104,6 +104,7 @@ function ports(
 ): ResultsPorts & {
   projectResults: ReturnType<typeof vi.fn>;
   projectRankedResults: ReturnType<typeof vi.fn>;
+  projectRankedComments: ReturnType<typeof vi.fn>;
 } {
   return {
     findAccessEnvelope: vi.fn(async () => access),
@@ -117,6 +118,10 @@ function ports(
       ...rankedTally(),
       representationVersion: 1,
     })),
+    projectRankedComments: vi.fn(async () => ({
+      comments: [],
+      ownerComments: null,
+    })),
   };
 }
 
@@ -128,6 +133,7 @@ function livePorts(
   readRepresentationVersion: ReturnType<typeof vi.fn>;
   projectVersionedResults: ReturnType<typeof vi.fn>;
   projectVersionedRankedResults: ReturnType<typeof vi.fn>;
+  projectRankedComments: ReturnType<typeof vi.fn>;
 } {
   return {
     findAccessEnvelope: vi.fn(async () => access),
@@ -150,6 +156,10 @@ function livePorts(
             representationVersion,
           },
     ),
+    projectRankedComments: vi.fn(async () => ({
+      comments: [],
+      ownerComments: null,
+    })),
   };
 }
 

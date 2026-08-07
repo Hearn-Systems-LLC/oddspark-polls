@@ -1,11 +1,8 @@
 ---
 import TrustBadge from "./trust-badge.astro";
-import type { RankedTallyView } from "../modules/results/index";
+import type { RankedTallyView, RankedEliminationView } from "../modules/results/index";
 import type { PollSecurityToggles, PollStatus } from "../shared/domain/index";
 import { RESULTS_COPY } from "../modules/results/index";
-
-// Ranked Tally summary (Story 5.2). Round table + YOUR BALLOT + Comments land
-// in Story 5.3 — this surface only shows the IRV outcome and final standing.
 
 type Props = {
   ranked: RankedTallyView;
@@ -14,6 +11,8 @@ type Props = {
   liveEndpoint?: string;
   initialValidator?: string;
   initialRenderAtMs?: number;
+  yourBallotLabels?: readonly string[];
+  canonicalReference?: string;
 };
 
 const {
@@ -23,6 +22,8 @@ const {
   liveEndpoint,
   initialValidator,
   initialRenderAtMs,
+  yourBallotLabels,
+  canonicalReference,
 } = Astro.props;
 
 const winnerLabel =
@@ -39,6 +40,64 @@ const outcomeLine = ranked.empty
     : tiedLabels.length > 0
       ? `Unresolved tie: ${tiedLabels.join(", ")}`
       : "Unresolved";
+
+function eliminationStatement(
+  elim: RankedEliminationView,
+): string {
+  const names = elim.labels.map((l) => (l.trim() ? l : "—"));
+  switch (elim.reason) {
+    case "fewest_votes":
+      return `${names.join(", ")} had the fewest votes and was eliminated.`;
+    case "safe_batch":
+      return `${names.join(", ")} together held fewer votes than any remaining option and were eliminated as a group.`;
+    case "backward_tie_break": {
+      const round = elim.backwardTieBreakRound ?? "?";
+      return `${names.join(", ")} were tied; the tie was broken by their counts in Round ${round}, where they had fewer votes.`;
+    }
+  }
+}
+
+const allOptionIds = ranked.rounds.length > 0
+  ? ranked.rounds[0].counts.map((c) => c.optionId)
+  : [];
+
+function isEliminatedBeforeOrAt(
+  optionId: string,
+  roundIndex: number,
+): boolean {
+  for (let i = 0; i <= roundIndex; i++) {
+    const elim = ranked.rounds[i]?.eliminated;
+    if (elim && elim.optionIds.includes(optionId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isEliminatedBefore(optionId: string, roundIndex: number): boolean {
+  for (let i = 0; i < roundIndex; i++) {
+    const elim = ranked.rounds[i]?.eliminated;
+    if (elim && elim.optionIds.includes(optionId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function countForOption(
+  optionId: string,
+  roundIndex: number,
+): number | null {
+  const round = ranked.rounds[roundIndex];
+  if (!round) return null;
+  const entry = round.counts.find((c) => c.optionId === optionId);
+  return entry ? entry.count : null;
+}
+
+const unresolvedCopy =
+  !ranked.resolved && tiedLabels.length > 0 && ranked.rounds.length > 0
+    ? `Unresolved at Round ${ranked.rounds.length}. ${tiedLabels.join(" and ")} are tied, and have been tied in every Round before this one. Rather than eliminate one at random, the count stops here. Standing counts below.`
+    : null;
 ---
 
 <section
@@ -64,6 +123,14 @@ const outcomeLine = ranked.empty
       ? ` · ${ranked.rounds.length} ROUND${ranked.rounds.length === 1 ? "" : "S"}`
       : ""}
   </p>
+  {yourBallotLabels && yourBallotLabels.length > 0 && (
+    <p class="ranked-your-ballot" data-your-ballot>
+      <span class="ranked-your-ballot-label">{RESULTS_COPY.yourBallot}</span>
+      <span class="ranked-your-ballot-options">
+        {yourBallotLabels.join(" > ")}
+      </span>
+    </p>
+  )}
   {
     !ranked.empty && ranked.finalCounts.length > 0 && (
       <ol class="ranked-standing" data-ranked-standing>
@@ -96,9 +163,102 @@ const outcomeLine = ranked.empty
       </ol>
     )
   }
-  <p class="ranked-note">
-    Instant-runoff count · full per-round table arrives with the Ballot Manifest.
-  </p>
+  {unresolvedCopy && (
+    <p class="ranked-unresolved-copy" data-ranked-unresolved>
+      {unresolvedCopy}
+    </p>
+  )}
+  {!ranked.empty && ranked.rounds.length > 0 && (
+    <div class="round-table-scroll" data-round-table-scroll>
+      <table class="round-table" data-round-table>
+        <caption class="visually-hidden">Per-round vote counts</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="round-table-head">OPTION</th>
+            {ranked.rounds.map((round) => (
+              <th scope="col" class="round-table-head">
+                ROUND {round.roundNumber}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {allOptionIds.map((optionId) => {
+            const label =
+              ranked.rounds[0]?.counts.find((c) => c.optionId === optionId)
+                ?.label ?? "—";
+            const isWinnerOption =
+              ranked.resolved && ranked.winnerId === optionId;
+            const isTiedOption =
+              !ranked.resolved &&
+              ranked.tiedOptionIds.includes(optionId);
+            return (
+              <tr
+                class:list={[
+                  "round-table-row",
+                  isTiedOption && "is-tied-option",
+                ]}
+                data-option-id={optionId}
+              >
+                <th scope="row" class="round-table-option">
+                  {label}
+                </th>
+                {ranked.rounds.map((round, ri) => {
+                  const count = countForOption(optionId, ri);
+                  const eliminatedBefore = isEliminatedBefore(optionId, ri);
+                  const eliminatedThisRound =
+                    round.eliminated?.optionIds.includes(optionId) ?? false;
+                  const isWinnerCell =
+                    isWinnerOption && ri === ranked.rounds.length - 1;
+                  const faint = eliminatedBefore || eliminatedThisRound;
+                  return (
+                    <td
+                      class:list={[
+                        "round-table-cell",
+                        faint && "is-faint",
+                        isWinnerCell && "is-winner-cell",
+                      ]}
+                    >
+                      {count !== null ? String(count) : "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+          {ranked.rounds.some((r) => r.exhaustedCount > 0) && (
+            <tr class="round-table-row round-table-exhausted">
+              <th scope="row" class="round-table-option">EXHAUSTED</th>
+              {ranked.rounds.map((round) => (
+                <td class="round-table-cell">
+                  {round.exhaustedCount > 0
+                    ? String(round.exhaustedCount)
+                    : "—"}
+                </td>
+              ))}
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  )}
+  {!ranked.empty &&
+    ranked.rounds.map((round) => {
+      if (!round.eliminated) return null;
+      return (
+        <p class="round-table-elimination" data-elimination-round={round.roundNumber}>
+          {eliminationStatement(round.eliminated)}
+        </p>
+      );
+    })}
+  {status === "closed" && canonicalReference && (
+    <a
+      class="manifest-link"
+      href={`/${encodeURIComponent(canonicalReference)}/manifest`}
+    >
+      BALLOT MANIFEST
+    </a>
+  )}
 </section>
 
 <style>
@@ -167,10 +327,141 @@ const outcomeLine = ranked.empty
     color: var(--color-dim);
   }
 
-  .ranked-note {
+  .ranked-your-ballot {
     margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-3);
+    align-items: baseline;
+  }
+
+  .ranked-your-ballot-label {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
     color: var(--color-dim);
-    font-size: var(--type-body-sm-size);
-    line-height: var(--type-body-sm-lh);
+  }
+
+  .ranked-your-ballot-options {
+    font-family: var(--font-machine);
+    font-size: var(--type-data-size);
+    font-weight: 700;
+    line-height: var(--type-data-lh);
+    color: var(--color-ink);
+  }
+
+  .ranked-unresolved-copy {
+    margin: 0;
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
+    color: var(--color-ink);
+  }
+
+  .round-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .round-table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 320px;
+  }
+
+  .round-table-head {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    font-weight: 400;
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+    padding: var(--space-3) var(--space-3);
+    border-bottom: 1px solid var(--color-rule);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .round-table-option {
+    font-family: var(--font-machine);
+    font-size: var(--type-data-size);
+    font-weight: 700;
+    line-height: var(--type-data-lh);
+    color: var(--color-ink);
+    padding: var(--space-3) var(--space-3);
+    border-bottom: 1px solid var(--color-rule);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .round-table-cell {
+    font-family: var(--font-machine);
+    font-size: var(--type-data-size);
+    font-weight: 700;
+    line-height: var(--type-data-lh);
+    color: var(--color-ink);
+    padding: var(--space-3) var(--space-3);
+    border-bottom: 1px solid var(--color-rule);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .round-table-cell.is-faint {
+    color: var(--color-faint);
+    text-decoration: line-through;
+  }
+
+  .round-table-cell.is-winner-cell {
+    color: var(--color-solar-ink);
+  }
+
+  .round-table-row.is-tied-option .round-table-option {
+    border-left: 2px solid var(--color-entropy);
+  }
+
+  .round-table-exhausted .round-table-option,
+  .round-table-exhausted .round-table-cell {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    font-weight: 400;
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+  }
+
+  .round-table-elimination {
+    margin: 0;
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-lh);
+    color: var(--color-ink);
+  }
+
+  .manifest-link {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-entropy);
+    text-decoration: none;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .manifest-link:focus-visible {
+    outline: 2px solid var(--color-entropy);
+    outline-offset: 2px;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 </style>

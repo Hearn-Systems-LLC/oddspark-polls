@@ -119,6 +119,11 @@ export type ResultsPorts = {
   projectRankedResults: (
     pollId: PollId,
   ) => Promise<VersionedRankedTallyProjection | null>;
+  /** Ranked-safe comments — joins through vote → vote_comment without touching vote_selection. */
+  projectRankedComments: (
+    pollId: PollId,
+    includeOwnerModeration: boolean,
+  ) => Promise<CommentResultsProjection | null>;
 };
 
 // Narrow compatibility projection retained for adapter-level Tally tests and
@@ -132,7 +137,7 @@ export type VersionedResultsTallyProjection = ResultsTallyProjection & {
 // projection so authorization always happens first and a matching validator
 // can avoid the heavier projection. The full projection carries its own
 // version so the response body and ETag describe one D1 snapshot (AD-24).
-export type LiveResultsPorts = Pick<ResultsPorts, "findAccessEnvelope"> & {
+export type LiveResultsPorts = Pick<ResultsPorts, "findAccessEnvelope" | "projectRankedComments"> & {
   readRepresentationVersion: (pollId: PollId) => Promise<number | null>;
   projectVersionedResults: (
     pollId: PollId,
@@ -155,6 +160,10 @@ export const RESULTS_COPY = {
   rankedUnavailable:
     "Ranked-choice results aren't available yet. Ballots are recorded without showing a misleading Tally.",
   yourBallot: "YOUR BALLOT",
+  manifestNotYet:
+    "The Ballot Manifest publishes when the Poll closes — {deadline}.",
+  manifestNotYetNoDeadline:
+    "The Ballot Manifest publishes when the Poll closes.",
 } as const;
 
 export type ResultsTallyOptionView = {
@@ -194,7 +203,6 @@ export type LiveMultipleChoicePayload = ResultsTallyView & {
 export type LiveRankedResultsPayload = RankedTallyView & {
   status: PollStatus;
   pollType: "ranked_choice";
-  /** Always empty until Story 5.3 wires Comment + round-table display. */
   comments: CommentView[];
 };
 
@@ -238,6 +246,8 @@ export type ResultsView =
       status: PollStatus;
       securityToggles: PollSecurityToggles;
       ranked: RankedTallyView;
+      comments: CommentView[];
+      ownerComments: OwnerCommentView[] | null;
       validator: string;
     }
   | {
@@ -270,6 +280,7 @@ export type LiveResultsView =
       status: PollStatus;
       validator: string;
       ranked: RankedTallyView;
+      comments: CommentView[];
     }
   | {
       kind: "not_modified";
@@ -408,8 +419,8 @@ export async function queryResults(
 
   if (envelope.pollType === "ranked_choice") {
     // Authorize first (above); only then read Ballot facts for IRV (AD-21).
-    // Comments stay empty until Story 5.3. Keep ranked_unavailable only if
-    // the ranked projection port is missing (defensive residual path).
+    // Keep ranked_unavailable only if the ranked projection port is missing
+    // (defensive residual path).
     if (typeof ports.projectRankedResults !== "function") {
       return {
         kind: "ranked_unavailable",
@@ -422,6 +433,15 @@ export async function queryResults(
     if (rankedProjection === null) {
       throw new Error("Ranked Results projection unavailable");
     }
+    const includeOwnerModeration =
+      viewer.userId !== null && viewer.userId === envelope.ownerUserId;
+    const commentProjection =
+      typeof ports.projectRankedComments === "function"
+        ? await ports.projectRankedComments(
+            envelope.pollId,
+            includeOwnerModeration,
+          )
+        : null;
     return {
       kind: "ranked_visible",
       pollId: envelope.pollId,
@@ -430,6 +450,8 @@ export async function queryResults(
       status,
       securityToggles: envelope.securityToggles,
       ranked: rankedTallyFromVersioned(rankedProjection),
+      comments: commentProjection?.comments ?? [],
+      ownerComments: commentProjection?.ownerComments ?? null,
       validator: composeResultsValidator(
         rankedProjection.representationVersion,
         status,
@@ -525,6 +547,10 @@ export async function queryLiveResults(
       rankedProjection.representationVersion,
       status,
     );
+    const commentProjection =
+      typeof ports.projectRankedComments === "function"
+        ? await ports.projectRankedComments(envelope.pollId, false)
+        : null;
     return {
       kind: "ranked_visible",
       pollId: envelope.pollId,
@@ -533,6 +559,7 @@ export async function queryLiveResults(
       status,
       validator: snapshotValidator,
       ranked: rankedTallyFromVersioned(rankedProjection),
+      comments: commentProjection?.comments ?? [],
     };
   }
 
@@ -553,5 +580,90 @@ export async function queryLiveResults(
     validator: snapshotValidator,
     tally: projectTallyView(envelope, projection),
     comments: projection.comments,
+  };
+}
+
+// Ballot Manifest (Story 5.3, FR-10, AD-9): every Ballot's rankings in
+// canonical order, stripped of all voter data and timestamps. Published only
+// when the Poll is effectively closed AND the Tally is visible to this viewer.
+export type BallotManifestRow = {
+  readonly rankedOptionLabels: readonly string[];
+  readonly count: number;
+};
+
+export type BallotManifestView =
+  | {
+      kind: "published";
+      pollId: PollId;
+      question: string;
+      canonicalReference: string;
+      ballots: readonly BallotManifestRow[];
+    }
+  | {
+      kind: "not_yet";
+      pollId: PollId;
+      question: string;
+      canonicalReference: string;
+      deadlineMs: number | null;
+    }
+  | {
+      kind: "hidden";
+      pollId: PollId;
+      canonicalReference: string;
+    }
+  | { kind: "not_found" };
+
+export type BallotManifestPorts = {
+  findAccessEnvelope: (
+    reference: string,
+  ) => Promise<ResultsAccessEnvelope | null>;
+  projectBallotManifest: (
+    pollId: PollId,
+  ) => Promise<readonly BallotManifestRow[] | null>;
+};
+
+export async function queryBallotManifest(
+  ports: BallotManifestPorts,
+  reference: string,
+  viewer: ViewerContext,
+  nowMs: number,
+): Promise<BallotManifestView> {
+  const envelope = await ports.findAccessEnvelope(reference);
+  if (!envelope) {
+    return { kind: "not_found" };
+  }
+
+  const status = effectivePollStatus(envelope, nowMs);
+  const visible = resultsAreVisible(envelope, viewer, status);
+
+  if (!visible) {
+    return {
+      kind: "hidden",
+      pollId: envelope.pollId,
+      canonicalReference: envelope.canonicalReference,
+    };
+  }
+
+  if (status !== "closed") {
+    return {
+      kind: "not_yet",
+      pollId: envelope.pollId,
+      question: envelope.question,
+      canonicalReference: envelope.canonicalReference,
+      deadlineMs: envelope.deadlineMs,
+    };
+  }
+
+  const ballots = await ports.projectBallotManifest(envelope.pollId);
+  if (ballots === null) {
+    throw new Error("Ballot Manifest projection unavailable");
+  }
+
+  return {
+    kind: "published",
+    pollId: envelope.pollId,
+    question: envelope.question,
+    canonicalReference: envelope.canonicalReference,
+    ballots,
   };
 }

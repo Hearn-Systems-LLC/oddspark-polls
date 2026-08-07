@@ -13,6 +13,7 @@ import {
   tabulateAndProjectRanked,
   type RankedTallyView,
 } from "../../results/index";
+import { POLL_CAPS } from "../caps";
 import type { IrvBallot, IrvOptionSet } from "../../results/tabulate-irv";
 
 export type RankedChoiceCreateInput = {
@@ -63,6 +64,21 @@ export type RankedChoiceResultsFacts = {
   ballots: IrvBallot[];
 };
 
+export type RankedChoiceExportFacts = {
+  options: {
+    label: string;
+    position: number;
+    count: number;
+  }[];
+  votes: {
+    alignmentKey: number;
+    createdAtMs: number;
+    rankedOptionPositions: number[];
+  }[];
+  voterCount: number;
+  selectionCount: number;
+};
+
 type RankedChoiceStrategy = Omit<
   PollTypeStrategy<
     RankedChoiceCreateInput,
@@ -71,7 +87,7 @@ type RankedChoiceStrategy = Omit<
     RankedChoiceValidatedSubmission,
     RankedChoicePersistedFacts,
     RankedChoiceResultsFacts,
-    RankedTallyView,
+    RankedChoiceExportFacts,
     PollTypeExportProjection
   >,
   "validateSubmission" | "projectResults" | "projectExport"
@@ -82,7 +98,9 @@ type RankedChoiceStrategy = Omit<
   ) => Result<RankedChoiceValidatedSubmission>;
   /** Pure IRV projection — same tabulator as the D1 Results adapter (AD-9). */
   projectResults: (facts: RankedChoiceResultsFacts) => RankedTallyView;
-  projectExport: () => Result<PollTypeExportProjection>;
+  projectExport: (
+    facts: RankedChoiceExportFacts,
+  ) => Result<PollTypeExportProjection>;
 };
 
 const invalidRanking = (
@@ -181,11 +199,111 @@ export const rankedChoiceStrategy: RankedChoiceStrategy = {
       ballots: facts.ballots,
       options: facts.options,
     }),
-  projectExport: () => ({
-    ok: false,
-    error: {
-      code: "export_projection_unavailable",
-      message: "Ranked Choice export is not available yet.",
-    },
-  }),
+  projectExport: (facts) => {
+    const malformed = () => ({
+      ok: false as const,
+      error: {
+        code: "export_projection_invalid",
+        message: "Export data is unavailable right now.",
+      },
+    });
+    if (
+      !Number.isSafeInteger(facts.voterCount) ||
+      facts.voterCount < 0 ||
+      !Number.isSafeInteger(facts.selectionCount) ||
+      facts.selectionCount < 0 ||
+      facts.votes.length !== facts.voterCount
+    ) {
+      return malformed();
+    }
+
+    const options = [...facts.options];
+    const labels = options.map(({ label }) => label);
+    if (
+      options.length < 2 ||
+      options.length > POLL_CAPS.maxOptions ||
+      options.some(
+        (option, index) =>
+          option.position !== index ||
+          typeof option.label !== "string" ||
+          option.label.length === 0 ||
+          option.label !== option.label.trim() ||
+          option.label.includes("\0") ||
+          [...option.label].length > POLL_CAPS.maxOptionLength ||
+          !Number.isSafeInteger(option.count) ||
+          option.count < 0 ||
+          option.count > facts.voterCount,
+      ) ||
+      new Set(labels).size !== labels.length
+    ) {
+      return malformed();
+    }
+
+    const maxRankings = options.length;
+    const voteRows: PollTypeExportProjection["votes"]["rows"][number][] = [];
+    let totalSelections = 0;
+    for (const [voteIndex, vote] of facts.votes.entries()) {
+      if (
+        !Number.isSafeInteger(vote.alignmentKey) ||
+        vote.alignmentKey !== voteIndex ||
+        !Number.isSafeInteger(vote.createdAtMs) ||
+        vote.createdAtMs < 0 ||
+        (voteIndex > 0 &&
+          vote.createdAtMs < facts.votes[voteIndex - 1]!.createdAtMs)
+      ) {
+        return malformed();
+      }
+      if (
+        vote.rankedOptionPositions.length === 0 ||
+        vote.rankedOptionPositions.length > maxRankings
+      ) {
+        return malformed();
+      }
+      const seen = new Set<number>();
+      const rankedLabels: string[] = [];
+      for (const pos of vote.rankedOptionPositions) {
+        if (
+          !Number.isSafeInteger(pos) ||
+          pos < 0 ||
+          pos >= options.length ||
+          seen.has(pos)
+        ) {
+          return malformed();
+        }
+        seen.add(pos);
+        rankedLabels.push(options[pos]!.label);
+        totalSelections += 1;
+      }
+      voteRows.push({
+        alignmentKey: vote.alignmentKey,
+        cells: Array.from(
+          { length: maxRankings },
+          (_, index) => rankedLabels[index] ?? "",
+        ),
+      });
+    }
+
+    if (totalSelections !== facts.selectionCount) {
+      return malformed();
+    }
+
+    return {
+      ok: true,
+      value: {
+        votes: {
+          columns: Array.from(
+            { length: maxRankings },
+            (_, index) => `RANK ${index + 1}`,
+          ),
+          rows: voteRows,
+        },
+        tally: {
+          columns: ["OPTION", "COUNT"],
+          rows: options.map((option) => [option.label, option.count]),
+        },
+        voterCount: facts.voterCount,
+        selectionCount: facts.selectionCount,
+      },
+    };
+  },
 };

@@ -43,6 +43,7 @@ export type IrvRound = {
   readonly eliminated: {
     readonly optionIds: readonly PollOptionId[];
     readonly reason: IrvEliminationReason;
+    readonly backwardTieBreakRound?: number;
   } | null;
 };
 
@@ -217,7 +218,11 @@ function canSafeBatchEliminate(
 function backwardTieBreak(
   rounds: readonly IrvRound[],
   tiedOptionIds: readonly PollOptionId[],
-): { eliminated: PollOptionId[]; reason: IrvEliminationReason } | null {
+): {
+  eliminated: PollOptionId[];
+  reason: IrvEliminationReason;
+  backwardTieBreakRound?: number;
+} | null {
   for (let i = rounds.length - 1; i >= 0; i--) {
     const round = rounds[i];
     const countsInRound: Array<{ id: PollOptionId; count: number }> = [];
@@ -240,7 +245,11 @@ function backwardTieBreak(
       const eliminated = countsInRound
         .filter(({ count }) => count === minCount)
         .map(({ id }) => id);
-      return { eliminated, reason: "backward_tie_break" };
+      return {
+        eliminated,
+        reason: "backward_tie_break",
+        backwardTieBreakRound: round.roundNumber,
+      };
     }
   }
   return null;
@@ -340,6 +349,7 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
     let eliminationDecision: {
       eliminated: PollOptionId[];
       reason: IrvEliminationReason;
+      backwardTieBreakRound?: number;
     };
 
     if (
@@ -390,6 +400,9 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
       eliminated: {
         optionIds: sortedEliminated,
         reason: eliminationDecision.reason,
+        ...(eliminationDecision.backwardTieBreakRound !== undefined
+          ? { backwardTieBreakRound: eliminationDecision.backwardTieBreakRound }
+          : {}),
       },
     };
     rounds.push(round);

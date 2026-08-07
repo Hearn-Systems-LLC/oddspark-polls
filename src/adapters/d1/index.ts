@@ -344,7 +344,7 @@ export function createPollPersistence(db: D1Database) {
     // The one AD-3 creation batch: poll + options + reference commit
     // together or not at all — a failed batch leaves no reachable Poll.
     async insertPoll(rows: PollPersistenceRows): Promise<void> {
-      const { poll, options, reference } = rows;
+      const { poll, options, reference, media } = rows;
       try {
         await db.batch([
           db
@@ -395,6 +395,23 @@ export function createPollPersistence(db: D1Database) {
               reference.kind,
               reference.createdAtMs,
             ),
+          ...(media ?? []).map((m) =>
+            db
+              .prepare(
+                "INSERT INTO media_object (id, poll_id, option_id, r2_key, content_type, size_bytes, alt_text, caption, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              )
+              .bind(
+                m.id,
+                m.pollId,
+                m.optionId,
+                m.r2Key,
+                m.contentType,
+                m.sizeBytes,
+                m.altText,
+                m.caption,
+                m.createdAtMs,
+              ),
+          ),
         ]);
       } catch (error) {
         // Poll-ID precedence preserves D4 dedupe when a replay collides on

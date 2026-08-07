@@ -16,6 +16,7 @@ import {
   RECENTLY_CREATED_WINDOW_MS,
   SECURITY_TOGGLE_META,
   type CreatePollDraft,
+  type PollPersistenceRows,
 } from "../../modules/polls/index";
 import {
   POLL_CAPS,
@@ -25,8 +26,14 @@ import { LISTING_CHOICES } from "../../modules/discovery/index";
 import {
   SECURITY_TOGGLES,
   type PollId,
+  type PollOptionId,
   type UserId,
 } from "../../shared/domain/index";
+import {
+  validateImageUpload,
+  IMAGE_UPLOAD_COPY,
+} from "../../modules/polls/image-upload";
+import { imageStrategy, IMAGE_DEFINITION_COPY } from "../../modules/polls/types/image";
 
 // Creator responses are never cached (AD-21).
 Astro.response.headers.set("cache-control", "private, no-store");
@@ -125,28 +132,77 @@ let formError: string | null = null;
 // failure, so it renders as a note on a 200, not as an error on a 422.
 let optionNote: string | null = null;
 
+// Image Poll media state (Story 6.1). Tracks successfully uploaded temp keys
+// for re-render preservation and alt text / caption per option.
+type TempMediaEntry = {
+  mediaId: string;
+  r2Key: string;
+  contentType: string;
+  sizeBytes: number;
+  altText: string;
+  caption: string;
+};
+let tempMedia: TempMediaEntry[] = [];
+
 if (Astro.request.method === "POST") {
   let parsed: z.infer<typeof formSchema>;
+  // Image Poll file entries extracted before text coercion eats them. The
+  // index is the raw option-row index parsed from the field name.
+  const imageFiles: { index: number; file: File }[] = [];
+  // Preserved temp-media refs from hidden inputs on a 422 re-render.
+  const preservedRefs: { index: number; mediaId: string }[] = [];
   try {
     const formData = await Astro.request.formData();
+    // Extract File parts from their own per-index fields — never mixed with
+    // the option label strings under name="option".
+    for (const [key, value] of formData.entries()) {
+      const fileMatch = key.match(/^media_file_(\d+)$/);
+      if (fileMatch && value instanceof File && value.size > 0) {
+        imageFiles.push({ index: parseInt(fileMatch[1]!, 10), file: value });
+      }
+    }
+    // Extract preserved temp-media refs (hidden inputs from 422 re-render).
+    const mediaRefEntries = formData.getAll("media_ref");
+    for (const entry of mediaRefEntries) {
+      if (typeof entry === "string" && entry.length > 0) {
+        // Format: "{index}:{mediaId}"
+        const colonIdx = entry.indexOf(":");
+        if (colonIdx > 0) {
+          const idx = parseInt(entry.slice(0, colonIdx), 10);
+          const mediaId = entry.slice(colonIdx + 1);
+          if (!Number.isNaN(idx) && mediaId.length > 0) {
+            preservedRefs.push({ index: idx, mediaId });
+          }
+        }
+      }
+    }
+    // Extract alt text and caption per option index.
+    const altTexts: Record<number, string> = {};
+    const captions: Record<number, string> = {};
+    for (const [key, value] of formData.entries()) {
+      if (typeof value !== "string") continue;
+      const altMatch = key.match(/^media_alt_(\d+)$/);
+      if (altMatch) {
+        altTexts[parseInt(altMatch[1]!, 10)] = value;
+      }
+      const capMatch = key.match(/^media_caption_(\d+)$/);
+      if (capMatch) {
+        captions[parseInt(capMatch[1]!, 10)] = value;
+      }
+    }
+
     // Multipart bodies can carry File parts in any field — keep strings
     // only so a File can never throw the parse or persist as "[object File]".
     const text = (entry: FormDataEntryValue | null): string =>
       typeof entry === "string" ? entry : "";
     parsed = formSchema.parse({
-      // Story 5.1 adds an explicit chooser, while preserving the established
-      // Multiple-Choice POST contract for old clients and integration callers.
       pollType: text(formData.get("pollType")) || "multiple_choice",
       question: text(formData.get("question")),
       description: text(formData.get("description")),
       options: formData
         .getAll("option")
         .filter((entry): entry is string => typeof entry === "string"),
-      // Missing or tampered visibility must fail domain validation with the
-      // visibilityInvalid copy — never silently default to live.
       visibility: text(formData.get("visibility")),
-      // The Unlisted default belongs to fresh GET rendering. Missing or
-      // tampered POST values must reach domain validation unchanged.
       listing: text(formData.get("listing")),
       deadline: text(formData.get("deadline")),
       timezone: text(formData.get("timezone")),
@@ -155,20 +211,23 @@ if (Astro.request.method === "POST") {
       minSelections: text(formData.get("minSelections")),
       maxSelections: text(formData.get("maxSelections")),
       commentsEnabled: text(formData.get("commentsEnabled")) || "false",
-      // Checkbox absent = off (multiSelect semantics) — never silent default on.
       sessionChecks: text(formData.get("sessionChecks")),
       ipChecks: text(formData.get("ipChecks")),
       voterCodes: text(formData.get("voterCodes")),
       captcha: text(formData.get("captcha")),
       vpnBlocking: text(formData.get("vpnBlocking")),
-      // Anything other than exactly "add-option" is a publish.
       intent: text(formData.get("intent")),
       pollId: text(formData.get("poll_id")),
     });
+
+    // Attach extracted media metadata to parsed for downstream use.
+    (parsed as any)._imageFiles = imageFiles;
+    (parsed as any)._preservedRefs = preservedRefs;
+    (parsed as any)._altTexts = altTexts;
+    (parsed as any)._captions = captions;
   } catch {
     return new Response("Unreadable form submission.", {
       status: 422,
-      // Creator responses are never cached (AD-21) — early returns too.
       headers: { "cache-control": "private, no-store" },
     });
   }
@@ -203,6 +262,100 @@ if (Astro.request.method === "POST") {
     idempotencyId: formPollId,
   };
 
+  // Image Poll media handling (Story 6.1 / AC 1, 2, 4).
+  const isImagePoll = parsed.pollType === "image";
+  const extractedFiles = (parsed as any)._imageFiles as typeof imageFiles;
+  const extractedPreservedRefs = (parsed as any)._preservedRefs as typeof preservedRefs;
+  const extractedAltTexts = (parsed as any)._altTexts as Record<number, string>;
+  const extractedCaptions = (parsed as any)._captions as Record<number, string>;
+
+  // Raw option indexes that still carry a non-blank label. Blank rows are
+  // dropped on publish (helper-note contract), so media keyed to a blank row
+  // is stale and its temp object is swept (6.3). Indexes never shift between
+  // round-trips — rows are only appended or cleared.
+  const activeRawIndexes = parsed.options
+    .map((label, index) => ({ label, index }))
+    .filter(({ label }) => label.trim().length > 0)
+    .map(({ index }) => index);
+  const activeIndexSet = new Set(activeRawIndexes);
+  // Compact (persisted) position → raw option-row index.
+  const rawIndexForPosition = new Map<number, number>(
+    activeRawIndexes.map((rawIndex, position) => [position, rawIndex]),
+  );
+  // Render state only ever carries entries for live rows.
+  tempMedia = tempMedia.filter((_, index) => activeIndexSet.has(index));
+
+  if (isImagePoll) {
+    // Upload processing also runs on the no-JS ADD OPTION round-trip so an
+    // in-flight image survives adding a row (AC 4). Publish-only validation
+    // (media-missing, alt-text-required) stays below the branch.
+    for (const { index, file } of extractedFiles) {
+      const validation = await validateImageUpload(file);
+      if (!validation.ok) {
+        fieldErrors[`media[${index}]`] = validation.error;
+        continue;
+      }
+      const mediaId = crypto.randomUUID();
+      const r2Key = `tmp/${formPollId}/${mediaId}`;
+      try {
+        await env.MEDIA.put(r2Key, file.stream(), {
+          httpMetadata: { contentType: validation.contentType },
+        });
+        tempMedia[index] = {
+          mediaId,
+          r2Key,
+          contentType: validation.contentType,
+          sizeBytes: validation.sizeBytes,
+          altText: extractedAltTexts[index]?.trim() ?? "",
+          caption: extractedCaptions[index]?.trim() ?? "",
+        };
+      } catch {
+        fieldErrors[`media[${index}]`] = IMAGE_UPLOAD_COPY.uploadFailed(file.name);
+      }
+    }
+
+    // Restore preserved refs from hidden inputs (previous successful uploads).
+    for (const { index, mediaId } of extractedPreservedRefs) {
+      if (tempMedia[index]) continue; // New upload already filled this slot.
+      // Validate the ref exists in R2 and is scoped to this poll_id. The
+      // mediaId IS the UUID portion of the key; reconstruct to verify scope.
+      const candidateKey = `tmp/${formPollId}/${mediaId}`;
+      try {
+        const head = await env.MEDIA.head(candidateKey);
+        if (head) {
+          tempMedia[index] = {
+            mediaId,
+            r2Key: candidateKey,
+            contentType: head.httpMetadata?.contentType ?? "application/octet-stream",
+            sizeBytes: head.size,
+            altText: extractedAltTexts[index]?.trim() ?? "",
+            caption: extractedCaptions[index]?.trim() ?? "",
+          };
+        } else {
+          fieldErrors[`media[${index}]`] = IMAGE_UPLOAD_COPY.uploadFailed("A previously uploaded image");
+        }
+      } catch {
+        fieldErrors[`media[${index}]`] = IMAGE_UPLOAD_COPY.uploadFailed("A previously uploaded image");
+      }
+    }
+
+    // Publish-only validation: every live option row needs an image, and
+    // every image needs alt text (AC 3). Compact position → raw index so the
+    // error lands on the field the Creator actually sees.
+    if (parsed.intent !== "add-option") {
+      for (const [position, rawIndex] of rawIndexForPosition) {
+        const entry = tempMedia[rawIndex];
+        if (!entry) {
+          if (!fieldErrors[`media[${rawIndex}]`]) {
+            fieldErrors[`media[${rawIndex}]`] = IMAGE_DEFINITION_COPY.mediaIdMissing;
+          }
+        } else if (entry.altText.trim().length === 0) {
+          fieldErrors[`media[${rawIndex}].altText`] = IMAGE_DEFINITION_COPY.altTextMissing;
+        }
+      }
+    }
+  }
+
   if (parsed.intent === "add-option") {
     // No-JS ADD OPTION round-trip: one more row, everything preserved,
     // nothing validated yet. The cap counts non-blank rows (blank = removed);
@@ -222,20 +375,54 @@ if (Astro.request.method === "POST") {
           : CREATE_POLL_COPY.rowsTooMany;
     }
   } else {
-    const persistence = createPollPersistence(env.DB);
-    const result = await createPoll(
-      {
-        persist: (rows) => persistence.insertPoll(rows),
-        generateId: () => crypto.randomUUID(),
-        generateReference: generatePollReference,
-        nowMs: () => Date.now(),
-        findExistingPoll: (pollId, ownerUserId) =>
-          persistence.findPollForOwner(pollId, ownerUserId),
-      },
-      principal.userId as UserId,
-      values,
+    // Any media failure (bad file, missing upload, missing alt text) blocks
+    // publication on a 422 with every other field and upload preserved.
+    const hasMediaErrors = Object.keys(fieldErrors).some((key) =>
+      key.startsWith("media["),
     );
-    if (result.ok) {
+    if (hasMediaErrors) {
+      Astro.response.status = 422;
+    } else {
+      const persistence = createPollPersistence(env.DB);
+      const nowMs = Date.now();
+      const result = await createPoll(
+        {
+          persist: async (rows) => {
+            // For Image Polls, attach media_object rows to the batch (AD-3).
+            // rows.options are the compacted non-blank set, so map position
+            // back to the raw row index that owns the temp media entry.
+            if (isImagePoll) {
+              const mediaRows: NonNullable<PollPersistenceRows["media"]> = [];
+              for (let position = 0; position < rows.options.length; position++) {
+                const rawIndex = rawIndexForPosition.get(position);
+                const entry = rawIndex !== undefined ? tempMedia[rawIndex] : undefined;
+                if (!entry) continue;
+                mediaRows.push({
+                  id: entry.mediaId,
+                  pollId: rows.poll.id,
+                  optionId: rows.options[position]!.id,
+                  r2Key: entry.r2Key,
+                  contentType: entry.contentType,
+                  sizeBytes: entry.sizeBytes,
+                  altText: entry.altText.trim(),
+                  caption: entry.caption.trim() || null,
+                  createdAtMs: nowMs,
+                });
+              }
+              rows.media = mediaRows;
+            }
+            await persistence.insertPoll(rows);
+          },
+          generateId: () => crypto.randomUUID(),
+          generateReference: generatePollReference,
+          nowMs: () => nowMs,
+          findExistingPoll: (pollId, ownerUserId) =>
+            persistence.findPollForOwner(pollId, ownerUserId),
+        },
+        principal.userId as UserId,
+        values,
+      );
+      if (result.ok) {
       // A fresh create always lands on the just-created outcome; a deduped
       // retry only while the Poll is still inside the freshness window.
       const suffix =
@@ -269,6 +456,7 @@ if (Astro.request.method === "POST") {
       formError = result.error.message;
       Astro.response.status = 500;
     }
+    }
   }
 }
 
@@ -284,7 +472,7 @@ while (values.options.length < 2) {
 
     {formError && <p class="form-error" tabindex="-1" autofocus>{formError}</p>}
 
-    <form method="post" action="/creator/new" data-create-poll-form novalidate>
+    <form method="post" action="/creator/new" enctype="multipart/form-data" data-create-poll-form novalidate>
       <input type="hidden" name="csrf_token" value={csrfToken} />
       <input type="hidden" name="timezone" value={values.timeZone} />
       <input type="hidden" name="poll_id" value={formPollId} />
@@ -308,6 +496,8 @@ while (values.options.length < 2) {
         showPollType={true}
         pollTypeEditable={true}
         showDescription={false}
+        tempMedia={tempMedia}
+        pollId={formPollId}
       />
 
       <fieldset class="field-block" data-security-toggles>

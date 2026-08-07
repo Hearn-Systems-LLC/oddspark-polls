@@ -31,6 +31,17 @@ interface Props {
   /** Label for the primary save submit (edit only; create uses external publish). */
   saveLabel?: string | null;
   showSave?: boolean;
+  /** Image Poll temp media entries for re-render preservation (Story 6.1). */
+  tempMedia?: {
+    mediaId: string;
+    r2Key: string;
+    contentType: string;
+    sizeBytes: number;
+    altText: string;
+    caption: string;
+  }[];
+  /** In-flight form nonce — scopes creator preview URLs for unadopted media. */
+  pollId?: string;
 }
 
 const {
@@ -45,6 +56,8 @@ const {
   lockMessage = null,
   saveLabel = "SAVE CHANGES",
   showSave = false,
+  tempMedia = [],
+  pollId = "",
 } = Astro.props;
 
 const MULTI_SELECT_CHOICES = [
@@ -62,9 +75,15 @@ const POLL_TYPE_CHOICES = [
     label: "RANKED CHOICE",
     description: "Voters rank any non-empty subset in preference order.",
   },
+  {
+    value: "image",
+    label: "IMAGE",
+    description: "Each option is a picture. Voters pick their favorite.",
+  },
 ] as const;
 const pollType = values.pollType ?? "multiple_choice";
 const rankedChoice = pollType === "ranked_choice";
+const imagePoll = pollType === "image";
 ---
 
 {
@@ -201,6 +220,76 @@ const rankedChoice = pollType === "ranked_choice";
                   label={`OPTION ${index + 1}`}
                   value={option}
                 />
+                <div class="image-upload-fields" data-image-upload-fields hidden={!imagePoll}>
+                  <div class="image-file-row">
+                    <label class="group-label" for={`media-file-${index}`}>
+                      IMAGE
+                    </label>
+                    <input
+                      type="file"
+                      id={`media-file-${index}`}
+                      name={imagePoll ? `media_file_${index}` : undefined}
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={!imagePoll}
+                      aria-describedby={
+                        fieldErrors[`media[${index}]`]
+                          ? `media-${index}-error`
+                          : undefined
+                      }
+                    />
+                    {tempMedia[index] && (
+                      <>
+                        <input
+                          type="hidden"
+                          name="media_ref"
+                          value={`${index}:${tempMedia[index].mediaId}`}
+                        />
+                        <div class="image-preview-plate">
+                          <img
+                            src={`/creator/media/${tempMedia[index].mediaId}?poll=${encodeURIComponent(pollId)}`}
+                            alt={tempMedia[index].altText || "Uploaded preview"}
+                            width="120"
+                            height="120"
+                          />
+                        </div>
+                      </>
+                    )}
+                    {fieldErrors[`media[${index}]`] && (
+                      <p class="field-error" id={`media-${index}-error`}>
+                        {fieldErrors[`media[${index}]`]}
+                      </p>
+                    )}
+                  </div>
+                  <div class="field-block">
+                    <Input
+                      id={`media-alt-${index}`}
+                      name={imagePoll ? `media_alt_${index}` : undefined}
+                      label="ALT TEXT"
+                      value={tempMedia[index]?.altText ?? ""}
+                      disabled={!imagePoll}
+                      error={Boolean(fieldErrors[`media[${index}].altText`])}
+                      describedby={
+                        fieldErrors[`media[${index}].altText`]
+                          ? `media-alt-${index}-error`
+                          : undefined
+                      }
+                    />
+                    {fieldErrors[`media[${index}].altText`] && (
+                      <p class="field-error" id={`media-alt-${index}-error`}>
+                        {fieldErrors[`media[${index}].altText`]}
+                      </p>
+                    )}
+                  </div>
+                  <div class="field-block">
+                    <Input
+                      id={`media-caption-${index}`}
+                      name={imagePoll ? `media_caption_${index}` : undefined}
+                      label="CAPTION (OPTIONAL)"
+                      value={tempMedia[index]?.caption ?? ""}
+                      disabled={!imagePoll}
+                    />
+                  </div>
+                </div>
               </div>
             ))}
         </div>
@@ -221,7 +310,7 @@ const rankedChoice = pollType === "ranked_choice";
       <fieldset
         class="field-block"
         data-multiple-choice-fields
-        hidden={rankedChoice}
+        hidden={rankedChoice || imagePoll}
         aria-invalid={fieldErrors.multiSelect ? "true" : undefined}
         aria-describedby={
           fieldErrors.multiSelect ? "multi-select-error" : undefined
@@ -236,7 +325,7 @@ const rankedChoice = pollType === "ranked_choice";
               value={choice.value}
               label={choice.label}
               checked={values.multiSelect === choice.value}
-              disabled={rankedChoice}
+              disabled={rankedChoice || imagePoll}
             />
           ))}
         </div>
@@ -259,7 +348,7 @@ const rankedChoice = pollType === "ranked_choice";
               label="MIN (OPTIONAL)"
               type="number"
               value={values.minSelections}
-              disabled={rankedChoice}
+              disabled={rankedChoice || imagePoll}
               error={Boolean(fieldErrors.minSelections)}
               describedby={
                 fieldErrors.minSelections
@@ -280,7 +369,7 @@ const rankedChoice = pollType === "ranked_choice";
               label="MAX (OPTIONAL)"
               type="number"
               value={values.maxSelections}
-              disabled={rankedChoice}
+              disabled={rankedChoice || imagePoll}
               error={Boolean(fieldErrors.maxSelections)}
               describedby={
                 fieldErrors.maxSelections
@@ -507,5 +596,36 @@ const rankedChoice = pollType === "ranked_choice";
 
   .save-block-end {
     order: 10;
+  }
+
+  .image-upload-fields {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding-inline-start: var(--space-4);
+    border-inline-start: 1px solid var(--color-rule);
+  }
+
+  .image-upload-fields[hidden] {
+    display: none;
+  }
+
+  .image-file-row {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .image-preview-plate {
+    width: 120px;
+    height: 120px;
+    overflow: hidden;
+    border-radius: 0;
+  }
+
+  .image-preview-plate img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 </style>

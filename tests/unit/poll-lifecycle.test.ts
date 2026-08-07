@@ -124,6 +124,46 @@ describe("validatePollDefinition (shared create/edit)", () => {
       },
     });
   });
+
+  it("rejects multi-select for image polls", () => {
+    const result = validatePollDefinition(
+      {
+        question: "Which photo?",
+        description: "",
+        options: ["A", "B"],
+        multiSelect: "true",
+        minSelections: "",
+        maxSelections: "",
+      },
+      "image",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reasonCodes?.multiSelect).toBe(
+        "image_bounds_invalid",
+      );
+    }
+  });
+
+  it("accepts a valid image poll definition without multi-select", () => {
+    const result = validatePollDefinition(
+      {
+        question: "Which photo?",
+        description: "",
+        options: ["A", "B"],
+        multiSelect: "false",
+        minSelections: "",
+        maxSelections: "",
+      },
+      "image",
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.multiSelect).toBe(false);
+      expect(result.value.minSelections).toBeNull();
+      expect(result.value.maxSelections).toBeNull();
+    }
+  });
 });
 
 describe("closePoll", () => {

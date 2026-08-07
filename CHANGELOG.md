@@ -15,7 +15,15 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
-- Per-round IRV table on Ranked-Choice Results. Every Round shows per-option
+- Image Poll creation on `/creator/new`. Creators can now choose the IMAGE poll
+  type, upload one JPEG/PNG/WebP image per option (5 MB cap, server-side
+  magic-byte validation), and provide required alt text and optional captions.
+  Images are stored in R2 with temp-key adoption: files land at scoped temporary
+  keys and become publicly servable only after the D1 creation batch adopts them.
+  Upload failures preserve all other form fields so the Creator retries only the
+  failed file.
+- Public media serving at `/media/{id}`. Adopted images are served with
+  immutable caching headers; unadopted or unknown IDs return 404.
   counts, elimination statements (fewest votes, safe batch, backward tie-break),
   and exhausted-Ballot counts. Eliminated options are struck through from their
   elimination Round onward; the winner's final-Round cell is gold; unresolved

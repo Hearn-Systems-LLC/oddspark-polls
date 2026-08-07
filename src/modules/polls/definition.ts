@@ -152,6 +152,18 @@ export function validatePollDefinition(
         DEFINITION_COPY.rankedBoundsInvalid,
       );
     }
+  } else if (pollType === "image") {
+    if (
+      requestedMultiSelect ||
+      rawMinSelections.length > 0 ||
+      rawMaxSelections.length > 0
+    ) {
+      fail(
+        "multiSelect",
+        "image_bounds_invalid",
+        "Image Polls use single-select voting, not multi-select bounds.",
+      );
+    }
   } else if (!multiSelect) {
     if (rawMinSelections.length > 0 || rawMaxSelections.length > 0) {
       fail(
@@ -257,9 +269,9 @@ export function validatePollDefinition(
       : multipleChoiceStrategy.create(
           {
             optionLabels: labels,
-            multiSelect,
-            minSelections,
-            maxSelections,
+            multiSelect: pollType === "image" ? false : multiSelect,
+            minSelections: pollType === "image" ? null : minSelections,
+            maxSelections: pollType === "image" ? null : maxSelections,
           },
           { nowMs: 0 },
         );

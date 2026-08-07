@@ -6,6 +6,7 @@ const RESERVED_APPLICATION_SLUGS = [
   "/",
   "creator",
   "discover",
+  "media",
   "sign-in",
   "assets",
   "api",

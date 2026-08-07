@@ -25,9 +25,15 @@ import type {
   ResultsAccessEnvelope,
   ResultsProjection,
   ResultsTallyProjection,
+  VersionedRankedTallyProjection,
   VersionedResultsProjection,
   VersionedResultsTallyProjection,
 } from "../../modules/results/index";
+import { tabulateAndProjectRanked } from "../../modules/results/index";
+import type {
+  IrvBallot,
+  IrvOptionSet,
+} from "../../modules/results/tabulate-irv";
 import type { ExportOwnerEnvelope } from "../../modules/results/export";
 import {
   COMMENT_CAPS,
@@ -1948,6 +1954,135 @@ export function createResultsPersistence(db: D1Database) {
         options: projection.options,
         voterCount: projection.voterCount,
         selectionCount: projection.selectionCount,
+      };
+    },
+
+    /**
+     * Ranked IRV projection (Story 5.2). One snapshot of options + ordered
+     * preferences + representation_version; pure tabulator owns the count.
+     * Does not authorize visibility — callers must gate first (AD-21).
+     */
+    async projectRankedResults(
+      pollId: PollId,
+    ): Promise<VersionedRankedTallyProjection | null> {
+      return this.projectVersionedRankedResults(pollId);
+    },
+
+    async projectVersionedRankedResults(
+      pollId: PollId,
+    ): Promise<VersionedRankedTallyProjection | null> {
+      const pollRow = await db
+        .prepare(
+          `SELECT poll_type, representation_version
+           FROM poll
+           WHERE id = ?1
+           LIMIT 1`,
+        )
+        .bind(pollId)
+        .first<{
+          poll_type: unknown;
+          representation_version: number;
+        }>();
+      if (!pollRow) {
+        return null;
+      }
+      if (pollRow.poll_type !== "ranked_choice") {
+        throw new Error("Ranked projection requested for non-ranked Poll");
+      }
+      if (
+        !Number.isSafeInteger(pollRow.representation_version) ||
+        pollRow.representation_version < 1
+      ) {
+        throw new Error("Malformed representation version");
+      }
+
+      const optionRows = await db
+        .prepare(
+          `SELECT id, label, position
+           FROM poll_option
+           WHERE poll_id = ?1
+           ORDER BY position`,
+        )
+        .bind(pollId)
+        .all<{
+          id: PollOptionId;
+          label: string;
+          position: number;
+        }>();
+
+      if (optionRows.results.length === 0) {
+        throw new Error(
+          "Malformed ranked projection: resolved Poll has no options",
+        );
+      }
+
+      const options: IrvOptionSet[] = optionRows.results.map((row) => {
+        if (
+          typeof row.id !== "string" ||
+          typeof row.label !== "string" ||
+          !Number.isSafeInteger(row.position) ||
+          row.position < 0
+        ) {
+          throw new Error("Malformed ranked projection: invalid option row");
+        }
+        return {
+          id: row.id,
+          label: row.label,
+          position: row.position,
+        };
+      });
+
+      const preferenceRows = await db
+        .prepare(
+          `SELECT v.id AS vote_id,
+                  rvp.poll_option_id AS poll_option_id,
+                  rvp.preference_rank AS preference_rank
+           FROM vote v
+           JOIN ranked_vote_preference rvp ON rvp.vote_id = v.id
+           WHERE v.poll_id = ?1
+           ORDER BY v.id, rvp.preference_rank`,
+        )
+        .bind(pollId)
+        .all<{
+          vote_id: string;
+          poll_option_id: PollOptionId;
+          preference_rank: number;
+        }>();
+
+      const knownOptionIds = new Set(options.map((option) => option.id));
+      const byVote = new Map<string, { rank: number; optionId: PollOptionId }[]>();
+      for (const row of preferenceRows.results) {
+        if (
+          typeof row.vote_id !== "string" ||
+          typeof row.poll_option_id !== "string" ||
+          !Number.isSafeInteger(row.preference_rank) ||
+          row.preference_rank < 1 ||
+          !knownOptionIds.has(row.poll_option_id)
+        ) {
+          throw new Error("Malformed ranked projection: invalid preference row");
+        }
+        const existing = byVote.get(row.vote_id) ?? [];
+        existing.push({
+          rank: row.preference_rank,
+          optionId: row.poll_option_id,
+        });
+        byVote.set(row.vote_id, existing);
+      }
+
+      // Also count votes with zero preferences (should not exist post-validation)
+      // by using distinct vote ids that have preferences as the ballot set —
+      // accepted ranked Votes always have ≥1 preference.
+      const ballots: IrvBallot[] = [...byVote.values()].map((prefs) => {
+        const ordered = [...prefs].sort((a, b) => a.rank - b.rank);
+        return {
+          preferences: ordered.map((preference) => preference.optionId),
+        };
+      });
+
+      const ranked = tabulateAndProjectRanked({ ballots, options });
+      return {
+        ...ranked,
+        representationVersion: pollRow.representation_version,
       };
     },
   };

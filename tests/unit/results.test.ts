@@ -4,6 +4,7 @@ import {
   queryLiveResults,
   queryResults,
   type LiveResultsPorts,
+  type RankedTallyView,
   type ResultsAccessEnvelope,
   type ResultsPorts,
   type ResultsTallyProjection,
@@ -66,10 +67,44 @@ function tally(
   };
 }
 
+function rankedTally(
+  overrides: Partial<RankedTallyView> = {},
+): RankedTallyView {
+  return {
+    empty: false,
+    voterCount: 2,
+    resolved: true,
+    winnerId: OPTION_A,
+    winnerLabel: "Pizza",
+    tiedOptionIds: [],
+    tiedOptionLabels: [],
+    finalCounts: [
+      { optionId: OPTION_A, label: "Pizza", position: 0, count: 2 },
+      { optionId: OPTION_B, label: "Sushi", position: 1, count: 0 },
+    ],
+    rounds: [
+      {
+        roundNumber: 1,
+        counts: [
+          { optionId: OPTION_A, label: "Pizza", position: 0, count: 2 },
+          { optionId: OPTION_B, label: "Sushi", position: 1, count: 0 },
+        ],
+        exhaustedCount: 0,
+        activeBallotCount: 2,
+        eliminated: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function ports(
   access: ResultsAccessEnvelope | null,
   projection: ResultsTallyProjection = tally(),
-): ResultsPorts & { projectResults: ReturnType<typeof vi.fn> } {
+): ResultsPorts & {
+  projectResults: ReturnType<typeof vi.fn>;
+  projectRankedResults: ReturnType<typeof vi.fn>;
+} {
   return {
     findAccessEnvelope: vi.fn(async () => access),
     projectResults: vi.fn(async (_pollId, includeOwnerModeration) => ({
@@ -77,6 +112,10 @@ function ports(
       representationVersion: 1,
       comments: [],
       ownerComments: includeOwnerModeration ? [] : null,
+    })),
+    projectRankedResults: vi.fn(async () => ({
+      ...rankedTally(),
+      representationVersion: 1,
     })),
   };
 }
@@ -88,6 +127,7 @@ function livePorts(
 ): LiveResultsPorts & {
   readRepresentationVersion: ReturnType<typeof vi.fn>;
   projectVersionedResults: ReturnType<typeof vi.fn>;
+  projectVersionedRankedResults: ReturnType<typeof vi.fn>;
 } {
   return {
     findAccessEnvelope: vi.fn(async () => access),
@@ -102,24 +142,37 @@ function livePorts(
             ownerComments: null,
           },
     ),
+    projectVersionedRankedResults: vi.fn(async () =>
+      representationVersion === null
+        ? null
+        : {
+            ...rankedTally(),
+            representationVersion,
+          },
+    ),
   };
 }
 
 describe("queryResults visibility matrix", () => {
-  it("returns an honest ranked unavailable state without reading result facts", async () => {
+  it("projects ranked IRV after authorization without using the MC tally port", async () => {
     const rankedPorts = ports(envelope({ pollType: "ranked_choice" }));
-    await expect(
-      queryResults(rankedPorts, "team-lunch", ANONYMOUS, NOW),
-    ).resolves.toEqual({
-      kind: "ranked_unavailable",
-      pollId: POLL_ID,
-      question: "Where to lunch?",
-      canonicalReference: "team-lunch",
-    });
+    const view = await queryResults(
+      rankedPorts,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+    );
+    expect(view.kind).toBe("ranked_visible");
+    if (view.kind === "ranked_visible") {
+      expect(view.ranked.resolved).toBe(true);
+      expect(view.ranked.winnerId).toBe(OPTION_A);
+      expect(view.validator).toBe('"1:open"');
+    }
+    expect(rankedPorts.projectRankedResults).toHaveBeenCalledWith(POLL_ID);
     expect(rankedPorts.projectResults).not.toHaveBeenCalled();
   });
 
-  it("keeps a hidden ranked Poll hidden before applying the unavailable boundary", async () => {
+  it("keeps a hidden ranked Poll hidden before reading ballots", async () => {
     const rankedPorts = ports(
       envelope({
         pollType: "ranked_choice",
@@ -130,6 +183,7 @@ describe("queryResults visibility matrix", () => {
     await expect(
       queryResults(rankedPorts, "team-lunch", ANONYMOUS, NOW),
     ).resolves.toMatchObject({ kind: "after_close_hidden" });
+    expect(rankedPorts.projectRankedResults).not.toHaveBeenCalled();
     expect(rankedPorts.projectResults).not.toHaveBeenCalled();
   });
   it.each([
@@ -531,7 +585,32 @@ describe("live Results validator", () => {
 });
 
 describe("queryLiveResults authorization and projection", () => {
-  it("declines ranked live projection before any version or result read", async () => {
+  it("serves ranked live IRV after authorization and version check", async () => {
+    const rankedPorts = livePorts(
+      envelope({ pollType: "ranked_choice" }),
+      17,
+    );
+    const view = await queryLiveResults(
+      rankedPorts,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+      '"16:open"',
+    );
+    expect(view.kind).toBe("ranked_visible");
+    if (view.kind === "ranked_visible") {
+      expect(view.representationVersion).toBe(17);
+      expect(view.ranked.winnerId).toBe(OPTION_A);
+      expect(view.validator).toBe('"17:open"');
+    }
+    expect(rankedPorts.readRepresentationVersion).toHaveBeenCalled();
+    expect(rankedPorts.projectVersionedRankedResults).toHaveBeenCalledWith(
+      POLL_ID,
+    );
+    expect(rankedPorts.projectVersionedResults).not.toHaveBeenCalled();
+  });
+
+  it("returns not_modified for ranked when the validator matches", async () => {
     const rankedPorts = livePorts(
       envelope({ pollType: "ranked_choice" }),
       17,
@@ -542,15 +621,10 @@ describe("queryLiveResults authorization and projection", () => {
         "team-lunch",
         ANONYMOUS,
         NOW,
-        '"16:open"',
+        '"17:open"',
       ),
-    ).resolves.toEqual({
-      kind: "ranked_unavailable",
-      pollId: POLL_ID,
-      canonicalReference: "team-lunch",
-    });
-    expect(rankedPorts.readRepresentationVersion).not.toHaveBeenCalled();
-    expect(rankedPorts.projectVersionedResults).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ kind: "not_modified", validator: '"17:open"' });
+    expect(rankedPorts.projectVersionedRankedResults).not.toHaveBeenCalled();
   });
   it.each([
     {

@@ -2,7 +2,7 @@
 title: 'Story 5.2: Deterministic IRV Tabulation'
 type: 'feature'
 created: '2026-08-06T18:00:00-04:00'
-status: 'ready-for-dev'
+status: 'review'
 baseline_revision: '58b9e0d'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -68,18 +68,18 @@ warnings: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/modules/results/tabulate-irv.ts` — implement the pure IRV tabulator with safe batch elimination, backward tie-breaking, unresolved halt, and exhaustion tracking; export typed input/output shapes; zero provider imports.
-- [ ] `src/modules/results/index.ts` — add `RankedTallyProjection`, `RankedResultsView`, and `RankedLiveResultsView` types; replace `ranked_unavailable` early-returns with ranked projection calls; keep Comments empty on ranked views; preserve `RESULTS_COPY.rankedUnavailable` for residual fallback.
-- [ ] `src/adapters/d1/index.ts` — add `projectRankedResults` to `createResultsPersistence`; one-snapshot SQL joining `ranked_vote_preference`, `vote`, and `poll_option`; map to tabulator input; call pure tabulator; return versioned projection. Authorization check remains in the Results module, not the adapter.
-- [ ] `src/modules/polls/types/ranked-choice.ts` — widen strategy to include `projectResults` delegating to the shared tabulator; keep `projectExport` returning unavailable.
-- [ ] `src/pages/[reference]/results.astro` — render ranked Tally for `ranked_visible`; keep CommentList absent; preserve `ranked_unavailable` as defensive fallback.
-- [ ] `src/pages/[reference]/results/live.ts` — serve ranked live payload when authorized; preserve 204 for hidden states.
-- [ ] `src/lib/poll-delivery.ts` — extend `PostVoteResultsView` with `ranked_visible`; map through `postVoteResultsFrom`; keep Comments empty.
-- [ ] `src/components/poll-voting-surface.astro` — render ranked Tally region for `ranked_visible`; keep CommentList absent.
-- [ ] `tests/unit/tabulate-irv.test.ts` — fast-check property tests for all six invariants plus edge cases.
-- [ ] `tests/integration/ranked-results-adapter.integration.test.ts` — workerd + D1 tests for adapter correctness and authorization.
-- [ ] `tests/e2e/ranked-results.spec.mjs` — Playwright journeys for ranked results surfaces.
-- [ ] `CHANGELOG.md`, `README.md`, `spec-5-2-deterministic-irv-tabulation.md`, `sprint-status.yaml` — synchronize documentation and status.
+- [x] `src/modules/results/tabulate-irv.ts` — implement the pure IRV tabulator with safe batch elimination, backward tie-breaking, unresolved halt, and exhaustion tracking; export typed input/output shapes; zero provider imports.
+- [x] `src/modules/results/index.ts` — add `RankedTallyProjection`, `RankedResultsView`, and `RankedLiveResultsView` types; replace `ranked_unavailable` early-returns with ranked projection calls; keep Comments empty on ranked views; preserve `RESULTS_COPY.rankedUnavailable` for residual fallback.
+- [x] `src/adapters/d1/index.ts` — add `projectRankedResults` to `createResultsPersistence`; one-snapshot SQL joining `ranked_vote_preference`, `vote`, and `poll_option`; map to tabulator input; call pure tabulator; return versioned projection. Authorization check remains in the Results module, not the adapter.
+- [x] `src/modules/polls/types/ranked-choice.ts` — widen strategy to include `projectResults` delegating to the shared tabulator; keep `projectExport` returning unavailable.
+- [x] `src/pages/[reference]/results.astro` — render ranked Tally for `ranked_visible`; keep CommentList absent; preserve `ranked_unavailable` as defensive fallback.
+- [x] `src/pages/[reference]/results/live.ts` — serve ranked live payload when authorized; preserve 204 for hidden states.
+- [x] `src/lib/poll-delivery.ts` — extend `PostVoteResultsView` with `ranked_visible`; map through `postVoteResultsFrom`; keep Comments empty.
+- [x] `src/components/poll-voting-surface.astro` — render ranked Tally region for `ranked_visible`; keep CommentList absent.
+- [x] `tests/unit/tabulate-irv.test.ts` — fast-check property tests for all six invariants plus edge cases.
+- [x] `tests/integration/ranked-results-adapter.integration.test.ts` — workerd + D1 tests for adapter correctness and authorization.
+- [x] `tests/e2e/ranked-results.spec.mjs` — Playwright journeys for ranked results surfaces.
+- [x] `CHANGELOG.md`, `README.md`, `spec-5-2-deterministic-irv-tabulation.md`, `sprint-status.yaml` — synchronize documentation and status.
 
 **Acceptance Criteria:**
 - Given a set of accepted Ballots, when the tabulator runs, then each Round counts every active Ballot toward its highest-ranked non-eliminated option; an option holding more than 50% of active Ballots wins and tabulation stops; otherwise the fewest-votes option is eliminated (FR-9).
@@ -99,7 +99,37 @@ warnings: []
 
 ## Review Triage Log
 
-(Entries added during code review.)
+- 2026-08-07 — Code review of branch `story/5-2-deterministic-irv-tabulation` (`aaa04a5` vs `main`/`58b9e0d`). Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. Suite fails to load (`Cannot find module '../../../src/...'`). Core pure algorithm largely FR-9-aligned; tests and remaining Code Map wiring incomplete.
+
+### Review Findings
+
+#### Decision-needed
+
+- [x] [Review][Decision] Intentional pure-core slice vs full Story 5.2 delivery — **Resolved 2026-08-07 (D1=1):** intentional pure-tabulator intermediate slice; remaining Code Map is next work, not defects in this commit. → defer (product wiring)
+- [x] [Review][Decision] Zero-ballot multi-option empty contract — **Resolved 2026-08-07 (D2=1):** early-return zero rounds when `ballots.length === 0`. → patch
+- [x] [Review][Decision] Last-remaining winner with zero active ballots — **Resolved 2026-08-07 (D3=1):** keep last-remaining win; relax majority property to allow sole-survivor terminal path. → patch
+
+#### Patch
+
+- [x] [Review][Patch] Fix unit import path (`../../../src` → `../../src`) so the suite loads [tests/unit/tabulate-irv.test.ts:3-9]
+- [x] [Review][Patch] A=40/B=30/C=30 must expect unresolved halt naming B+C, not a single non-batch elimination [tests/unit/tabulate-irv.test.ts:82-98]
+- [x] [Review][Patch] Safe-batch “fires” fixture currently has majority (4/7 for A); replace with a fixture that actually batch-eliminates [tests/unit/tabulate-irv.test.ts:60-80]
+- [x] [Review][Patch] Backward-tie unit test never hits multi-way last-place; rebuild fixture and assert `reason === "backward_tie_break"` + eliminated IDs [tests/unit/tabulate-irv.test.ts:101-113]
+- [x] [Review][Patch] Add fast-check property tests for backward tie-break, unresolved halt, and exhaustion (Always + Code Map require all six) [tests/unit/tabulate-irv.test.ts]
+- [x] [Review][Patch] Strengthen determinism property to compare full Round evidence (counts, eliminated optionIds/reason, tiedOptionIds, standingCounts) [tests/unit/tabulate-irv.test.ts:208-254]
+- [x] [Review][Patch] Sort `eliminated.optionIds` for stable presentation determinism (tiedOptionIds already sorted) [src/modules/results/tabulate-irv.ts:298-301]
+- [x] [Review][Patch] Generate non-monotonic rankings in property generators (`fc.subarray` preserves ascending indices) [tests/unit/tabulate-irv.test.ts:216-219]
+- [x] [Review][Patch] Deepen exhaustion assertions (`sum(counts) === activeBallotCount`, exhausted leave later Rounds) [tests/unit/tabulate-irv.test.ts:147-163]
+- [x] [Review][Patch] Lock multi-round unit cases to expected winner and elimination sequence, not only `resolved`/`rounds.length` [tests/unit/tabulate-irv.test.ts:42-56]
+- [x] [Review][Patch] Document input contract: preferences are highest-rank-first; callers must supply rank-ordered IDs [src/modules/results/tabulate-irv.ts:9-10]
+- [x] [Review][Patch] Synchronize story bookkeeping: check completed pure-tabulator task, fill Dev Agent Record / evidence as appropriate [spec-5-2-deterministic-irv-tabulation.md]
+- [x] [Review][Patch] Zero ballots early-return empty rounds (D2) [src/modules/results/tabulate-irv.ts:177-187]
+- [x] [Review][Patch] Relax majority property for last-remaining sole-survivor wins; document both terminal paths (D3) [tests/unit/tabulate-irv.test.ts:257-286] [src/modules/results/tabulate-irv.ts:222-238]
+
+#### Defer
+
+- [x] [Review][Defer] `ReadonlyMap` counts are not JSON-serializable for live/results payloads [src/modules/results/tabulate-irv.ts:26,46] — deferred, wiring will map to arrays/objects
+- [x] [Review][Defer] Remaining product wiring (adapter, Results types, live/post-vote UI, integration/e2e, CHANGELOG/README) — **resolved 2026-08-07** by product-wiring pass on this branch
 
 ## Design Notes
 
@@ -119,22 +149,53 @@ The live endpoint extends `LiveResultsPayload` rather than replacing it. The exi
 - `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check` — generated bindings stable, shipping artifact builds, patch clean.
 
 **Evidence:**
-(To be filled after implementation.)
+- 2026-08-07 — `pnpm exec vitest run tests/unit/tabulate-irv.test.ts` — 19/19 passed after review patches.
+- 2026-08-07 — unit: results + comments + ranked-choice + IRV; integration: ranked-results-adapter (4/4); `pnpm check` clean.
+- 2026-08-07 — product wiring: adapter → queryResults/queryLiveResults → results.astro / live.ts / post-vote / RankedResultsSummary; Comments empty on ranked; export still unavailable.
 
 ## Dev Agent Record
 
 ### Agent Model Used
 
-(Populated by dev agent.)
+Grok (code review patch pass + product wiring, 2026-08-07)
 
 ### Debug Log References
 
-(Populated by dev agent.)
+- Pre-patch: suite failed to load (`Cannot find module '../../../src/...'`).
+- Fixtures re-derived for safe batch, backward tie-break, A=40/B=30/C=30 unresolved.
+- Live payload union split: MC enhancer keeps `LiveMultipleChoicePayload`; ranked uses `pollType: "ranked_choice"` discriminant.
 
 ### Completion Notes List
 
-(Populated by dev agent.)
+- Pure IRV tabulator + six property invariants + review patches (D2 empty ballots, D3 last-remaining).
+- D1 `projectRankedResults` / `projectVersionedRankedResults` snapshot SQL → `tabulateAndProjectRanked`.
+- Results authorize then project `ranked_visible`; residual `ranked_unavailable` if port missing.
+- Surfaces: RankedResultsSummary, ranked-results-live.ts, post-vote `ranked_visible`, no Comments / no YOUR BALLOT until 5.3.
+- Strategy `projectResults` delegates to the same pure path; `projectExport` still unavailable.
+- CHANGELOG + README updated; story status `review`.
 
 ### File List
 
-(Populated by dev agent.)
+- `src/modules/results/tabulate-irv.ts`
+- `src/modules/results/ranked-projection.ts`
+- `src/modules/results/index.ts`
+- `src/modules/polls/types/ranked-choice.ts`
+- `src/adapters/d1/index.ts`
+- `src/pages/[reference]/results.astro`
+- `src/pages/[reference]/results/live.ts`
+- `src/lib/poll-delivery.ts`
+- `src/components/ranked-results-summary.astro`
+- `src/components/poll-voting-surface.astro`
+- `src/scripts/ranked-results-live.ts`
+- `src/scripts/results-live.ts`
+- `src/scripts/results-live-core.ts`
+- `tests/unit/tabulate-irv.test.ts`
+- `tests/unit/results.test.ts`
+- `tests/unit/results-comments.test.ts`
+- `tests/integration/ranked-results-adapter.integration.test.ts`
+- `tests/e2e/ranked-results.spec.mjs`
+- `CHANGELOG.md`
+- `README.md`
+- `_bmad-output/implementation-artifacts/spec-5-2-deterministic-irv-tabulation.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `_bmad-output/implementation-artifacts/deferred-work.md`

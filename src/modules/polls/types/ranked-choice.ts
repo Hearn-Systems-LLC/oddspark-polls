@@ -9,6 +9,11 @@ import {
   type Result,
 } from "../../../shared/application/index";
 import type { PollOptionId } from "../../../shared/domain/index";
+import {
+  tabulateAndProjectRanked,
+  type RankedTallyView,
+} from "../../results/index";
+import type { IrvBallot, IrvOptionSet } from "../../results/tabulate-irv";
 
 export type RankedChoiceCreateInput = {
   optionLabels: string[];
@@ -52,6 +57,12 @@ export type RankedChoicePersistedFacts = {
   }[];
 };
 
+/** Multi-ballot input for the pure strategy projector (tests / AD-3). */
+export type RankedChoiceResultsFacts = {
+  options: IrvOptionSet[];
+  ballots: IrvBallot[];
+};
+
 type RankedChoiceStrategy = Omit<
   PollTypeStrategy<
     RankedChoiceCreateInput,
@@ -59,16 +70,18 @@ type RankedChoiceStrategy = Omit<
     RankedChoiceVoteSubmission,
     RankedChoiceValidatedSubmission,
     RankedChoicePersistedFacts,
-    never,
-    never,
+    RankedChoiceResultsFacts,
+    RankedTallyView,
     PollTypeExportProjection
   >,
-  "validateSubmission" | "projectExport"
+  "validateSubmission" | "projectResults" | "projectExport"
 > & {
   validateSubmission: (
     submission: RankedChoiceVoteSubmission,
     facts: RankedChoiceValidationFacts,
   ) => Result<RankedChoiceValidatedSubmission>;
+  /** Pure IRV projection — same tabulator as the D1 Results adapter (AD-9). */
+  projectResults: (facts: RankedChoiceResultsFacts) => RankedTallyView;
   projectExport: () => Result<PollTypeExportProjection>;
 };
 
@@ -163,6 +176,11 @@ export const rankedChoiceStrategy: RankedChoiceStrategy = {
       ...preference,
     })),
   }),
+  projectResults: (facts) =>
+    tabulateAndProjectRanked({
+      ballots: facts.ballots,
+      options: facts.options,
+    }),
   projectExport: () => ({
     ok: false,
     error: {

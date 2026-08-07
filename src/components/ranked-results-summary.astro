@@ -1,0 +1,168 @@
+---
+import TrustBadge from "./trust-badge.astro";
+import type { RankedTallyView } from "../modules/results/index";
+import type { PollSecurityToggles, PollStatus } from "../shared/domain/index";
+import { RESULTS_COPY } from "../modules/results/index";
+
+// Ranked Tally summary (Story 5.2). Round table + YOUR BALLOT + Comments land
+// in Story 5.3 — this surface only shows the IRV outcome and final standing.
+
+type Props = {
+  ranked: RankedTallyView;
+  status: PollStatus;
+  toggles?: PollSecurityToggles;
+  liveEndpoint?: string;
+  initialValidator?: string;
+  initialRenderAtMs?: number;
+};
+
+const {
+  ranked,
+  status,
+  toggles,
+  liveEndpoint,
+  initialValidator,
+  initialRenderAtMs,
+} = Astro.props;
+
+const outcomeLine = ranked.empty
+  ? RESULTS_COPY.empty
+  : ranked.resolved
+    ? `Winner: ${ranked.winnerLabel ?? "—"}`
+    : ranked.tiedOptionLabels.length > 0
+      ? `Unresolved tie: ${ranked.tiedOptionLabels.join(", ")}`
+      : "Unresolved";
+---
+
+<section
+  class="ranked-results"
+  data-ranked-results
+  data-results-region
+  data-poll-type="ranked_choice"
+  data-status={status}
+  data-live-endpoint={liveEndpoint}
+  data-initial-validator={initialValidator}
+  data-initial-render-at={initialRenderAtMs}
+>
+  {toggles && <TrustBadge toggles={toggles} />}
+  <p class="ranked-outcome" data-ranked-outcome>
+    {outcomeLine}
+  </p>
+  <p class="ranked-meta" data-ranked-meta>
+    {ranked.voterCount === 1
+      ? "1 BALLOT"
+      : `${ranked.voterCount} BALLOTS`}
+    {ranked.rounds.length > 0
+      ? ` · ${ranked.rounds.length} ROUND${ranked.rounds.length === 1 ? "" : "S"}`
+      : ""}
+  </p>
+  {
+    !ranked.empty && ranked.finalCounts.length > 0 && (
+      <ol class="ranked-standing" data-ranked-standing>
+        {ranked.finalCounts.map((option) => {
+          const isWinner =
+            ranked.resolved && ranked.winnerId === option.optionId;
+          const isTied =
+            !ranked.resolved &&
+            ranked.tiedOptionIds.includes(option.optionId);
+          return (
+            <li
+              class:list={[
+                "ranked-standing-row",
+                isWinner && "is-winner",
+                isTied && "is-tied",
+              ]}
+              data-option-id={option.optionId}
+            >
+              <span class="ranked-standing-label">{option.label}</span>
+              <span class="ranked-standing-count">{option.count}</span>
+              {isWinner && (
+                <span class="ranked-standing-mark">Winner</span>
+              )}
+              {isTied && (
+                <span class="ranked-standing-mark">{RESULTS_COPY.tied}</span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    )
+  }
+  <p class="ranked-note">
+    Instant-runoff count · full per-round table arrives with the Ballot Manifest.
+  </p>
+</section>
+
+<style>
+  .ranked-results {
+    display: grid;
+    gap: var(--space-4);
+  }
+
+  .ranked-outcome {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--type-title-size);
+    line-height: var(--type-title-lh);
+    color: var(--color-ink);
+  }
+
+  .ranked-meta {
+    margin: 0;
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-dim);
+  }
+
+  .ranked-standing {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .ranked-standing-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: var(--space-3);
+    align-items: baseline;
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--color-rule);
+  }
+
+  .ranked-standing-label {
+    color: var(--color-ink);
+  }
+
+  .ranked-standing-row.is-winner .ranked-standing-label {
+    font-weight: 600;
+  }
+
+  .ranked-standing-count {
+    font-family: var(--font-machine);
+    color: var(--color-dim);
+  }
+
+  .ranked-standing-mark {
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+    color: var(--color-solar);
+  }
+
+  .ranked-standing-row.is-tied .ranked-standing-mark {
+    color: var(--color-dim);
+  }
+
+  .ranked-note {
+    margin: 0;
+    color: var(--color-dim);
+    font-size: var(--type-body-sm-size);
+    line-height: var(--type-body-sm-lh);
+  }
+</style>

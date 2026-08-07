@@ -3,7 +3,7 @@ import {
   isCommentTimestamp,
 } from "../modules/comments/index";
 import type { CommentView } from "../modules/comments/index";
-import type { LiveResultsPayload } from "../modules/results/index";
+import type { LiveMultipleChoicePayload } from "../modules/results/index";
 import type { PollStatus } from "../shared/domain/index";
 
 export const RESULTS_POLL_CADENCE_MS = 3_000;
@@ -71,9 +71,10 @@ const isUnitShare = (value: unknown): value is number =>
   value >= 0 &&
   value <= 1;
 
+/** Type guard for Multiple-Choice live payloads only (not ranked IRV). */
 export function isLiveResultsPayload(
   value: unknown,
-): value is LiveResultsPayload {
+): value is LiveMultipleChoicePayload {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [

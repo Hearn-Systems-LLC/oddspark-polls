@@ -1,6 +1,6 @@
 import { barAccessibleName, barWidthPercent } from "../components/results-bar";
 import { formatVoteTotal } from "../components/live-indicator";
-import type { LiveResultsPayload } from "../modules/results/index";
+import type { LiveMultipleChoicePayload } from "../modules/results/index";
 import type { CommentView } from "../modules/comments/index";
 import { RESULTS_CHART_FORM_CHANGE_EVENT } from "./chart-form-contract";
 import {
@@ -508,7 +508,7 @@ const enhanceResultsTally = (root: HTMLElement): void => {
   });
 
   const reconcile = (
-    payload: LiveResultsPayload,
+    payload: LiveMultipleChoicePayload,
     animate: boolean,
   ): boolean => {
     const bars = Array.from(

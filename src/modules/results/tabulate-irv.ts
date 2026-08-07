@@ -6,10 +6,24 @@
 
 import type { PollOptionId } from "../../shared/domain/index";
 
+/**
+ * One accepted ranked Ballot as an ordered preference list.
+ *
+ * Contract: `preferences[0]` is the highest rank (first choice), then
+ * descending. Callers (D1 adapter, tests) must supply IDs already ordered by
+ * preference rank — this module never re-sorts by option id or position.
+ * Duplicate or unknown option IDs are not validated here; the Vote boundary
+ * rejects malformed Ballots before tabulation.
+ */
 export type IrvBallot = {
   readonly preferences: readonly PollOptionId[];
 };
 
+/**
+ * Option metadata for labels and stable identity. `position` is display/order
+ * metadata from the Poll; the tabulator does not use it for elimination or
+ * tie-breaking (FR-9 forbids position-based arbitrary breaks).
+ */
 export type IrvOptionSet = {
   readonly id: PollOptionId;
   readonly label: string;
@@ -174,16 +188,33 @@ function backwardTieBreak(
   return null;
 }
 
+function emptyUnresolved(): IrvOutcome {
+  return {
+    resolved: false,
+    tiedOptionIds: [],
+    tiedOptionLabels: [],
+    standingCounts: new Map(),
+    rounds: [],
+  };
+}
+
+/**
+ * Deterministic IRV tabulation (FR-9).
+ *
+ * Terminal paths for a resolved winner:
+ * 1. **Strict majority** — one option holds more than half of active Ballots.
+ * 2. **Last remaining** — only one option remains after eliminations (including
+ *    when every Ballot is exhausted and the survivor has zero active votes).
+ *    Sole survivor always wins; unresolved is reserved for indistinguishable
+ *    multi-option ties, never a single remaining name.
+ *
+ * Empty input: zero options, or zero accepted Ballots, yields zero Rounds and
+ * an unresolved empty outcome (Results empty-state owns presentation).
+ */
 export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
   const { ballots, options } = input;
-  if (options.length === 0) {
-    return {
-      resolved: false,
-      tiedOptionIds: [],
-      tiedOptionLabels: [],
-      standingCounts: new Map(),
-      rounds: [],
-    };
+  if (options.length === 0 || ballots.length === 0) {
+    return emptyUnresolved();
   }
 
   const optionMap = new Map<PollOptionId, IrvOptionSet>();
@@ -219,6 +250,8 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
       };
     }
 
+    // Sole survivor wins even with zero active ballots (exhaustion of all
+    // remaining preferences). Not a majority path — see module doc.
     if (remaining.size === 1) {
       const lastId = [...remaining][0];
       const round: IrvRound = {
@@ -290,13 +323,14 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
       };
     }
 
+    const sortedEliminated = [...eliminationDecision.eliminated].sort();
     const round: IrvRound = {
       roundNumber,
       counts: new Map(counts),
       exhaustedCount,
       activeBallotCount,
       eliminated: {
-        optionIds: eliminationDecision.eliminated,
+        optionIds: sortedEliminated,
         reason: eliminationDecision.reason,
       },
     };
@@ -307,11 +341,5 @@ export function tabulateIrv(input: TabulateIrvInput): IrvOutcome {
     }
   }
 
-  return {
-    resolved: false,
-    tiedOptionIds: [],
-    tiedOptionLabels: [],
-    standingCounts: new Map(),
-    rounds,
-  };
+  return emptyUnresolved();
 }

@@ -15,11 +15,17 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Deterministic instant-runoff (IRV) tabulation for Ranked-Choice Polls. After
+  authorization, live and closed Results, post-vote surfaces, and the live JSON
+  endpoint compute the same pure IRV outcome from accepted Ballots — majority
+  wins, safe batch elimination, backward tie-breaking, honest unresolved ties,
+  and exhaustion tracking. The summary shows the winner or unresolved standings;
+  the per-round table, Ballot Manifest, Comments on ranked Results, and ranked
+  export remain for later stories.
 - Ranked-Choice Poll creation and accessible ordered partial Ballots. Voters
   can rank, unrank, and compact options by tap, Enter, or Space, with the same
   complete flow available through server forms without JavaScript. Accepted
-  preferences commit atomically as normalized Vote facts; Ranked Results and
-  export remain explicitly unavailable until the IRV and trust-surface stories.
+  preferences commit atomically as normalized Vote facts.
 - Large Discover catalogs now publish a bounded sitemap index whose opaque
   keyset-range children reapply fresh D1 eligibility without crossing their
   encoded ranges; smaller catalogs keep the byte-compatible single

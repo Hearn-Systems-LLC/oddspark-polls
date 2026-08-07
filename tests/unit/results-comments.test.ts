@@ -69,6 +69,7 @@ describe("Results Comment authorization and projection", () => {
     const ports: ResultsPorts = {
       findAccessEnvelope: async () => envelope(visibility),
       projectResults,
+      projectRankedResults: vi.fn(async () => null),
     };
     const view = await queryResults(ports, "comments", viewer, NOW);
     expect(view.kind).not.toBe("visible");
@@ -84,6 +85,7 @@ describe("Results Comment authorization and projection", () => {
     const ports: ResultsPorts = {
       findAccessEnvelope: async () => envelope(),
       projectResults,
+      projectRankedResults: vi.fn(async () => null),
     };
 
     const publicView = await queryResults(ports, "comments", { userId: null }, NOW);
@@ -113,6 +115,7 @@ describe("Results Comment authorization and projection", () => {
       findAccessEnvelope: async () => envelope("creator_only"),
       readRepresentationVersion: async () => 2,
       projectVersionedResults,
+      projectVersionedRankedResults: async () => null,
     };
     const view = await queryLiveResults(
       ports,

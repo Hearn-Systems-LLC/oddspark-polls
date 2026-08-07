@@ -1958,9 +1958,11 @@ export function createResultsPersistence(db: D1Database) {
     },
 
     /**
-     * Ranked IRV projection (Story 5.2). One snapshot of options + ordered
-     * preferences + representation_version; pure tabulator owns the count.
+     * Ranked IRV projection (Story 5.2). Options + ordered preferences +
+     * representation_version; pure tabulator owns the count.
      * Does not authorize visibility — callers must gate first (AD-21).
+     * AD-24: re-reads representation_version after ballots and retries on
+     * skew so the validator and body describe one coherent generation.
      */
     async projectRankedResults(
       pollId: PollId,
@@ -1971,119 +1973,168 @@ export function createResultsPersistence(db: D1Database) {
     async projectVersionedRankedResults(
       pollId: PollId,
     ): Promise<VersionedRankedTallyProjection | null> {
-      const pollRow = await db
-        .prepare(
-          `SELECT poll_type, representation_version
-           FROM poll
-           WHERE id = ?1
-           LIMIT 1`,
-        )
-        .bind(pollId)
-        .first<{
-          poll_type: unknown;
-          representation_version: number;
-        }>();
-      if (!pollRow) {
-        return null;
-      }
-      if (pollRow.poll_type !== "ranked_choice") {
-        throw new Error("Ranked projection requested for non-ranked Poll");
-      }
-      if (
-        !Number.isSafeInteger(pollRow.representation_version) ||
-        pollRow.representation_version < 1
-      ) {
-        throw new Error("Malformed representation version");
-      }
-
-      const optionRows = await db
-        .prepare(
-          `SELECT id, label, position
-           FROM poll_option
-           WHERE poll_id = ?1
-           ORDER BY position`,
-        )
-        .bind(pollId)
-        .all<{
-          id: PollOptionId;
-          label: string;
-          position: number;
-        }>();
-
-      if (optionRows.results.length === 0) {
-        throw new Error(
-          "Malformed ranked projection: resolved Poll has no options",
-        );
-      }
-
-      const options: IrvOptionSet[] = optionRows.results.map((row) => {
-        if (
-          typeof row.id !== "string" ||
-          typeof row.label !== "string" ||
-          !Number.isSafeInteger(row.position) ||
-          row.position < 0
-        ) {
-          throw new Error("Malformed ranked projection: invalid option row");
+      const maxAttempts = 3;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const pollRow = await db
+          .prepare(
+            `SELECT poll_type, representation_version
+             FROM poll
+             WHERE id = ?1
+             LIMIT 1`,
+          )
+          .bind(pollId)
+          .first<{
+            poll_type: unknown;
+            representation_version: number;
+          }>();
+        if (!pollRow) {
+          return null;
         }
-        return {
-          id: row.id,
-          label: row.label,
-          position: row.position,
-        };
-      });
-
-      const preferenceRows = await db
-        .prepare(
-          `SELECT v.id AS vote_id,
-                  rvp.poll_option_id AS poll_option_id,
-                  rvp.preference_rank AS preference_rank
-           FROM vote v
-           JOIN ranked_vote_preference rvp ON rvp.vote_id = v.id
-           WHERE v.poll_id = ?1
-           ORDER BY v.id, rvp.preference_rank`,
-        )
-        .bind(pollId)
-        .all<{
-          vote_id: string;
-          poll_option_id: PollOptionId;
-          preference_rank: number;
-        }>();
-
-      const knownOptionIds = new Set(options.map((option) => option.id));
-      const byVote = new Map<string, { rank: number; optionId: PollOptionId }[]>();
-      for (const row of preferenceRows.results) {
-        if (
-          typeof row.vote_id !== "string" ||
-          typeof row.poll_option_id !== "string" ||
-          !Number.isSafeInteger(row.preference_rank) ||
-          row.preference_rank < 1 ||
-          !knownOptionIds.has(row.poll_option_id)
-        ) {
-          throw new Error("Malformed ranked projection: invalid preference row");
+        if (pollRow.poll_type !== "ranked_choice") {
+          throw new Error("Ranked projection requested for non-ranked Poll");
         }
-        const existing = byVote.get(row.vote_id) ?? [];
-        existing.push({
-          rank: row.preference_rank,
-          optionId: row.poll_option_id,
+        if (
+          !Number.isSafeInteger(pollRow.representation_version) ||
+          pollRow.representation_version < 1
+        ) {
+          throw new Error("Malformed representation version");
+        }
+        const versionAtStart = pollRow.representation_version;
+
+        const optionRows = await db
+          .prepare(
+            `SELECT id, label, position
+             FROM poll_option
+             WHERE poll_id = ?1
+             ORDER BY position`,
+          )
+          .bind(pollId)
+          .all<{
+            id: PollOptionId;
+            label: string;
+            position: number;
+          }>();
+
+        if (optionRows.results.length === 0) {
+          throw new Error(
+            "Malformed ranked projection: resolved Poll has no options",
+          );
+        }
+
+        const options: IrvOptionSet[] = optionRows.results.map((row) => {
+          if (
+            typeof row.id !== "string" ||
+            typeof row.label !== "string" ||
+            !Number.isSafeInteger(row.position) ||
+            row.position < 0
+          ) {
+            throw new Error("Malformed ranked projection: invalid option row");
+          }
+          return {
+            id: row.id,
+            label: row.label,
+            position: row.position,
+          };
         });
-        byVote.set(row.vote_id, existing);
-      }
 
-      // Also count votes with zero preferences (should not exist post-validation)
-      // by using distinct vote ids that have preferences as the ballot set —
-      // accepted ranked Votes always have ≥1 preference.
-      const ballots: IrvBallot[] = [...byVote.values()].map((prefs) => {
-        const ordered = [...prefs].sort((a, b) => a.rank - b.rank);
+        const voteCountRow = await db
+          .prepare(
+            `SELECT COUNT(*) AS vote_count
+             FROM vote
+             WHERE poll_id = ?1`,
+          )
+          .bind(pollId)
+          .first<{ vote_count: number }>();
+        const voteCount = voteCountRow?.vote_count ?? 0;
+        if (!Number.isSafeInteger(voteCount) || voteCount < 0) {
+          throw new Error("Malformed ranked projection: invalid vote count");
+        }
+
+        const preferenceRows = await db
+          .prepare(
+            `SELECT v.id AS vote_id,
+                    rvp.poll_option_id AS poll_option_id,
+                    rvp.preference_rank AS preference_rank
+             FROM vote v
+             JOIN ranked_vote_preference rvp ON rvp.vote_id = v.id
+             WHERE v.poll_id = ?1
+             ORDER BY v.id, rvp.preference_rank`,
+          )
+          .bind(pollId)
+          .all<{
+            vote_id: string;
+            poll_option_id: PollOptionId;
+            preference_rank: number;
+          }>();
+
+        const knownOptionIds = new Set(options.map((option) => option.id));
+        const byVote = new Map<
+          string,
+          { rank: number; optionId: PollOptionId }[]
+        >();
+        for (const row of preferenceRows.results) {
+          if (
+            typeof row.vote_id !== "string" ||
+            typeof row.poll_option_id !== "string" ||
+            !Number.isSafeInteger(row.preference_rank) ||
+            row.preference_rank < 1 ||
+            !knownOptionIds.has(row.poll_option_id)
+          ) {
+            throw new Error(
+              "Malformed ranked projection: invalid preference row",
+            );
+          }
+          const existing = byVote.get(row.vote_id) ?? [];
+          existing.push({
+            rank: row.preference_rank,
+            optionId: row.poll_option_id,
+          });
+          byVote.set(row.vote_id, existing);
+        }
+
+        // Accepted ranked Votes always carry ≥1 preference. Orphan vote rows
+        // (zero preferences) must fail closed rather than silently undercount.
+        if (byVote.size !== voteCount) {
+          throw new Error(
+            "Malformed ranked projection: vote rows without preferences",
+          );
+        }
+
+        const ballots: IrvBallot[] = [...byVote.values()].map((prefs) => {
+          const ordered = [...prefs].sort((a, b) => a.rank - b.rank);
+          return {
+            preferences: ordered.map((preference) => preference.optionId),
+          };
+        });
+
+        // Confirm version still matches after ballot/option reads (AD-24).
+        const versionAfter = await db
+          .prepare(
+            `SELECT representation_version
+             FROM poll
+             WHERE id = ?1
+             LIMIT 1`,
+          )
+          .bind(pollId)
+          .first<{ representation_version: number }>();
+        if (
+          !versionAfter ||
+          !Number.isSafeInteger(versionAfter.representation_version) ||
+          versionAfter.representation_version < 1
+        ) {
+          throw new Error("Malformed representation version");
+        }
+        if (versionAfter.representation_version !== versionAtStart) {
+          continue;
+        }
+
+        const ranked = tabulateAndProjectRanked({ ballots, options });
         return {
-          preferences: ordered.map((preference) => preference.optionId),
+          ...ranked,
+          representationVersion: versionAtStart,
         };
-      });
-
-      const ranked = tabulateAndProjectRanked({ ballots, options });
-      return {
-        ...ranked,
-        representationVersion: pollRow.representation_version,
-      };
+      }
+      throw new Error("Ranked projection snapshot race");
     },
   };
 }

@@ -515,3 +515,16 @@ resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 
 - `IrvRound.counts` and unresolved `standingCounts` are `ReadonlyMap`s (`src/modules/results/tabulate-irv.ts`). Maps do not JSON-serialize for live payload / results projection. Defer until Results/live wiring maps Round evidence to a stable array/object shape.
 - Remaining Story 5.2 product wiring (Results module types, D1 `projectRankedResults`, strategy `projectResults`, results/live/post-vote UI, integration/e2e, CHANGELOG/README) is not in commit `aaa04a5`. Deferred as the next implementation slice — confirmed intentional pure-core intermediate delivery (code review D1=1, 2026-08-07). **Resolved 2026-08-07:** product wiring landed on `story/5-2-deterministic-irv-tabulation` (adapter, ranked_visible surfaces, tests, CHANGELOG/README).
+
+## Deferred from: code review of spec-5-2-deterministic-irv-tabulation.md Group 2 (2026-08-07)
+
+- Spec wording “join poll_option” vs separate options SELECT + `knownOptionIds` guard — behavior correct; non-blocking wording residual.
+- Dual-path adapter vs strategy multi-round parity fixtures — pure tabulator already shared; nice-to-have integration depth.
+- Ranked live client exact-key validator parity with MC — deferred to Group 3 UI/live surface review.
+
+## Deferred from: code review of spec-5-2-deterministic-irv-tabulation.md Group 3 (2026-08-07)
+
+- Browser live-poller e2e for ranked DOM refresh and ranked 204 visibility journeys — SSR/HTTP coverage exists; full poller e2e is polish.
+- Ranked live exact-key validator unit suite parity with MC — shallow client checks sufficient for 5.2 minimal poller.
+- Post-vote CSS grid placement for `.ranked-results` under `data-post-vote` — visual polish, not AC fail.
+- Round-table / elimination trail / YOUR BALLOT / Comment list on ranked surfaces — intentionally Story 5.3.

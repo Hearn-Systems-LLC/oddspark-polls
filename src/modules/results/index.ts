@@ -37,6 +37,26 @@ export {
   tabulateAndProjectRanked,
 } from "./ranked-projection";
 
+/**
+ * Drop the versioned adapter field so delivery never spreads
+ * `representationVersion` into JSON bodies (validator/ETag only).
+ */
+function rankedTallyFromVersioned(
+  projection: VersionedRankedTallyProjection,
+): RankedTallyView {
+  return {
+    empty: projection.empty,
+    voterCount: projection.voterCount,
+    resolved: projection.resolved,
+    winnerId: projection.winnerId,
+    winnerLabel: projection.winnerLabel,
+    tiedOptionIds: projection.tiedOptionIds,
+    tiedOptionLabels: projection.tiedOptionLabels,
+    finalCounts: projection.finalCounts,
+    rounds: projection.rounds,
+  };
+}
+
 // The only identity fact Results may consult: the authenticated internal
 // Oddspark user ID, or anonymous. Never a Google/GitHub identifier (AD-4).
 export type ViewerContext = {
@@ -398,8 +418,8 @@ export async function queryResults(
         canonicalReference: envelope.canonicalReference,
       };
     }
-    const ranked = await ports.projectRankedResults(envelope.pollId);
-    if (ranked === null) {
+    const rankedProjection = await ports.projectRankedResults(envelope.pollId);
+    if (rankedProjection === null) {
       throw new Error("Ranked Results projection unavailable");
     }
     return {
@@ -409,8 +429,11 @@ export async function queryResults(
       canonicalReference: envelope.canonicalReference,
       status,
       securityToggles: envelope.securityToggles,
-      ranked,
-      validator: composeResultsValidator(ranked.representationVersion, status),
+      ranked: rankedTallyFromVersioned(rankedProjection),
+      validator: composeResultsValidator(
+        rankedProjection.representationVersion,
+        status,
+      ),
     };
   }
 
@@ -492,22 +515,24 @@ export async function queryLiveResults(
         canonicalReference: envelope.canonicalReference,
       };
     }
-    const ranked = await ports.projectVersionedRankedResults(envelope.pollId);
-    if (ranked === null) {
+    const rankedProjection = await ports.projectVersionedRankedResults(
+      envelope.pollId,
+    );
+    if (rankedProjection === null) {
       throw new Error("Live Ranked Results projection unavailable");
     }
     const snapshotValidator = composeResultsValidator(
-      ranked.representationVersion,
+      rankedProjection.representationVersion,
       status,
     );
     return {
       kind: "ranked_visible",
       pollId: envelope.pollId,
       canonicalReference: envelope.canonicalReference,
-      representationVersion: ranked.representationVersion,
+      representationVersion: rankedProjection.representationVersion,
       status,
       validator: snapshotValidator,
-      ranked,
+      ranked: rankedTallyFromVersioned(rankedProjection),
     };
   }
 

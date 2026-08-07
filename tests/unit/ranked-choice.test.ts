@@ -307,6 +307,34 @@ describe("Ranked Choice CastVote", () => {
     expect(persisted).toHaveLength(1);
   });
 
+  it("projectResults delegates to the shared pure IRV tabulator", () => {
+    const ranked = rankedChoiceStrategy.projectResults({
+      options: [
+        { id: OPTION_A, label: "A", position: 0 },
+        { id: OPTION_B, label: "B", position: 1 },
+        { id: OPTION_C, label: "C", position: 2 },
+      ],
+      ballots: [
+        { preferences: [OPTION_A, OPTION_B, OPTION_C] },
+        { preferences: [OPTION_A, OPTION_C, OPTION_B] },
+        { preferences: [OPTION_B, OPTION_A, OPTION_C] },
+      ],
+    });
+    expect(ranked.resolved).toBe(true);
+    expect(ranked.winnerId).toBe(OPTION_A);
+    expect(ranked.voterCount).toBe(3);
+    expect(ranked).not.toHaveProperty("representationVersion");
+  });
+
+  it("projectExport remains unavailable for ranked Choice", () => {
+    expect(rankedChoiceStrategy.projectExport()).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: "export_projection_unavailable",
+      }),
+    });
+  });
+
   it("uses the authoritative Poll Type and rejects a legacy-shaped Ballot", async () => {
     const deps: CastVoteDeps = {
       findPoll: async () => rankedPoll(),

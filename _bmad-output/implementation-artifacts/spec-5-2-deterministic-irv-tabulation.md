@@ -2,7 +2,7 @@
 title: 'Story 5.2: Deterministic IRV Tabulation'
 type: 'feature'
 created: '2026-08-06T18:00:00-04:00'
-status: 'review'
+status: 'done'
 baseline_revision: '58b9e0d'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -100,6 +100,9 @@ warnings: []
 ## Review Triage Log
 
 - 2026-08-07 — Code review of branch `story/5-2-deterministic-irv-tabulation` (`aaa04a5` vs `main`/`58b9e0d`). Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. Suite fails to load (`Cannot find module '../../../src/...'`). Core pure algorithm largely FR-9-aligned; tests and remaining Code Map wiring incomplete.
+- 2026-08-07 — Group 1 chunk review (`58b9e0d..HEAD`, tabulator + unit tests only). Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. **AC pass** on pure tabulator; 0 decision-needed, 7 patch (test strength + Map freeze), ~18 dismissed (null guards under TS contract, MAX_SAFE_INTEGER, unreachable fallthrough, double-majority impossible, empty-options vs empty-ballots shape intentional, ghost-only vs zero-ballot intentional, auditor property-naming residual). All 7 patches applied same day; suite 26/26.
+- 2026-08-07 — Group 2 chunk review (Results + D1 ranked ports + strategy + wiring tests). Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. **AC pass** (AD-9/AD-21, ranked_visible, empty Comments, residual copy, live 304). 0 decision-needed, 5 patch (version strip, AD-24 snapshot, orphan vote fail-closed, residual tests), 3 defer, ~12 dismissed (export deferred to later story, YOUR BALLOT until 5.3, null-throw matches MC, typeof residual untested not product path). All 5 patches applied same day.
+- 2026-08-07 — Group 3 chunk review (UI/live/post-vote/e2e). Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. **AC pass** (ranked_visible render, Comments hidden, no-store, 204 hidden, unresolved as result, no Manifest/export). 0 decision-needed, 5 patch (standing reconcile, 204 reload, init guard, empty labels, aria-live), 4 defer, ~8 dismissed (rounds in JSON intentional until 5.3 table, YOUR BALLOT data path 5.3). All 5 patches applied; story → done.
 
 ### Review Findings
 
@@ -131,6 +134,79 @@ warnings: []
 - [x] [Review][Defer] `ReadonlyMap` counts are not JSON-serializable for live/results payloads [src/modules/results/tabulate-irv.ts:26,46] — deferred, wiring will map to arrays/objects
 - [x] [Review][Defer] Remaining product wiring (adapter, Results types, live/post-vote UI, integration/e2e, CHANGELOG/README) — **resolved 2026-08-07** by product-wiring pass on this branch
 
+### Review Findings — Group 1 chunk (tabulator + unit tests, 2026-08-07)
+
+Post-merge review of `58b9e0d..HEAD` scoped to `src/modules/results/tabulate-irv.ts` and `tests/unit/tabulate-irv.test.ts`. Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. Auditor: Group 1 meets tabulator-scoped AC; residuals are test strength only.
+
+#### Decision-needed
+
+_(none)_
+
+#### Patch
+
+- [x] [Review][Patch] Strengthen `backward_tie_break` property to assert FR-9 semantics (eliminated IDs had strictly fewer votes than at least one other member of the same lowest group in the distinguishing prior Round) [tests/unit/tabulate-irv.test.ts] — applied 2026-08-07
+- [x] [Review][Patch] Add unit cases for Vote-boundary regressions the pure module documents but does not validate: empty `preferences`, duplicate ranks on one ballot, mixed unknown+real option IDs [tests/unit/tabulate-irv.test.ts] — applied 2026-08-07
+- [x] [Review][Patch] Assert `IrvOptionSet.position` never affects elimination/winner (same ballots, permuted positions → identical outcome) [tests/unit/tabulate-irv.test.ts] — applied 2026-08-07
+- [x] [Review][Patch] Add a fixed safe-batch fixture with three-or-more options tied for last place [tests/unit/tabulate-irv.test.ts] — applied 2026-08-07
+- [x] [Review][Patch] Expand property generators to include partial rankings so exhaustion/partial-majority paths enter the generative surface [tests/unit/tabulate-irv.test.ts] — applied 2026-08-07
+- [x] [Review][Patch] Assert round integrity invariants: contiguous `roundNumber` from 1; terminal rounds have `eliminated: null`; `fewest_votes` eliminates exactly one option [tests/unit/tabulate-irv.test.ts] — applied 2026-08-07
+- [x] [Review][Patch] Freeze returned `counts` / `standingCounts` Maps (immutable ReadonlyMap wrapper; mutation methods throw) [src/modules/results/tabulate-irv.ts] — applied 2026-08-07
+
+#### Defer
+
+_(none for this chunk)_
+
+**Group 1 outcome:** all 7 patches applied; `pnpm exec vitest run tests/unit/tabulate-irv.test.ts` → 26/26. Story remains `review` until Groups 2–3 (wiring / UI+e2e) are reviewed.
+
+### Review Findings — Group 2 chunk (wiring, 2026-08-07)
+
+Post-merge review of Results module + `ranked-projection` + D1 `projectRanked*` + ranked-choice strategy + integration/unit wiring tests. Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. Auditor: **Group 2 AC pass**; residuals are snapshot fidelity, version stripping, and tests.
+
+#### Decision-needed
+
+_(none)_
+
+#### Patch
+
+- [x] [Review][Patch] Strip `representationVersion` from the outward `ranked` object in `queryResults` / `queryLiveResults` so live `...view.ranked` JSON cannot leak version (module contract: version lives in ETag/validator only) [src/modules/results/index.ts] — applied 2026-08-07 (`rankedTallyFromVersioned`)
+- [x] [Review][Patch] Harden ranked D1 projection snapshot coherence (AD-24): re-read version after prefs; retry up to 3 times on skew [src/adapters/d1/index.ts] — applied 2026-08-07
+- [x] [Review][Patch] Fail closed when `vote` rows exist without any `ranked_vote_preference` (orphan Votes) [src/adapters/d1/index.ts] — applied 2026-08-07
+- [x] [Review][Patch] Unit-test residual `ranked_unavailable` when ranked port is missing; assert `rankedChoiceStrategy.projectResults` / `projectExport` wiring [tests/unit] — applied 2026-08-07
+- [x] [Review][Patch] Assert `view.ranked` has no `representationVersion` on ranked_visible unit paths [tests/unit/results.test.ts] — applied 2026-08-07
+
+**Group 2 outcome:** all 5 patches applied; unit+integration ranked suite green (106 tests across results/ranked-choice/IRV/adapter). Story remains `review` until Group 3.
+
+#### Defer
+
+- [x] [Review][Defer] Spec wording “join poll_option” vs separate options SELECT + knownOptionIds set — behavior correct; wording residual — deferred, non-blocking
+- [x] [Review][Defer] Dual-path adapter vs strategy multi-round parity fixtures — deferred, pure tabulator already shared; nice-to-have
+- [x] [Review][Defer] Ranked live client exact-key validator parity with MC — deferred to Group 3 UI/live surface
+
+### Review Findings — Group 3 chunk (UI + live + e2e, 2026-08-07)
+
+Post-merge review of RankedResultsSummary, ranked-results-live, results/live delivery, post-vote surface, e2e. Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. Auditor: **Group 3 AC pass**; residuals include live standing refresh and terminal-status UX.
+
+#### Decision-needed
+
+_(none)_
+
+#### Patch
+
+- [x] [Review][Patch] Live poller reconciles standing list when `finalCounts`/winner/ties change [src/scripts/ranked-results-live.ts] — applied 2026-08-07
+- [x] [Review][Patch] On live `204`/`404`, reload like MC so entitlement loss does not leave IRV on screen [src/scripts/ranked-results-live.ts] — applied 2026-08-07
+- [x] [Review][Patch] Idempotent live init (`data-live-enhanced` guard) [src/scripts/ranked-results-live.ts] — applied 2026-08-07
+- [x] [Review][Patch] Blank winner/tie labels use "—"; empty copy shared with RESULTS_COPY.empty string [src/components/ranked-results-summary.astro, src/scripts/ranked-results-live.ts] — applied 2026-08-07
+- [x] [Review][Patch] `aria-live="polite"` on ranked outcome + section aria-label [src/components/ranked-results-summary.astro] — applied 2026-08-07
+
+**Group 3 outcome:** all 5 patches applied. Full story review (Groups 1–3) complete.
+
+#### Defer
+
+- [x] [Review][Defer] Browser live-poller e2e for ranked DOM refresh + ranked 204 visibility journeys — deferred, AC HTTP/e2e SSR coverage exists; full poller e2e is polish
+- [x] [Review][Defer] Ranked live exact-key validator parity with MC unit tests — deferred (payload validation strengthened in live client; full suite later)
+- [x] [Review][Defer] Post-vote CSS grid placement for `.ranked-results` under `data-post-vote` — deferred visual polish, not AC fail
+- [x] [Review][Defer] Round-table / elimination trail / YOUR BALLOT / Comment list on ranked — intentionally Story 5.3
+
 ## Design Notes
 
 The tabulator is a pure function with no side effects. Its input is a flat array of Ballots (each an ordered list of option IDs) plus the option set; its output is a discriminated union of either a winner with Round sequence or an unresolved state with standing counts. The adapter owns the SQL-to-tabulator-input mapping; the Results module owns authorization; the delivery layer owns HTTP shaping. This separation means the tabulator can be tested exhaustively without workerd, D1, or any provider.
@@ -150,6 +226,7 @@ The live endpoint extends `LiveResultsPayload` rather than replacing it. The exi
 
 **Evidence:**
 - 2026-08-07 — `pnpm exec vitest run tests/unit/tabulate-irv.test.ts` — 19/19 passed after review patches.
+- 2026-08-07 — Group 1 review patches: `pnpm exec vitest run tests/unit/tabulate-irv.test.ts` — 26/26; `tsc --noEmit` clean.
 - 2026-08-07 — unit: results + comments + ranked-choice + IRV; integration: ranked-results-adapter (4/4); `pnpm check` clean.
 - 2026-08-07 — product wiring: adapter → queryResults/queryLiveResults → results.astro / live.ts / post-vote / RankedResultsSummary; Comments empty on ranked; export still unavailable.
 

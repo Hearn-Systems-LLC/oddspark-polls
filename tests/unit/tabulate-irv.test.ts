@@ -23,12 +23,18 @@ const ballot = (...prefs: number[]): IrvBallot => ({
   preferences: prefs.map((n) => optionId(n)),
 });
 
-/** Arbitrary non-empty ranking over option indices (any order). */
-const arbitraryBallot = (optionCount: number) =>
+/**
+ * Arbitrary ranking over option indices (any order). When `allowPartial` is
+ * true, length may be shorter than the option set so partial-rank paths enter
+ * the generative surface.
+ */
+const arbitraryBallot = (optionCount: number, allowPartial = false) =>
   fc
     .uniqueArray(fc.integer({ min: 0, max: optionCount - 1 }), {
       minLength: 1,
-      maxLength: optionCount,
+      maxLength: allowPartial
+        ? Math.max(1, Math.floor(optionCount / 2) + 1)
+        : optionCount,
     })
     .map((indices) => ballot(...indices));
 
@@ -37,11 +43,12 @@ const arbitraryInput = (
   optionMax: number,
   ballotMin: number,
   ballotMax: number,
+  allowPartial = true,
 ) =>
   fc.integer({ min: optionMin, max: optionMax }).chain((optionCount) =>
     fc.record({
       options: fc.constant(makeOptions(optionCount)),
-      ballots: fc.array(arbitraryBallot(optionCount), {
+      ballots: fc.array(arbitraryBallot(optionCount, allowPartial), {
         minLength: ballotMin,
         maxLength: ballotMax,
       }),
@@ -187,6 +194,39 @@ describe("tabulateIrv", () => {
           ]);
         }
         expect(result.winnerId).toBe(optionId(0));
+      }
+    });
+
+    it("batch-eliminates three or more options tied for last when safe", () => {
+      // A=6, B=4, C=1, D=1, E=1 (total 13). No majority (need >6.5 → 7).
+      // Tied last C+D+E combined 3 < B=4 → safe_batch of three.
+      const options = makeOptions(5);
+      const ballots: IrvBallot[] = [
+        ballot(0),
+        ballot(0),
+        ballot(0),
+        ballot(0),
+        ballot(0),
+        ballot(0),
+        ballot(1),
+        ballot(1),
+        ballot(1),
+        ballot(1),
+        ballot(2),
+        ballot(3),
+        ballot(4),
+      ];
+      const result = tabulateIrv({ ballots, options });
+      const firstRound = result.rounds[0];
+      expect(firstRound.eliminated).not.toBeNull();
+      if (firstRound.eliminated) {
+        expect(firstRound.eliminated.reason).toBe("safe_batch");
+        expect(firstRound.eliminated.optionIds.length).toBe(3);
+        expect([...firstRound.eliminated.optionIds].sort()).toEqual([
+          optionId(2),
+          optionId(3),
+          optionId(4),
+        ]);
       }
     });
 
@@ -386,6 +426,85 @@ describe("tabulateIrv", () => {
         expect(finalRound.counts.get(optionId(0))).toBe(0);
       }
     });
+
+    it("treats empty preferences as exhausted (Vote-boundary regression surface)", () => {
+      const options = makeOptions(2);
+      const ballots: IrvBallot[] = [
+        { preferences: [] },
+        { preferences: [] },
+        ballot(0, 1),
+      ];
+      const result = tabulateIrv({ ballots, options });
+      expect(result.resolved).toBe(true);
+      if (result.resolved) {
+        expect(result.winnerId).toBe(optionId(0));
+        expect(result.rounds[0].exhaustedCount).toBe(2);
+        expect(result.rounds[0].activeBallotCount).toBe(1);
+      }
+    });
+
+    it("skips duplicate preference IDs and counts the first remaining occurrence", () => {
+      // Ballot ranks A, A, B — first remaining match is A once.
+      const options = makeOptions(2);
+      const ballots: IrvBallot[] = [
+        { preferences: [optionId(0), optionId(0), optionId(1)] },
+        ballot(1, 0),
+      ];
+      const result = tabulateIrv({ ballots, options });
+      expect(result.rounds[0].counts.get(optionId(0))).toBe(1);
+      expect(result.rounds[0].counts.get(optionId(1))).toBe(1);
+    });
+
+    it("skips unknown option IDs and transfers to the next known remaining preference", () => {
+      const options = makeOptions(2);
+      const ballots: IrvBallot[] = [
+        {
+          preferences: [
+            "ghost" as PollOptionId,
+            optionId(1),
+            optionId(0),
+          ],
+        },
+        ballot(0, 1),
+      ];
+      const result = tabulateIrv({ ballots, options });
+      expect(result.rounds[0].counts.get(optionId(1))).toBe(1);
+      expect(result.rounds[0].counts.get(optionId(0))).toBe(1);
+      expect(result.rounds[0].exhaustedCount).toBe(0);
+    });
+
+    it("does not use option position for elimination or tie-breaking", () => {
+      const ballots: IrvBallot[] = [
+        ballot(0, 1, 2),
+        ballot(0, 1, 2),
+        ballot(1, 2, 0),
+        ballot(2, 1, 0),
+        ballot(2, 1, 0),
+      ];
+      const base = makeOptions(3);
+      const reversedPositions: IrvOptionSet[] = base.map((opt, index) => ({
+        ...opt,
+        position: base.length - 1 - index,
+      }));
+      const left = tabulateIrv({ ballots, options: base });
+      const right = tabulateIrv({ ballots, options: reversedPositions });
+      expect(outcomesEqual(left, right)).toBe(true);
+    });
+
+    it("rejects mutation of returned counts maps", () => {
+      const result = tabulateIrv({
+        ballots: [ballot(0, 1), ballot(1, 0)],
+        options: makeOptions(2),
+      });
+      const counts = result.rounds[0].counts as Map<PollOptionId, number>;
+      expect(counts.get(optionId(0))).toBe(1);
+      expect(() => counts.set(optionId(0), 99)).toThrow(/immutable/);
+      expect(counts.get(optionId(0))).toBe(1);
+      if (!result.resolved) {
+        const standing = result.standingCounts as Map<PollOptionId, number>;
+        expect(() => standing.set(optionId(0), 99)).toThrow(/immutable/);
+      }
+    });
   });
 
   describe("determinism property", () => {
@@ -460,25 +579,108 @@ describe("tabulateIrv", () => {
   });
 
   describe("backward tie-break property", () => {
-    it("backward_tie_break only fires after at least one prior round and eliminates a subset of the tied-last group", () => {
+    it("backward_tie_break eliminates only the lowest of the prior distinguishing Round among the current tied-last group", () => {
       fc.assert(
         fc.property(arbitraryInput(3, 6, 3, 50), (input: TabulateIrvInput) => {
           const result = tabulateIrv(input);
           for (let i = 0; i < result.rounds.length; i++) {
             const round = result.rounds[i];
             if (
-              round.eliminated !== null &&
-              round.eliminated.reason === "backward_tie_break"
+              round.eliminated === null ||
+              round.eliminated.reason !== "backward_tie_break"
             ) {
-              expect(i).toBeGreaterThan(0);
-              expect(round.eliminated.optionIds.length).toBeGreaterThan(0);
-              // Eliminated IDs must have been present in this round's counts.
-              for (const id of round.eliminated.optionIds) {
-                expect(round.counts.has(id)).toBe(true);
+              continue;
+            }
+            expect(i).toBeGreaterThan(0);
+            expect(round.eliminated.optionIds.length).toBeGreaterThan(0);
+            for (const id of round.eliminated.optionIds) {
+              expect(round.counts.has(id)).toBe(true);
+            }
+            const sorted = [...round.eliminated.optionIds].sort();
+            expect(round.eliminated.optionIds).toEqual(sorted);
+
+            // Reconstruct the tied-last group in this Round (all at min count).
+            let minCount = Infinity;
+            for (const count of round.counts.values()) {
+              if (count < minCount) minCount = count;
+            }
+            const tiedLast: PollOptionId[] = [];
+            for (const [id, count] of round.counts) {
+              if (count === minCount) tiedLast.push(id);
+            }
+            // Eliminated must be a non-empty subset of that group.
+            for (const id of round.eliminated.optionIds) {
+              expect(tiedLast).toContain(id);
+            }
+            expect(round.eliminated.optionIds.length).toBeLessThanOrEqual(
+              tiedLast.length,
+            );
+
+            // FR-9: in the most recent earlier Round that distinguishes the
+            // group, eliminated IDs hold the minimum count among the group,
+            // and at least one other group member has a strictly higher count.
+            let distinguishing: IrvRound | null = null;
+            for (let r = i - 1; r >= 0; r--) {
+              const prior = result.rounds[r];
+              const priorCounts = tiedLast.map(
+                (id) => prior.counts.get(id) ?? 0,
+              );
+              const first = priorCounts[0];
+              if (priorCounts.some((c) => c !== first)) {
+                distinguishing = prior;
+                break;
               }
-              // Sorted presentation order.
-              const sorted = [...round.eliminated.optionIds].sort();
-              expect(round.eliminated.optionIds).toEqual(sorted);
+            }
+            expect(distinguishing).not.toBeNull();
+            if (distinguishing === null) return;
+            const groupCounts = tiedLast.map((id) => ({
+              id,
+              count: distinguishing.counts.get(id) ?? 0,
+            }));
+            const priorMin = Math.min(...groupCounts.map((e) => e.count));
+            const priorMax = Math.max(...groupCounts.map((e) => e.count));
+            expect(priorMax).toBeGreaterThan(priorMin);
+            for (const id of round.eliminated.optionIds) {
+              expect(distinguishing.counts.get(id) ?? 0).toBe(priorMin);
+            }
+            // Every tied-last member at priorMin must be eliminated (full min set).
+            const expectedEliminated = groupCounts
+              .filter((e) => e.count === priorMin)
+              .map((e) => e.id)
+              .sort();
+            expect([...round.eliminated.optionIds].sort()).toEqual(
+              expectedEliminated,
+            );
+          }
+        }),
+        { numRuns: 200 },
+      );
+    });
+  });
+
+  describe("round integrity property", () => {
+    it("rounds are contiguous from 1, terminal rounds have no elimination, fewest_votes removes exactly one", () => {
+      fc.assert(
+        fc.property(arbitraryInput(2, 6, 1, 50), (input: TabulateIrvInput) => {
+          const result = tabulateIrv(input);
+          for (let i = 0; i < result.rounds.length; i++) {
+            expect(result.rounds[i].roundNumber).toBe(i + 1);
+          }
+          if (result.rounds.length === 0) return;
+          const last = result.rounds[result.rounds.length - 1];
+          // Terminal round (winner or unresolved) always has eliminated: null.
+          if (
+            result.resolved ||
+            (!result.resolved && result.tiedOptionIds.length > 0)
+          ) {
+            expect(last.eliminated).toBeNull();
+          }
+          for (const round of result.rounds) {
+            if (
+              round.eliminated !== null &&
+              round.eliminated.reason === "fewest_votes"
+            ) {
+              expect(round.eliminated.optionIds.length).toBe(1);
             }
           }
         }),

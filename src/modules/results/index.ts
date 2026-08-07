@@ -20,6 +20,22 @@ import type {
   CommentView,
   OwnerCommentView,
 } from "../comments/index";
+import type {
+  RankedTallyView,
+  VersionedRankedTallyProjection,
+} from "./ranked-projection";
+
+export type {
+  RankedEliminationView,
+  RankedOptionCountView,
+  RankedRoundView,
+  RankedTallyView,
+  VersionedRankedTallyProjection,
+} from "./ranked-projection";
+export {
+  projectRankedTallyView,
+  tabulateAndProjectRanked,
+} from "./ranked-projection";
 
 // The only identity fact Results may consult: the authenticated internal
 // Oddspark user ID, or anonymous. Never a Google/GitHub identifier (AD-4).
@@ -79,6 +95,10 @@ export type ResultsPorts = {
     pollId: PollId,
     includeOwnerModeration: boolean,
   ) => Promise<VersionedResultsProjection | null>;
+  /** Ranked IRV projection — never invents a Multiple-Choice pseudo-Tally. */
+  projectRankedResults: (
+    pollId: PollId,
+  ) => Promise<VersionedRankedTallyProjection | null>;
 };
 
 // Narrow compatibility projection retained for adapter-level Tally tests and
@@ -97,6 +117,9 @@ export type LiveResultsPorts = Pick<ResultsPorts, "findAccessEnvelope"> & {
   projectVersionedResults: (
     pollId: PollId,
   ) => Promise<VersionedResultsProjection | null>;
+  projectVersionedRankedResults: (
+    pollId: PollId,
+  ) => Promise<VersionedRankedTallyProjection | null>;
 };
 
 // Results-owned copy for the hidden shapes and Tally annotations. The voting
@@ -141,11 +164,23 @@ export type ResultsTallyView = {
 
 // Public JSON contract consumed by the isolated Tally enhancer. Internal
 // Poll identifiers and representation versions stay in the HTTP validator,
-// never in the payload.
-export type LiveResultsPayload = ResultsTallyView & {
+// never in the payload. Ranked payloads use an explicit discriminant so the
+// MC exact-key validator and the ranked validator stay separate.
+export type LiveMultipleChoicePayload = ResultsTallyView & {
   status: PollStatus;
   comments: CommentView[];
 };
+
+export type LiveRankedResultsPayload = RankedTallyView & {
+  status: PollStatus;
+  pollType: "ranked_choice";
+  /** Always empty until Story 5.3 wires Comment + round-table display. */
+  comments: CommentView[];
+};
+
+export type LiveResultsPayload =
+  | LiveMultipleChoicePayload
+  | LiveRankedResultsPayload;
 
 export type ResultsView =
   | {
@@ -176,6 +211,16 @@ export type ResultsView =
       canonicalReference: string;
     }
   | {
+      kind: "ranked_visible";
+      pollId: PollId;
+      question: string;
+      canonicalReference: string;
+      status: PollStatus;
+      securityToggles: PollSecurityToggles;
+      ranked: RankedTallyView;
+      validator: string;
+    }
+  | {
       kind: "ranked_unavailable";
       pollId: PollId;
       question: string;
@@ -196,6 +241,15 @@ export type LiveResultsView =
       validator: string;
       tally: ResultsTallyView;
       comments: CommentView[];
+    }
+  | {
+      kind: "ranked_visible";
+      pollId: PollId;
+      canonicalReference: string;
+      representationVersion: number;
+      status: PollStatus;
+      validator: string;
+      ranked: RankedTallyView;
     }
   | {
       kind: "not_modified";
@@ -332,15 +386,31 @@ export async function queryResults(
         };
   }
 
-  // Story 5.1 persists normalized Ballots but deliberately does not invent a
-  // first-choice or multi-select pseudo-Tally before the IRV projector lands
-  // in Story 5.2. This branch runs before any private result-fact read.
   if (envelope.pollType === "ranked_choice") {
+    // Authorize first (above); only then read Ballot facts for IRV (AD-21).
+    // Comments stay empty until Story 5.3. Keep ranked_unavailable only if
+    // the ranked projection port is missing (defensive residual path).
+    if (typeof ports.projectRankedResults !== "function") {
+      return {
+        kind: "ranked_unavailable",
+        pollId: envelope.pollId,
+        question: envelope.question,
+        canonicalReference: envelope.canonicalReference,
+      };
+    }
+    const ranked = await ports.projectRankedResults(envelope.pollId);
+    if (ranked === null) {
+      throw new Error("Ranked Results projection unavailable");
+    }
     return {
-      kind: "ranked_unavailable",
+      kind: "ranked_visible",
       pollId: envelope.pollId,
       question: envelope.question,
       canonicalReference: envelope.canonicalReference,
+      status,
+      securityToggles: envelope.securityToggles,
+      ranked,
+      validator: composeResultsValidator(ranked.representationVersion, status),
     };
   }
 
@@ -395,14 +465,6 @@ export async function queryLiveResults(
     };
   }
 
-  if (envelope.pollType === "ranked_choice") {
-    return {
-      kind: "ranked_unavailable",
-      pollId: envelope.pollId,
-      canonicalReference: envelope.canonicalReference,
-    };
-  }
-
   if (currentValidator !== null) {
     const representationVersion = await ports.readRepresentationVersion(
       envelope.pollId,
@@ -420,6 +482,33 @@ export async function queryLiveResults(
         validator,
       };
     }
+  }
+
+  if (envelope.pollType === "ranked_choice") {
+    if (typeof ports.projectVersionedRankedResults !== "function") {
+      return {
+        kind: "ranked_unavailable",
+        pollId: envelope.pollId,
+        canonicalReference: envelope.canonicalReference,
+      };
+    }
+    const ranked = await ports.projectVersionedRankedResults(envelope.pollId);
+    if (ranked === null) {
+      throw new Error("Live Ranked Results projection unavailable");
+    }
+    const snapshotValidator = composeResultsValidator(
+      ranked.representationVersion,
+      status,
+    );
+    return {
+      kind: "ranked_visible",
+      pollId: envelope.pollId,
+      canonicalReference: envelope.canonicalReference,
+      representationVersion: ranked.representationVersion,
+      status,
+      validator: snapshotValidator,
+      ranked,
+    };
   }
 
   const projection = await ports.projectVersionedResults(envelope.pollId);

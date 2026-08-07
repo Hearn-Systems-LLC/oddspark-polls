@@ -510,3 +510,8 @@ resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 ## Deferred from: code review of spec-5-1-cast-a-ranked-ballot.md (2026-08-06)
 
 - Ranked-unavailable results page hides the Comment list pre-5.2 (src/modules/results/index.ts ranked branch, src/pages/[reference]/results.astro). Comments submitted with ranked ballots are invisible on all surfaces until IRV lands in Story 5.2. Resolved by Justin: keep hidden; revisit comment visibility when the IRV projection ships.
+
+## Deferred from: code review of spec-5-2-deterministic-irv-tabulation.md (2026-08-07)
+
+- `IrvRound.counts` and unresolved `standingCounts` are `ReadonlyMap`s (`src/modules/results/tabulate-irv.ts`). Maps do not JSON-serialize for live payload / results projection. Defer until Results/live wiring maps Round evidence to a stable array/object shape.
+- Remaining Story 5.2 product wiring (Results module types, D1 `projectRankedResults`, strategy `projectResults`, results/live/post-vote UI, integration/e2e, CHANGELOG/README) is not in commit `aaa04a5`. Deferred as the next implementation slice — confirmed intentional pure-core intermediate delivery (code review D1=1, 2026-08-07). **Resolved 2026-08-07:** product wiring landed on `story/5-2-deterministic-irv-tabulation` (adapter, ranked_visible surfaces, tests, CHANGELOG/README).

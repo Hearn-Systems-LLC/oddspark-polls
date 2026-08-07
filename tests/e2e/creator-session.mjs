@@ -256,6 +256,7 @@ export function cleanupCreator(userId) {
       sql`DELETE FROM voter_claim WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
       sql`DELETE FROM vote_comment WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId}));`,
       sql`DELETE FROM vote_selection WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId}));`,
+      sql`DELETE FROM ranked_vote_preference WHERE vote_id IN (SELECT id FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId}));`,
       sql`DELETE FROM vote WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
       sql`DELETE FROM poll_option WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,
       sql`DELETE FROM poll_reference WHERE poll_id IN (SELECT id FROM poll WHERE owner_user_id = ${userId});`,

@@ -75,11 +75,19 @@ const handle: APIRoute = async ({ request, params, locals }) => {
   }
 
   headers.set("content-type", "application/json; charset=utf-8");
-  const payload: LiveResultsPayload = {
-    ...view.tally,
-    status: view.status,
-    comments: view.comments,
-  };
+  const payload: LiveResultsPayload =
+    view.kind === "ranked_visible"
+      ? {
+          ...view.ranked,
+          status: view.status,
+          pollType: "ranked_choice",
+          comments: [],
+        }
+      : {
+          ...view.tally,
+          status: view.status,
+          comments: view.comments,
+        };
   return new Response(JSON.stringify(payload), { status: 200, headers });
 };
 

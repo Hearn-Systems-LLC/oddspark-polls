@@ -20,8 +20,8 @@ available yet.
 
 | Status | Capabilities |
 | --- | --- |
-| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, owner CSV export, and bounded owner XLSX export through 1,000 accepted Votes (larger Polls keep CSV); Ranked-Choice Poll creation and ordered partial Ballots; Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Multiple-Choice Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
-| Planned / backlog | Ranked-Choice IRV Results, round display, Ballot Manifest, and export; Image and Meeting Polls; Voter Codes; VPN Blocking |
+| Shipped | Multiple-Choice Polls, including bounded multi-select, opt-in Comments with Votes, authorized Comment lists, owner/administrator Comment moderation, owner CSV export, and bounded owner XLSX export through 1,000 accepted Votes (larger Polls keep CSV); Ranked-Choice Poll creation, ordered partial Ballots, and deterministic IRV Results summary (live/closed/post-vote); Session and IP Checks; Turnstile; per-source-IP rate limiting; canonical sharing; live Multiple-Choice Results; creator lifecycle controls; opt-in Discovery and administrator delisting; the product landing page; the live Demo Poll |
+| Planned / backlog | Ranked-Choice per-round display, Ballot Manifest, and export; Image and Meeting Polls; Voter Codes; VPN Blocking |
 
 ## Product tour
 
@@ -66,12 +66,13 @@ contains the complete decisions and capability map. The evaluator-sized map is:
   digests rather than stored raw identifiers (AD-7, AD-8, AD-19).
 - Ranked Choice is registered behind the shared Poll Type contract. Accepted
   preferences are normalized, contiguous one-based facts committed atomically
-  with the Vote; pre-IRV Results and export fail closed without projecting a
-  Multiple-Choice Tally (AD-3, AD-7, AD-9).
-- Results authorizes before coherently projecting a Tally and its complete
-  Comment list; Voting-owned owner/administrator commands delete only a
-  Comment and advance the shared representation version atomically (AD-19,
-  AD-21, AD-24).
+  with the Vote. One pure IRV tabulator projects authorized Results (live,
+  closed, post-vote) from those Ballots; ranked export and the Ballot Manifest
+  remain unavailable until their stories (AD-3, AD-7, AD-9).
+- Results authorizes before coherently projecting a Tally (Multiple-Choice or
+  Ranked IRV) and its complete Comment list on Multiple-Choice surfaces;
+  Voting-owned owner/administrator commands delete only a Comment and advance
+  the shared representation version atomically (AD-19, AD-21, AD-24).
 - Owner CSV/XLSX export authorizes a provider-free `ViewerContext` before a
   type-specific D1 driver reads one snapshot. That driver strips join IDs,
   the required Poll Type strategy projects response/Tally cells, and Results

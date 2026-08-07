@@ -6,6 +6,7 @@ import PollOption from "./poll-option.astro";
 import RankBuilder from "./rank-builder.astro";
 import PublicRepositoryLink from "./public-repository-link.astro";
 import ResultsTally from "./results-tally.astro";
+import RankedResultsSummary from "./ranked-results-summary.astro";
 import ShareAction from "./share-action.astro";
 import TrustBadge from "./trust-badge.astro";
 import Turnstile from "./turnstile.astro";
@@ -258,6 +259,20 @@ const tallyOwnsBadge = readOnly;
       </section>
     )
   }
+  {
+    showTally && postVoteResults?.kind === "ranked_visible" && (
+      <section class:list={["tally-region", embedded && "embedded-tally"]} aria-label={embedded ? "Current Demo Poll results" : undefined}>
+        <RankedResultsSummary
+          ranked={postVoteResults.ranked}
+          status={postVoteResults.status}
+          toggles={tallyOwnsBadge ? pollToggles : undefined}
+          liveEndpoint={postVoteResults.status === "open" ? liveEndpoint : undefined}
+          initialRenderAtMs={resultsRenderedAtMs}
+          initialValidator={postVoteResults.validator}
+        />
+      </section>
+    )
+  }
   <section class="share-block" aria-label="Share this Poll">
     <ShareAction canonicalUrl={canonicalUrl} />
   </section>
@@ -269,6 +284,7 @@ const tallyOwnsBadge = readOnly;
 <script src="../scripts/share-action.ts"></script>
 {showTally && postVoteResults?.kind === "visible" && <script src="../scripts/chart-form-toggle.ts"></script>}
 {showTally && postVoteResults?.kind === "visible" && postVoteResults.status === "open" && <script src="../scripts/results-live.ts"></script>}
+{showTally && postVoteResults?.kind === "ranked_visible" && postVoteResults.status === "open" && <script src="../scripts/ranked-results-live.ts"></script>}
 {showTally && postVoteResults?.kind === "visible" && (postVoteResults.ownerComments?.length ?? 0) > 0 && <script src="../scripts/overlay.ts"></script>}
 
 <style>

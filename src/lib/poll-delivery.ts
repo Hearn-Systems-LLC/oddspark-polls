@@ -31,6 +31,7 @@ import { COMMENT_CAPS } from "../modules/comments/index";
 import {
   queryResults,
   RESULTS_COPY,
+  type RankedTallyView,
   type ResultsTallyView,
   type ResultsView,
 } from "../modules/results/index";
@@ -134,6 +135,12 @@ export type PostVoteResultsView =
       ownerComments: OwnerCommentView[] | null;
       validator: string;
     }
+  | {
+      kind: "ranked_visible";
+      status: PollStatus;
+      ranked: RankedTallyView;
+      validator: string;
+    }
   | ({
       kind: "after_close_hidden" | "creator_only_hidden" | "unavailable";
     } & ResultsExplanationView);
@@ -154,7 +161,10 @@ export type PollDeliveryState = {
   compactCounted: boolean;
   showReadOnlyOptions: boolean;
   showTally: boolean;
-  resultsExplanation: Exclude<PostVoteResultsView, { kind: "visible" }> | null;
+  resultsExplanation: Exclude<
+    PostVoteResultsView,
+    { kind: "visible" } | { kind: "ranked_visible" }
+  > | null;
   postVoteComposition: boolean;
   selected: Set<string>;
   multiSelect: boolean;
@@ -259,6 +269,13 @@ const postVoteResultsFrom = (view: ResultsView): PostVoteResultsView => {
         tally: view.tally,
         comments: view.comments,
         ownerComments: view.ownerComments,
+        validator: view.validator,
+      };
+    case "ranked_visible":
+      return {
+        kind: "ranked_visible",
+        status: view.status,
+        ranked: view.ranked,
         validator: view.validator,
       };
     case "after_close_hidden":
@@ -688,7 +705,12 @@ export async function deliverPollVotingSurface(
         { userId: input.principalUserId === null ? null : input.principalUserId as UserId },
         resultsRenderedAtMs,
       ));
-      if (input.includeEditableTally && !readOnly && postVoteResults.kind !== "visible") {
+      if (
+        input.includeEditableTally &&
+        !readOnly &&
+        postVoteResults.kind !== "visible" &&
+        postVoteResults.kind !== "ranked_visible"
+      ) {
         unavailable = true;
         markDemoUnavailable();
         status = 503;
@@ -719,20 +741,38 @@ export async function deliverPollVotingSurface(
       );
     }
     if (outcome?.code === "counted") {
-      outcome = {
-        ...outcome,
-        ...(postVoteResults.kind === "visible"
-          ? { body: VOTE_COPY.countedLive, time: null }
-          : { body: postVoteResults.body, time: postVoteResults.time }),
-      };
+      if (
+        postVoteResults.kind === "visible" ||
+        postVoteResults.kind === "ranked_visible"
+      ) {
+        outcome = {
+          ...outcome,
+          body: VOTE_COPY.countedLive,
+          time: null,
+        };
+      } else {
+        outcome = {
+          ...outcome,
+          body: postVoteResults.body,
+          time: postVoteResults.time,
+        };
+      }
     }
   }
 
   const compactCounted = readOnly && outcome?.code === "counted";
   const showReadOnlyOptions =
     readOnly && !compactCounted && poll.pollType === "multiple_choice";
-  const showTally = postVoteResults?.kind === "visible" && (readOnly || input.includeEditableTally);
-  const resultsExplanation = !compactCounted && postVoteResults?.kind !== "visible" ? postVoteResults : null;
+  const showTally =
+    (postVoteResults?.kind === "visible" ||
+      postVoteResults?.kind === "ranked_visible") &&
+    (readOnly || input.includeEditableTally);
+  const resultsExplanation =
+    !compactCounted &&
+    postVoteResults?.kind !== "visible" &&
+    postVoteResults?.kind !== "ranked_visible"
+      ? postVoteResults
+      : null;
   const postVoteComposition = compactCounted && showTally;
   const pollToggles = makeSecurityToggles(
     poll.sessionChecksEnabled,

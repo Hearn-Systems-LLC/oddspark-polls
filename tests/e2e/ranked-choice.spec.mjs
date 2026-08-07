@@ -90,7 +90,7 @@ test.describe("Story 5.1 Ranked-Choice creation and Ballot", () => {
     if (owner?.userId) cleanupCreator(owner.userId);
   });
 
-  test("creates, ranks by tap and keyboard, compacts, casts, and fails closed before IRV", async ({
+  test("creates, ranks by tap and keyboard, compacts, casts, and shows IRV results", async ({
     page,
     context,
     baseURL,
@@ -178,9 +178,11 @@ test.describe("Story 5.1 Ranked-Choice creation and Ballot", () => {
     await expect(page).toHaveURL(`/${reference}`);
     await expect(page.locator("[data-vote-outcome]")).toContainText("Counted.");
     await expect(page.locator("[data-vote-outcome]")).toContainText(
-      "Ranked-choice results aren't available yet.",
+      "Results are live, updating as they arrive.",
     );
-    await captureBoth(page, "counted-unavailable");
+    await expect(page.locator("[data-ranked-results]")).toBeVisible();
+    await expect(page.locator("[data-ranked-outcome]")).toContainText("Winner:");
+    await captureBoth(page, "counted-irv-results");
     expect(
       d1Query(
         sql`SELECT rvp.poll_option_id, rvp.preference_rank FROM ranked_vote_preference rvp JOIN vote v ON v.id = rvp.vote_id WHERE v.poll_id = ${pollId} ORDER BY rvp.preference_rank`,
@@ -192,12 +194,18 @@ test.describe("Story 5.1 Ranked-Choice creation and Ballot", () => {
 
     const directResults = await page.request.get(`/${reference}/results`);
     expect(directResults.status()).toBe(200);
-    expect(await directResults.text()).toContain(
+    const resultsHtml = await directResults.text();
+    expect(resultsHtml).toContain("data-ranked-results");
+    expect(resultsHtml).toContain("Winner:");
+    expect(resultsHtml).not.toContain(
       "Ranked-choice results aren&#39;t available yet.",
     );
     const live = await page.request.get(`/${reference}/results/live`);
-    expect(live.status()).toBe(204);
+    expect(live.status()).toBe(200);
     expect(live.headers()["cache-control"]).toBe("private, no-store");
+    const liveBody = await live.json();
+    expect(liveBody.pollType).toBe("ranked_choice");
+    expect(liveBody.resolved).toBe(true);
   });
 
   test("keeps the complete rank and compact flow functional without JavaScript", async ({

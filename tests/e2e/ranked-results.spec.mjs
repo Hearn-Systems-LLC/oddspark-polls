@@ -26,9 +26,9 @@ function seedRankedResultsPoll(ownerUserId, reference, { closed = false } = {}) 
   const pollId = randomUUID();
   const optionIds = [randomUUID(), randomUUID(), randomUUID()];
   const now = Date.now();
-  const closedAt = closed ? now - 1_000 : null;
+  // Insert as open so vote triggers accept ballots; close after seeding.
   const statements = [
-    sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, discovery_state, session_checks_enabled, comments_enabled, multi_select_enabled, min_selections, max_selections, representation_version, closed_at_ms, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerUserId}, 'ranked_choice', 'Who wins the ranked race?', 'live', 'unlisted', 0, 1, 0, NULL, NULL, 1, ${closedAt}, ${now}, ${now});`,
+    sql`INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, discovery_state, session_checks_enabled, comments_enabled, multi_select_enabled, min_selections, max_selections, representation_version, created_at_ms, updated_at_ms) VALUES (${pollId}, ${ownerUserId}, 'ranked_choice', 'Who wins the ranked race?', 'live', 'unlisted', 0, 1, 0, NULL, NULL, 1, ${now}, ${now});`,
     sql`INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (${optionIds[0]}, ${pollId}, 'Alpha', 0, ${now}), (${optionIds[1]}, ${pollId}, 'Beta', 1, ${now}), (${optionIds[2]}, ${pollId}, 'Gamma', 2, ${now});`,
     sql`INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (${reference}, ${pollId}, 'custom', 1, ${now});`,
   ];
@@ -46,6 +46,12 @@ function seedRankedResultsPoll(ownerUserId, reference, { closed = false } = {}) 
     statements.push(
       sql`INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (${voteId}, ${pollId}, ${"sub-b-0"}, ${"hash-b-0"}, ${now});`,
       sql`INSERT INTO ranked_vote_preference (vote_id, poll_option_id, preference_rank) VALUES (${voteId}, ${optionIds[1]}, 1), (${voteId}, ${optionIds[0]}, 2);`,
+    );
+  }
+
+  if (closed) {
+    statements.push(
+      sql`UPDATE poll SET closed_at_ms = ${now}, updated_at_ms = ${now} WHERE id = ${pollId};`,
     );
   }
 

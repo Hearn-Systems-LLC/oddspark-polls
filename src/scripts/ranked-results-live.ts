@@ -138,19 +138,20 @@ function applyStanding(root: HTMLElement, payload: RankedLivePayload): void {
     count.className = "ranked-standing-count";
     count.textContent = String(option.count);
 
-    li.append(label, count);
+    li.appendChild(label);
+    li.appendChild(count);
     if (isWinner) {
       const mark = document.createElement("span");
       mark.className = "ranked-standing-mark";
       mark.textContent = "Winner";
-      li.append(mark);
+      li.appendChild(mark);
     } else if (isTied) {
       const mark = document.createElement("span");
       mark.className = "ranked-standing-mark";
       mark.textContent = "TIED";
-      li.append(mark);
+      li.appendChild(mark);
     }
-    list.append(li);
+    list.appendChild(li);
   }
 }
 

@@ -179,7 +179,7 @@ describe("queryResults visibility matrix", () => {
     const withoutPort = {
       findAccessEnvelope: rankedPorts.findAccessEnvelope,
       projectResults: rankedPorts.projectResults,
-    } as ResultsPorts;
+    } as unknown as ResultsPorts;
     const view = await queryResults(
       withoutPort,
       "team-lunch",

@@ -22,6 +22,7 @@ export type RankedEliminationView = {
   readonly optionIds: readonly PollOptionId[];
   readonly labels: readonly string[];
   readonly reason: IrvEliminationReason;
+  readonly backwardTieBreakRound?: number;
 };
 
 export type RankedRoundView = {
@@ -96,6 +97,9 @@ function mapRound(
               labelFor(optionMap, id),
             ),
             reason: round.eliminated.reason,
+            ...(round.eliminated.backwardTieBreakRound !== undefined
+              ? { backwardTieBreakRound: round.eliminated.backwardTieBreakRound }
+              : {}),
           },
   };
 }

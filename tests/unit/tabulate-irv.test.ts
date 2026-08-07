@@ -284,6 +284,7 @@ describe("tabulateIrv", () => {
         expect(result.rounds[1].eliminated).toEqual({
           optionIds: [optionId(2)],
           reason: "backward_tie_break",
+          backwardTieBreakRound: 1,
         });
         expect(result.winnerId).toBe(optionId(0));
       }

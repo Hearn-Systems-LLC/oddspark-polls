@@ -148,18 +148,28 @@ const afterCloseParts =
             </section>
           )}
           {view.kind === "ranked_visible" && (
-            <RankedResultsSummary
-              ranked={view.ranked}
-              status={view.status}
-              toggles={view.securityToggles}
-              liveEndpoint={
-                view.status === "open"
-                  ? `/${encodeURIComponent(view.canonicalReference)}/results/live`
-                  : undefined
-              }
-              initialRenderAtMs={resultsRenderedAtMs}
-              initialValidator={view.validator}
-            />
+            <section data-results-region>
+              <RankedResultsSummary
+                ranked={view.ranked}
+                status={view.status}
+                toggles={view.securityToggles}
+                liveEndpoint={
+                  view.status === "open"
+                    ? `/${encodeURIComponent(view.canonicalReference)}/results/live`
+                    : undefined
+                }
+                initialRenderAtMs={resultsRenderedAtMs}
+                initialValidator={view.validator}
+                canonicalReference={view.canonicalReference}
+              />
+              <CommentList
+                comments={view.comments}
+                moderationComments={view.ownerComments}
+                csrfToken={Astro.locals.requestContext?.csrfToken?.value ?? ""}
+                cancelHref={`/${encodeURIComponent(view.canonicalReference)}/results`}
+                mode="owner"
+              />
+            </section>
           )}
           {view.kind === "after_close_hidden" && (
             <p class="results-explanation">

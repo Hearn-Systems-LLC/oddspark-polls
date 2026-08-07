@@ -20,7 +20,10 @@ export async function resolveAuthorizedBallotLabels(
   voterToken: string | null,
   loadLabels: LoadBallotLabels,
 ): Promise<string[]> {
-  if (results.kind !== "visible" || voterToken === null) {
+  if (
+    (results.kind !== "visible" && results.kind !== "ranked_visible") ||
+    voterToken === null
+  ) {
     return [];
   }
 

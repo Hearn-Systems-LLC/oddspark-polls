@@ -733,6 +733,12 @@ export async function deliverPollVotingSurface(
         voterToken,
         async (authorizedVoterToken) => {
           const ballotDigest = await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: poll.pollId, checkKind: "session", token: authorizedVoterToken });
+          if (poll.pollType === "ranked_choice") {
+            const preferenceIds = await votePersistence.findRankedPreferencesByClaim(poll.pollId, "session", ballotDigest);
+            const optionLabelById = new Map(poll.options.map((o) => [o.id, o.label]));
+            yourBallotOptionIds = preferenceIds.filter((id) => optionLabelById.has(id));
+            return yourBallotOptionIds.map((id) => optionLabelById.get(id)!);
+          }
           const selectedIds = new Set(await votePersistence.findVoteSelectionByClaim(poll.pollId, "session", ballotDigest));
           const selections = poll.options.filter((option) => selectedIds.has(option.id));
           yourBallotOptionIds = selections.map((option) => option.id);

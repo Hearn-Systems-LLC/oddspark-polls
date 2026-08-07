@@ -326,13 +326,27 @@ describe("Ranked Choice CastVote", () => {
     expect(ranked).not.toHaveProperty("representationVersion");
   });
 
-  it("projectExport remains unavailable for ranked Choice", () => {
-    expect(rankedChoiceStrategy.projectExport()).toEqual({
-      ok: false,
-      error: expect.objectContaining({
-        code: "export_projection_unavailable",
-      }),
+  it("projectExport produces a valid projection for ranked Choice", () => {
+    const result = rankedChoiceStrategy.projectExport({
+      options: [
+        { label: "Alpha", position: 0, count: 2 },
+        { label: "Beta", position: 1, count: 1 },
+      ],
+      votes: [
+        { alignmentKey: 0, createdAtMs: 1000, rankedOptionPositions: [0, 1] },
+        { alignmentKey: 1, createdAtMs: 2000, rankedOptionPositions: [1, 0] },
+        { alignmentKey: 2, createdAtMs: 3000, rankedOptionPositions: [0] },
+      ],
+      voterCount: 3,
+      selectionCount: 5,
     });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.voterCount).toBe(3);
+      expect(result.value.selectionCount).toBe(5);
+      expect(result.value.votes.columns).toEqual(["RANK 1", "RANK 2"]);
+      expect(result.value.votes.rows).toHaveLength(3);
+    }
   });
 
   it("uses the authoritative Poll Type and rejects a legacy-shaped Ballot", async () => {

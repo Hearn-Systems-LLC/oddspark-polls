@@ -37,6 +37,20 @@ describe("resolveAuthorizedBallotLabels", () => {
     expect(findVoteSelectionByClaim).toHaveBeenCalledWith("voter-token");
   });
 
+  it("reads claim selections after a ranked_visible Results outcome", async () => {
+    const loadLabels = vi.fn(async () => ["Alpha", "Beta", "Gamma"]);
+
+    await expect(
+      resolveAuthorizedBallotLabels(
+        { kind: "ranked_visible" },
+        "voter-token",
+        loadLabels,
+      ),
+    ).resolves.toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(loadLabels).toHaveBeenCalledOnce();
+    expect(loadLabels).toHaveBeenCalledWith("voter-token");
+  });
+
   it("does not read claim selections without a voter token", async () => {
     const findVoteSelectionByClaim = vi.fn(async () => ["Alpha"]);
 

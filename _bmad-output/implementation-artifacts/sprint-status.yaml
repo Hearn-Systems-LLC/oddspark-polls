@@ -1,5 +1,5 @@
 # generated: 2026-07-29T11:11:59-0400
-# last_updated: 2026-08-07T05:43:00-0400
+# last_updated: 2026-08-07T12:00:00-0400
 # project: oddspark-polls
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-29T11:11:59-0400
-last_updated: 2026-08-06T18:00:00-0400
+last_updated: 2026-08-07T12:30:00-0400
 project: oddspark-polls
 project_key: NOKEY
 tracking_system: file-system
@@ -87,11 +87,11 @@ development_status:
   4-4-xlsx-export: done
   epic-4-retrospective: done
 
-  epic-5: in-progress
+  epic-5: done
   5-1-cast-a-ranked-ballot: done
   5-2-deterministic-irv-tabulation: done
-  5-3-per-round-display-ballot-manifest: backlog
-  epic-5-retrospective: optional
+  5-3-per-round-display-ballot-manifest: done
+  epic-5-retrospective: done
 
   epic-6: backlog
   6-1-upload-image-options: backlog
@@ -208,4 +208,37 @@ action_items:
   - epic: 4
     action: "T3: Preserve format-neutral export and Poll Type projectExport for Ranked rows"
     owner: "Winston"
+    status: done
+  - epic: 5
+    action: "C1: Merge Epic 5 branch / PR to main with full CI gate green"
+    owner: "Amelia (Developer) + Justin (Project Lead)"
     status: open
+  - epic: 5
+    action: "C2: Deploy Epic 5 to staging -> smoke -> production"
+    owner: "Justin (ops) + deploy gate"
+    status: open
+  - epic: 5
+    action: "C3: Update public docs & CHANGELOG for Ranked-Choice release"
+    owner: "Paige (Technical Writer) + Amelia"
+    status: open
+  - epic: 5
+    action: "C4: Open Epic 6 planning & create-story for 6.1 (Upload Image Options)"
+    owner: "John (PM) + Amelia"
+    status: open
+  - epic: 5
+    action: "P1: Standardize multi-layer review chunking for complex epics"
+    owner: "Winston + Amelia"
+    status: open
+  - epic: 5
+    action: "P2: Monitor Ballot Manifest payload sizes and execution time on staging/prod"
+    owner: "Dana (QA Engineer)"
+    status: open
+  - epic: 5
+    action: "T1: Audit R2 MEDIA binding readiness for Epic 6 Image Polls"
+    owner: "Winston"
+    status: open
+  - epic: 5
+    action: "T2: Maintain multi-factor delivery gate (adversarial review + full gate per story)"
+    owner: "Team"
+    status: open
+

@@ -23,6 +23,7 @@ import type {
 } from "../../modules/discovery/index";
 import type {
   ResultsAccessEnvelope,
+  BallotManifestRow,
   ResultsProjection,
   ResultsTallyProjection,
   VersionedRankedTallyProjection,
@@ -41,6 +42,7 @@ import {
   isCommentTimestamp,
   type AdministratorCommentLoadOutcome,
   type CommentModerationPersistenceOutcome,
+  type CommentResultsProjection,
   type CommentView,
   type OwnerCommentView,
   type VoteCommentContribution,
@@ -1512,6 +1514,27 @@ export function createVotePersistence(db: D1Database) {
         .all<{ poll_option_id: PollOptionId }>();
       return rows.results.map((row) => row.poll_option_id);
     },
+
+    async findRankedPreferencesByClaim(
+      pollId: PollId,
+      checkKind: VoterClaimCheckKind,
+      digest: VoterClaimDigest,
+    ): Promise<PollOptionId[]> {
+      if (!isVoterClaimCheckKind(checkKind)) {
+        return [];
+      }
+      const validated = asVoterClaimDigest(digest);
+      if (validated === null) {
+        return [];
+      }
+      const rows = await db
+        .prepare(
+          "SELECT rvp.poll_option_id AS poll_option_id FROM voter_claim vc JOIN ranked_vote_preference rvp ON rvp.vote_id = vc.vote_id WHERE vc.poll_id = ?1 AND vc.check_kind = ?2 AND vc.digest = ?3 ORDER BY rvp.preference_rank ASC",
+        )
+        .bind(pollId, checkKind, validated)
+        .all<{ poll_option_id: PollOptionId }>();
+      return rows.results.map((row) => row.poll_option_id);
+    },
   };
 }
 
@@ -2135,6 +2158,207 @@ export function createResultsPersistence(db: D1Database) {
         };
       }
       throw new Error("Ranked projection snapshot race");
+    },
+
+    async projectRankedComments(
+      pollId: PollId,
+      includeOwnerModeration: boolean,
+    ): Promise<CommentResultsProjection | null> {
+      const row = await db
+        .prepare(
+          `WITH target_votes AS MATERIALIZED (
+             SELECT id FROM vote WHERE poll_id = ?1
+           ),
+           target_comments AS MATERIALIZED (
+             SELECT vc.id, vc.body, vc.display_name, vc.created_at_ms
+             FROM target_votes tv
+             JOIN vote_comment vc ON vc.vote_id = tv.id
+           )
+           SELECT
+             (
+               SELECT json_group_array(json_object(
+                 'body', ordered.body,
+                 'displayName', ordered.display_name,
+                 'createdAtMs', ordered.created_at_ms
+               ))
+               FROM (
+                 SELECT body, display_name, created_at_ms
+                 FROM target_comments
+                 ORDER BY created_at_ms DESC, id DESC
+               ) AS ordered
+             ) AS comments_json,
+             CASE WHEN ?2 = 1 THEN (
+               SELECT json_group_array(json_object(
+                 'commentId', ordered.id,
+                 'body', ordered.body,
+                 'displayName', ordered.display_name,
+                 'createdAtMs', ordered.created_at_ms
+               ))
+               FROM (
+                 SELECT id, body, display_name, created_at_ms
+                 FROM target_comments
+                 ORDER BY created_at_ms DESC, id DESC
+               ) AS ordered
+             ) ELSE NULL END AS owner_comments_json`,
+        )
+        .bind(pollId, includeOwnerModeration ? 1 : 0)
+        .first<{
+          comments_json: string | null;
+          owner_comments_json: string | null;
+        }>();
+
+      if (!row) return null;
+
+      const comments = parseJsonRecords(row.comments_json, "Comment").map(
+        mapCommentJson,
+      );
+      const ownerComments = includeOwnerModeration
+        ? parseJsonRecords(row.owner_comments_json, "owner Comment").map(
+            mapOwnerCommentJson,
+          )
+        : null;
+      validateCommentOrder(comments, ownerComments);
+      return { comments, ownerComments };
+    },
+
+    async projectBallotManifest(
+      pollId: PollId,
+    ): Promise<readonly BallotManifestRow[] | null> {
+      const maxAttempts = 3;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const pollRow = await db
+          .prepare(
+            `SELECT representation_version FROM poll WHERE id = ?1 LIMIT 1`,
+          )
+          .bind(pollId)
+          .first<{ representation_version: number }>();
+
+        if (!pollRow) return null;
+        if (
+          !Number.isSafeInteger(pollRow.representation_version) ||
+          pollRow.representation_version < 1
+        ) {
+          throw new Error("Malformed representation version");
+        }
+        const versionAtStart = pollRow.representation_version;
+
+        const optionRows = await db
+          .prepare(
+            "SELECT id, label, position FROM poll_option WHERE poll_id = ?1 ORDER BY position",
+          )
+          .bind(pollId)
+          .all<{ id: string; label: string; position: number }>();
+
+        if (optionRows.results.length === 0) return [];
+
+        const optionLabelById = new Map<string, string>();
+        const optionPositionById = new Map<string, number>();
+        for (const row of optionRows.results) {
+          optionLabelById.set(row.id, row.label);
+          optionPositionById.set(row.id, row.position);
+        }
+
+        const prefRows = await db
+          .prepare(
+            `SELECT v.id AS vote_id, rvp.poll_option_id, rvp.preference_rank
+             FROM vote v
+             JOIN ranked_vote_preference rvp ON rvp.vote_id = v.id
+             WHERE v.poll_id = ?1
+             ORDER BY v.id, rvp.preference_rank`,
+          )
+          .bind(pollId)
+          .all<{ vote_id: string; poll_option_id: string; preference_rank: number }>();
+
+        // Build ballots keyed by vote_id, storing positions for canonical sort.
+        const ballotMap = new Map<string, { positions: number[]; labels: string[] }>();
+        for (const row of prefRows.results) {
+          let entry = ballotMap.get(row.vote_id);
+          if (!entry) {
+            entry = { positions: [], labels: [] };
+            ballotMap.set(row.vote_id, entry);
+          }
+          const pos = optionPositionById.get(row.poll_option_id);
+          const label = optionLabelById.get(row.poll_option_id) ?? "—";
+          if (pos !== undefined) {
+            entry.positions.push(pos);
+          } else {
+            // Orphan option ID: use NaN sentinel so it sorts last within
+            // the ballot, and render "—" in output.
+            entry.positions.push(Number.NaN);
+          }
+          entry.labels.push(label);
+        }
+
+        // Canonical order: sort by numeric position sequence, not labels.
+        // Identical position sequences are adjacent regardless of insertion order.
+        const sortedEntries = [...ballotMap.values()];
+        sortedEntries.sort((left, right) => {
+          const aPos = left.positions;
+          const bPos = right.positions;
+          const len = Math.min(aPos.length, bPos.length);
+          for (let i = 0; i < len; i++) {
+            const aVal = aPos[i];
+            const bVal = bPos[i];
+            // NaN (orphan) sorts after any integer.
+            if (Number.isNaN(aVal) && !Number.isNaN(bVal)) return 1;
+            if (!Number.isNaN(aVal) && Number.isNaN(bVal)) return -1;
+            if (aVal < bVal) return -1;
+            if (aVal > bVal) return 1;
+          }
+          return aPos.length - bPos.length;
+        });
+
+        // Collapse adjacent identical ballots into a count. The sort above
+        // groups identical position sequences regardless of vote.id insertion
+        // order, so the count is deterministic and never correlates with
+        // persistence identifiers (AC 2, Trap 2).
+        const ballots: BallotManifestRow[] = [];
+        for (let i = 0; i < sortedEntries.length; ) {
+          const entry = sortedEntries[i]!;
+          const labels = entry.labels;
+          let count = 1;
+          while (i + count < sortedEntries.length) {
+            const next = sortedEntries[i + count]!;
+            if (next.positions.length !== entry.positions.length) break;
+            let same = true;
+            for (let j = 0; j < entry.positions.length; j++) {
+              const aVal = entry.positions[j]!;
+              const bVal = next.positions[j]!;
+              if (Number.isNaN(aVal as number) && Number.isNaN(bVal as number))
+                continue;
+              if (aVal !== bVal) {
+                same = false;
+                break;
+              }
+            }
+            if (!same) break;
+            count++;
+          }
+          ballots.push({ rankedOptionLabels: labels, count });
+          i += count;
+        }
+
+        // Confirm version still matches after reads (AD-24).
+        const versionAfter = await db
+          .prepare(
+            `SELECT representation_version FROM poll WHERE id = ?1 LIMIT 1`,
+          )
+          .bind(pollId)
+          .first<{ representation_version: number }>();
+        if (
+          !versionAfter ||
+          !Number.isSafeInteger(versionAfter.representation_version) ||
+          versionAfter.representation_version < 1
+        ) {
+          throw new Error("Malformed representation version");
+        }
+        if (versionAfter.representation_version !== versionAtStart) {
+          continue;
+        }
+
+        return ballots;
+      }
+      throw new Error("Ballot Manifest projection snapshot race");
     },
   };
 }

@@ -269,6 +269,15 @@ const tallyOwnsBadge = readOnly;
           liveEndpoint={postVoteResults.status === "open" ? liveEndpoint : undefined}
           initialRenderAtMs={resultsRenderedAtMs}
           initialValidator={postVoteResults.validator}
+          yourBallotLabels={yourBallotLabels.length > 0 ? yourBallotLabels : undefined}
+          canonicalReference={poll.canonicalReference}
+        />
+        <CommentList
+          comments={postVoteResults.comments}
+          moderationComments={postVoteResults.ownerComments}
+          csrfToken={Astro.locals.requestContext?.csrfToken?.value ?? ""}
+          cancelHref={canonicalUrl}
+          mode="owner"
         />
       </section>
     )
@@ -286,6 +295,7 @@ const tallyOwnsBadge = readOnly;
 {showTally && postVoteResults?.kind === "visible" && postVoteResults.status === "open" && <script src="../scripts/results-live.ts"></script>}
 {showTally && postVoteResults?.kind === "ranked_visible" && postVoteResults.status === "open" && <script src="../scripts/ranked-results-live.ts"></script>}
 {showTally && postVoteResults?.kind === "visible" && (postVoteResults.ownerComments?.length ?? 0) > 0 && <script src="../scripts/overlay.ts"></script>}
+{showTally && postVoteResults?.kind === "ranked_visible" && (postVoteResults.ownerComments?.length ?? 0) > 0 && <script src="../scripts/overlay.ts"></script>}
 
 <style>
   .poll-shell { width: min(100%, var(--space-measure)); margin-inline: auto; }

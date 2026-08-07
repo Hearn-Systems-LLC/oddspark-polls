@@ -218,6 +218,15 @@ if (form) {
     if (voteButton) {
       voteButton.textContent = idleVoteLabel;
       voteButton.removeAttribute("aria-busy");
+      if (rankedChoice) {
+        // syncSelectionState defers the ranked VOTE button to the rank
+        // builder; recompute here so an aborted POST never strands the
+        // button disabled behind an unchanged, still-valid draft.
+        const rankedCount = form.querySelectorAll(
+          "[data-rank-position-input]:not(:disabled)",
+        ).length;
+        voteButton.disabled = locked || rankedCount === 0;
+      }
     }
     if (commentBody) commentBody.readOnly = false;
     if (commentDisplayName) commentDisplayName.readOnly = false;

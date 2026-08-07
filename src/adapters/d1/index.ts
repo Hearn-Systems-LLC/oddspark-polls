@@ -740,7 +740,7 @@ export function createPollPersistence(db: D1Database) {
       pollId: PollId;
       ownerUserId: UserId;
       definition: ValidatedPollDefinition;
-      pollType?: "multiple_choice" | "ranked_choice";
+      pollType: "multiple_choice" | "ranked_choice";
       options: { id: PollOptionId; label: string; position: number }[];
       expectedRepresentationVersion: number;
       version: RepresentationVersionIncrement;
@@ -772,7 +772,7 @@ export function createPollPersistence(db: D1Database) {
             version.pollId,
             input.ownerUserId,
             input.expectedRepresentationVersion,
-            input.pollType ?? "multiple_choice",
+            input.pollType,
           ),
         ...input.options.map((option) =>
           db
@@ -790,7 +790,7 @@ export function createPollPersistence(db: D1Database) {
               version.pollId,
               input.ownerUserId,
               input.expectedRepresentationVersion,
-              input.pollType ?? "multiple_choice",
+              input.pollType,
               option.id,
               option.label,
               option.position,
@@ -818,7 +818,7 @@ export function createPollPersistence(db: D1Database) {
             version.pollId,
             input.ownerUserId,
             input.expectedRepresentationVersion,
-            input.pollType ?? "multiple_choice",
+            input.pollType,
             input.definition.question,
             input.definition.description,
             input.definition.multiSelect ? 1 : 0,

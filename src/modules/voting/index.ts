@@ -371,12 +371,30 @@ export function normalizeRankedVotePayload(
   rankedPreferences: readonly RankedPreferenceInput[],
   comment: CanonicalComment | null = null,
 ): string {
+  // The canonical payload is the byte-compat idempotency contract boundary;
+  // refuse to canonicalize a structurally invalid Ballot (non-integer,
+  // duplicate, or non-contiguous ranks) instead of silently hashing garbage.
+  const ordered = [...rankedPreferences].sort(
+    (left, right) => left.rank - right.rank,
+  );
+  const seenOptions = new Set<string>();
+  const structurallyValid =
+    ordered.length > 0 &&
+    ordered.every(
+      (preference, index) =>
+        Number.isSafeInteger(preference.rank) &&
+        preference.rank === index + 1 &&
+        preference.optionId.length > 0 &&
+        !seenOptions.has(preference.optionId) &&
+        (seenOptions.add(preference.optionId), true),
+    );
+  if (!structurallyValid) {
+    throw new Error("invalid ranked ballot payload");
+  }
   const ranked = {
     pollId,
     pollType: "ranked_choice" as const,
-    rankedPreferences: [...rankedPreferences]
-      .sort((left, right) => left.rank - right.rank)
-      .map(({ optionId, rank }) => ({ optionId, rank })),
+    rankedPreferences: ordered.map(({ optionId, rank }) => ({ optionId, rank })),
   };
   return JSON.stringify(
     comment === null ? ranked : { ...ranked, comment },

@@ -396,6 +396,35 @@ export async function deliverPollVotingSurface(
         const submittedId = parsed.data.submissionId;
         const rankAction = singletonText(formData, "rank_action");
         if (rankAction.length > 0) {
+          // Rank actions mutate only the server-side draft — they never
+          // consume vote admission — but they must not keep an interactive
+          // builder alive against a closed Poll or a counted Ballot.
+          const rankActionClosedMs = Date.now();
+          if (effectivePollStatus(poll, rankActionClosedMs) === "closed") {
+            outcome = { code: "poll_closed_get", heading: VOTE_COPY.closedOnGet, body: "", time: { placeholder: "{when}", timestampMs: poll.closedAtMs ?? poll.deadlineMs ?? rankActionClosedMs }, titlePrefix: "Poll closed", tone: "rejection" };
+            readOnly = true;
+          } else {
+            let rankActionCounted = false;
+            if (voterToken !== null && input.env.VOTE_DIGEST_SECRET) {
+              try {
+                const rankDigest = asVoterClaimDigest(await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: poll.pollId, checkKind: "session", token: voterToken }));
+                if (rankDigest !== null && await votePersistence.findClaim(poll.pollId, "session", rankDigest)) {
+                  rankActionCounted = true;
+                }
+              } catch { /* preflight failure degrades to the interactive builder */ }
+            }
+            if (!rankActionCounted) {
+              try {
+                rankActionCounted = await votePersistence.findVoteBySubmission(poll.pollId, submittedId) !== null;
+              } catch { /* submission lookup failure degrades to the interactive builder */ }
+            }
+            if (rankActionCounted) {
+              outcome = outcomeFromVoteError({ code: "already_voted", message: VOTE_COPY.alreadyVoted });
+              readOnly = true;
+            }
+          }
+        }
+        if (rankAction.length > 0 && !readOnly) {
           submissionId = submittedId;
           const knownOptionIds = new Set(poll.options.map((option) => option.id));
           const rankedDraftValid =
@@ -415,9 +444,13 @@ export async function deliverPollVotingSurface(
               all.some((entry) => entry.rank === index + 1),
             );
           if (!rankedDraftValid) {
+            // The Poll definition moved under the draft. Drop the stale
+            // preferences entirely rather than echo gap-bearing ranks into
+            // the re-rendered form.
+            rankedPreferences = [];
             outcome = outcomeFromVoteError({
-              code: "invalid_selection",
-              message: "That ranking does not match this Poll.",
+              code: "poll_definition_changed",
+              message: VOTE_COPY.pollDefinitionChanged,
             });
             status = 422;
             markVoteRejection();
@@ -430,7 +463,7 @@ export async function deliverPollVotingSurface(
               rankAction as PollOptionId,
             );
           }
-        } else {
+        } else if (rankAction.length === 0) {
         if (typeof input.env.VOTE_DIGEST_SECRET !== "string" || input.env.VOTE_DIGEST_SECRET.trim().length === 0) {
           response = immediate("Voting is unavailable.", 500);
           return { state: null, status: 500, headers, cookies, response, unavailable };

@@ -78,6 +78,17 @@ warnings: []
   and description-only locked forms validate their authoritative hidden type.
   All affected groups and the complete gates were rerun green.
 
+### Code Review 2026-08-06 (bmad-code-review: blind hunter, edge-case hunter, acceptance auditor)
+
+- [x] [Review][Decision] Ranked-unavailable results page hides the Comment list pre-5.2 — **Resolved (Justin): keep hidden until IRV lands**; recorded in deferred-work.md.
+- [x] [Review][Patch] Rank action performs no closed/already-voted check — fixed: rank-action POST preflights closed + already-voted/session claim + submission presence before mutating draft [src/lib/poll-delivery.ts]
+- [x] [Review][Patch] Aborted ranked POST leaves VOTE permanently disabled — fixed: restoreIdleState recomputes ranked VOTE disabled from enabled rank inputs [src/scripts/vote-form.ts]
+- [x] [Review][Patch] Definition-changed rank action 422s but neither resets nor re-compacts the draft — fixed: clears rankedPreferences and surfaces poll_definition_changed [src/lib/poll-delivery.ts]
+- [x] [Review][Patch] normalizeRankedVotePayload canonicalizes structurally invalid preferences — fixed: throws on non-contiguous / duplicate / empty ranks before hashing [src/modules/voting/index.ts]
+- [x] [Review][Patch] update-definition adapter binds `input.pollType ?? "multiple_choice"` — fixed: pollType required on the update-definition adapter input [src/adapters/d1/index.ts]
+- [ ] [Review][Patch] Ranked definition-edit lifecycle untested at integration/e2e level (AC4 proven only at domain level) [tests/integration/poll-lifecycle-adapter.integration.test.ts]
+- [ ] [Review][Patch] Ranked export direct-request route untested — AC5 fail-closed 500 path unexercised [tests/integration/csv-export-route.integration.test.ts, xlsx-export-route.integration.test.ts]
+
 ## Design Notes
 
 Transport explicit option/rank pairs so malformed ranks remain independently testable. The no-JavaScript surface uses ordinary rank-action submits that mutate only the draft; JavaScript intercepts the same controls for immediate local updates. Ranked canonicalization orders pairs by rank, while the legacy Multiple-Choice canonical payload remains unchanged.

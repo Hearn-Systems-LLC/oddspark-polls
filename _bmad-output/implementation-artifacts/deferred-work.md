@@ -506,3 +506,7 @@ resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 - source_spec: `_bmad-output/implementation-artifacts/spec-epic-4-followup.md`
   summary: The idempotency-conflict outcome renders an editable form with a fresh server-minted submission ID, so with every Security Toggle off a voter who edits after a committed original can click through the conflict and count a second Vote on the next submit.
   evidence: src/lib/poll-delivery.ts sets readOnly only for already_voted/already_voted_ip/poll_closed and mints a fresh submission ID on every outcome re-render; with toggles off no voter_claim exists, so the fresh-ID resubmission commits. Pre-existing designed Story 1.5/1.6 conflict behavior — FR-15's all-off mode licenses any fresh render, so closing the conflict-render path specifically is a product-contract decision, not an obvious defect.
+
+## Deferred from: code review of spec-5-1-cast-a-ranked-ballot.md (2026-08-06)
+
+- Ranked-unavailable results page hides the Comment list pre-5.2 (src/modules/results/index.ts ranked branch, src/pages/[reference]/results.astro). Comments submitted with ranked ballots are invisible on all surfaces until IRV lands in Story 5.2. Resolved by Justin: keep hidden; revisit comment visibility when the IRV projection ships.

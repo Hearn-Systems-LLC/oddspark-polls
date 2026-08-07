@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
+  assertUuid,
   cleanupCreator,
   d1Execute,
   hasBetterAuthSecret,
-  requireBaseUrl,
   seedCreatorSession,
   sql,
 } from "./creator-session.mjs";
@@ -22,6 +22,7 @@ mkdirSync(PROOF_DIR, { recursive: true });
 let owner;
 
 function seedRankedResultsPoll(ownerUserId, reference, { closed = false } = {}) {
+  assertUuid(ownerUserId);
   const pollId = randomUUID();
   const optionIds = [randomUUID(), randomUUID(), randomUUID()];
   const now = Date.now();
@@ -53,6 +54,7 @@ function seedRankedResultsPoll(ownerUserId, reference, { closed = false } = {}) 
 }
 
 function seedUnresolvedRankedPoll(ownerUserId, reference) {
+  assertUuid(ownerUserId);
   const pollId = randomUUID();
   const optionIds = [randomUUID(), randomUUID()];
   const now = Date.now();
@@ -78,16 +80,16 @@ function seedUnresolvedRankedPoll(ownerUserId, reference) {
 test.describe("Story 5.2 Ranked IRV Results", () => {
   test.beforeAll(async () => {
     owner = await seedCreatorSession();
+    assertUuid(owner.userId);
   });
 
-  test.afterAll(async () => {
-    if (owner) await cleanupCreator(owner);
+  test.afterAll(() => {
+    if (owner?.userId) cleanupCreator(owner.userId);
   });
 
   test("renders ranked winner summary without Comments on open Results", async ({
     page,
   }) => {
-    requireBaseUrl();
     const fixture = seedRankedResultsPoll(
       owner.userId,
       `rank-win-${randomUUID().slice(0, 8)}`,
@@ -103,7 +105,8 @@ test.describe("Story 5.2 Ranked IRV Results", () => {
     await expect(page.locator("[data-ranked-results-unavailable]")).toHaveCount(
       0,
     );
-    await expect(page.locator("text=Comment")).toHaveCount(0);
+    // Comment list is omitted on ranked surfaces until Story 5.3.
+    await expect(page.locator("[data-comment-list]")).toHaveCount(0);
     await page.screenshot({
       path: `${PROOF_DIR}/open-winner.png`,
       fullPage: true,
@@ -113,7 +116,6 @@ test.describe("Story 5.2 Ranked IRV Results", () => {
   test("serves ranked live JSON with ETag for authorized open Polls", async ({
     request,
   }) => {
-    requireBaseUrl();
     const fixture = seedRankedResultsPoll(
       owner.userId,
       `rank-live-${randomUUID().slice(0, 8)}`,
@@ -136,7 +138,6 @@ test.describe("Story 5.2 Ranked IRV Results", () => {
   });
 
   test("shows unresolved tie as a terminal ranked result", async ({ page }) => {
-    requireBaseUrl();
     const fixture = seedUnresolvedRankedPoll(
       owner.userId,
       `rank-tie-${randomUUID().slice(0, 8)}`,
@@ -152,7 +153,6 @@ test.describe("Story 5.2 Ranked IRV Results", () => {
   });
 
   test("closed ranked Poll still shows the IRV summary", async ({ page }) => {
-    requireBaseUrl();
     const fixture = seedRankedResultsPoll(
       owner.userId,
       `rank-closed-${randomUUID().slice(0, 8)}`,

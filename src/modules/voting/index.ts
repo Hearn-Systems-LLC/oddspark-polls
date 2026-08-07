@@ -517,6 +517,17 @@ export async function castVote(
             comment,
           );
   } catch {
+    // Structurally invalid ranked preferences (gaps, duplicates, empty)
+    // must fail closed as a permanent ballot rejection, never a transient
+    // 500. Strategy validation would return the same code if normalize ran
+    // after it; normalize is first because the payload hash needs the
+    // canonical form for idempotent replays of already-valid ballots.
+    if (input.pollType === "ranked_choice") {
+      return failure(
+        "invalid_ranking",
+        "That ranking does not match this Poll.",
+      );
+    }
     return failure("vote_failed", VOTE_COPY.retry);
   }
 

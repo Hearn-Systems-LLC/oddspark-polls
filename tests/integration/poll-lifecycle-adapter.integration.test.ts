@@ -441,6 +441,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
         maxSelections: null,
         commentsEnabled: false,
       },
+      pollType: "multiple_choice",
       options: [
         {
           id: "new-1" as PollOptionId,
@@ -527,6 +528,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
         pollId: POLL_A,
         ownerUserId: OWNER_A,
         definition,
+        pollType: "multiple_choice",
         options: firstOptions,
         expectedRepresentationVersion: 1,
         version: incrementRepresentationVersion(POLL_A, NOW + 10),
@@ -537,6 +539,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
         pollId: POLL_A,
         ownerUserId: OWNER_A,
         definition: { ...definition, question: "Stale overwrite" },
+        pollType: "multiple_choice",
         options: [
           { id: "stale-1" as PollOptionId, label: "X", position: 0 },
           { id: "stale-2" as PollOptionId, label: "Y", position: 1 },
@@ -550,6 +553,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
         pollId: POLL_A,
         ownerUserId: OWNER_B,
         definition: { ...definition, question: "Foreign overwrite" },
+        pollType: "multiple_choice",
         options: firstOptions,
         expectedRepresentationVersion: 2,
         version: incrementRepresentationVersion(POLL_A, NOW + 30),
@@ -581,6 +585,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
         pollId: POLL_B,
         ownerUserId: OWNER_A,
         definition,
+        pollType: "multiple_choice",
         options: firstOptions,
         expectedRepresentationVersion: 1,
         version: incrementRepresentationVersion(POLL_B, NOW + 40),
@@ -611,6 +616,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
           maxSelections: null,
           commentsEnabled: false,
         },
+        pollType: "multiple_choice",
         options: [
           { id: "edited-1" as PollOptionId, label: "New A", position: 0 },
           { id: "edited-2" as PollOptionId, label: "New B", position: 1 },

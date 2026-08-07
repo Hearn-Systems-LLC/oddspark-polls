@@ -131,6 +131,7 @@ const persistedDraft = (
   owned: NonNullable<typeof poll>,
   description = owned.description ?? "",
 ): PollDefinitionDraft => ({
+  pollType: owned.pollType,
   question: owned.question,
   description,
   options: owned.options.map((option) => option.label),
@@ -155,6 +156,7 @@ if (Astro.request.method === "POST") {
 
   const intent = parsedForm.intent;
   const submittedDraft: PollDefinitionDraft = {
+    pollType: parsedForm.pollType ?? poll?.pollType ?? "multiple_choice",
     question: parsedForm.question,
     description: parsedForm.description,
     options: parsedForm.options,
@@ -232,18 +234,12 @@ if (Astro.request.method === "POST") {
     if (!lifecycle) {
       poll = null;
       Astro.response.status = 404;
-    } else if (
-      lifecycle.voterCount > 0 ||
-      lifecycle.pollType !== "multiple_choice"
-    ) {
+    } else if (lifecycle.voterCount > 0) {
       forceLockedView = true;
       Astro.response.status = 422;
       poll = await persistence.findPollForOwner(pollId, ownerId);
       if (poll) {
         draftValues = persistedDraft(poll, submittedDraft.description);
-      }
-      if (lifecycle.pollType !== "multiple_choice") {
-        formError = LIFECYCLE_COPY.unsupportedPollType;
       }
     } else {
       draftValues = submittedDraft;
@@ -316,7 +312,12 @@ if (Astro.request.method === "POST") {
   } else if (intent === "update-description") {
     const description = parsedForm.description;
     draftValues = persistedDraft(poll, description);
-    const result = await updatePollDescription(
+    const submittedPollType = parsedForm.pollType;
+    if (submittedPollType !== null && submittedPollType !== poll.pollType) {
+      formError = LIFECYCLE_COPY.unsupportedPollType;
+      Astro.response.status = 422;
+    }
+    const result = formError ? null : await updatePollDescription(
       {
         loadOwnedPoll: loadLifecycle,
         updateDescription: (input) =>
@@ -327,7 +328,7 @@ if (Astro.request.method === "POST") {
       ownerId,
       description,
     );
-    if (result.ok) {
+    if (result?.ok) {
       return new Response(null, {
         status: 303,
         headers: {
@@ -336,22 +337,19 @@ if (Astro.request.method === "POST") {
         },
       });
     }
-    if (result.error.code === "poll_not_found") {
+    if (result && !result.ok && result.error.code === "poll_not_found") {
       poll = null;
       Astro.response.status = 404;
-    } else if (result.error.fieldErrors) {
+    } else if (result && !result.ok && result.error.fieldErrors) {
       fieldErrors = result.error.fieldErrors;
       Astro.response.status = 422;
-    } else {
+    } else if (result && !result.ok) {
       formError = result.error.message;
       Astro.response.status = 500;
     }
   } else if (intent === "update-definition") {
     const submittedPollType = parsedForm.pollType;
-    if (
-      submittedPollType !== null &&
-      submittedPollType !== "multiple_choice"
-    ) {
+    if (submittedPollType !== null && submittedPollType !== poll.pollType) {
       formError = LIFECYCLE_COPY.unsupportedPollType;
       Astro.response.status = 422;
     }
@@ -657,8 +655,7 @@ const voterCount =
   lifecycleSnapshot?.voterCount ?? selectedListRow?.voterCount ?? 0;
 const definitionLocked =
   forceLockedView ||
-  voterCount > 0 ||
-  (poll !== null && poll.pollType !== "multiple_choice");
+  voterCount > 0;
 
 const listCards = ownedPolls.map((row) =>
   buildPollCardViewModel({
@@ -675,6 +672,7 @@ const listCards = ownedPolls.map((row) =>
 );
 
 const formValues: PollDefinitionDraft = draftValues ?? {
+  pollType: poll?.pollType ?? "multiple_choice",
   question: poll?.question ?? "",
   description: poll?.description ?? "",
   options:
@@ -858,9 +856,7 @@ const detailPath = `/creator/polls/${pollId}`;
                 pollTypeLabel={poll.pollType.replaceAll("_", " ").toUpperCase()}
                 locked={definitionLocked}
                 lockMessage={
-                  poll.pollType !== "multiple_choice"
-                    ? LIFECYCLE_COPY.unsupportedPollType
-                    : definitionLocked
+                  definitionLocked
                       ? LIFECYCLE_COPY.definitionLocked
                       : null
                 }
@@ -1021,20 +1017,22 @@ const detailPath = `/creator/polls/${pollId}`;
                   VIEW LIVE RESULTS
                 </ButtonSecondary>
               </p>
-              <p class="export-link-row">
-                <ButtonSecondary
-                  href={`${detailPath}/export.csv`}
-                  data-export-csv
-                >
-                  EXPORT CSV
-                </ButtonSecondary>
-                <ButtonSecondary
-                  href={`${detailPath}/export.xlsx`}
-                  data-export-xlsx
-                >
-                  EXPORT XLSX
-                </ButtonSecondary>
-              </p>
+              {poll.pollType === "multiple_choice" && (
+                <p class="export-link-row">
+                  <ButtonSecondary
+                    href={`${detailPath}/export.csv`}
+                    data-export-csv
+                  >
+                    EXPORT CSV
+                  </ButtonSecondary>
+                  <ButtonSecondary
+                    href={`${detailPath}/export.xlsx`}
+                    data-export-xlsx
+                  >
+                    EXPORT XLSX
+                  </ButtonSecondary>
+                </p>
+              )}
             </div>
 
             <Overlay

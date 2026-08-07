@@ -34,6 +34,7 @@ function envelope(
   return {
     pollId: POLL_ID,
     question: "Where to lunch?",
+    pollType: "multiple_choice",
     resultVisibility: "live",
     ownerUserId: OWNER_ID,
     deadlineMs: null,
@@ -105,6 +106,32 @@ function livePorts(
 }
 
 describe("queryResults visibility matrix", () => {
+  it("returns an honest ranked unavailable state without reading result facts", async () => {
+    const rankedPorts = ports(envelope({ pollType: "ranked_choice" }));
+    await expect(
+      queryResults(rankedPorts, "team-lunch", ANONYMOUS, NOW),
+    ).resolves.toEqual({
+      kind: "ranked_unavailable",
+      pollId: POLL_ID,
+      question: "Where to lunch?",
+      canonicalReference: "team-lunch",
+    });
+    expect(rankedPorts.projectResults).not.toHaveBeenCalled();
+  });
+
+  it("keeps a hidden ranked Poll hidden before applying the unavailable boundary", async () => {
+    const rankedPorts = ports(
+      envelope({
+        pollType: "ranked_choice",
+        resultVisibility: "after_close",
+        deadlineMs: NOW + 1,
+      }),
+    );
+    await expect(
+      queryResults(rankedPorts, "team-lunch", ANONYMOUS, NOW),
+    ).resolves.toMatchObject({ kind: "after_close_hidden" });
+    expect(rankedPorts.projectResults).not.toHaveBeenCalled();
+  });
   it.each([
     { name: "anonymous", viewer: ANONYMOUS },
     { name: "signed-in non-owner", viewer: NON_OWNER },
@@ -504,6 +531,27 @@ describe("live Results validator", () => {
 });
 
 describe("queryLiveResults authorization and projection", () => {
+  it("declines ranked live projection before any version or result read", async () => {
+    const rankedPorts = livePorts(
+      envelope({ pollType: "ranked_choice" }),
+      17,
+    );
+    await expect(
+      queryLiveResults(
+        rankedPorts,
+        "team-lunch",
+        ANONYMOUS,
+        NOW,
+        '"16:open"',
+      ),
+    ).resolves.toEqual({
+      kind: "ranked_unavailable",
+      pollId: POLL_ID,
+      canonicalReference: "team-lunch",
+    });
+    expect(rankedPorts.readRepresentationVersion).not.toHaveBeenCalled();
+    expect(rankedPorts.projectVersionedResults).not.toHaveBeenCalled();
+  });
   it.each([
     {
       name: "open After Close for an anonymous viewer",

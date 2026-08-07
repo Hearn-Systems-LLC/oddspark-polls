@@ -24,7 +24,9 @@ import {
   isUuidShape,
   POLL_CAPS,
 } from "../modules/polls/index";
-import { multipleChoiceStrategy } from "../modules/polls/types/multiple-choice";
+import { votingStrategyFor } from "../modules/polls/types/registry";
+import type { RankedPreferenceInput } from "../modules/polls/types/ranked-choice";
+import { toggleRankedPreference } from "../modules/voting/rank-draft";
 import { COMMENT_CAPS } from "../modules/comments/index";
 import {
   queryResults,
@@ -42,10 +44,10 @@ import {
   asVoteRateLimitDigest,
   asVoterClaimDigest,
   castVote,
+  type CastVoteInput,
   type VoteApplicationError,
   type VoteRateLimitDigest,
   type VoterClaimDigest,
-  type VotingPollTypeStrategy,
 } from "../modules/voting/index";
 import {
   effectivePollStatus,
@@ -140,6 +142,7 @@ export type PollDeliveryState = {
   poll: PollPage;
   submissionId: string;
   selectedOptionIds: string[];
+  rankedPreferences: RankedPreferenceInput[];
   outcome: VoteOutcomeView | null;
   readOnly: boolean;
   actionDisabled: boolean;
@@ -193,6 +196,9 @@ export type PollDeliveryInput = {
 const formSchema = z.object({
   submissionId: z.string().refine(isUuidShape),
   selectedOptionIds: z.array(z.string()).max(POLL_CAPS.maxOptions),
+  rankedPreferences: z
+    .array(z.object({ optionId: z.string(), rank: z.number() }))
+    .max(POLL_CAPS.maxOptions),
 });
 
 export const splitVoteCopy = (copy: string): { heading: string; body: string } => {
@@ -214,9 +220,12 @@ export const outcomeFromVoteError = (
       return { code: error.code, ...splitVoteCopy(VOTE_COPY.pollClosed), time: { placeholder: "{when}", timestampMs: error.closedAtMs ?? Date.now() }, titlePrefix: "Poll closed", tone: "rejection" };
     case "selection_required":
       return { code: error.code, ...splitVoteCopy(VOTE_COPY.selectionRequired), time: null, titlePrefix: "Nothing selected", tone: "rejection" };
+    case "ranking_required":
+      return { code: error.code, ...splitVoteCopy(error.message), time: null, titlePrefix: "Nothing ranked", tone: "rejection" };
     case "idempotency_conflict":
       return { code: error.code, ...splitVoteCopy(VOTE_COPY.idempotencyConflict), time: null, titlePrefix: "Vote already counted", tone: "rejection" };
     case "invalid_selection":
+    case "invalid_ranking":
     case "too_few_selections":
     case "too_many_selections":
       return { code: error.code, ...splitVoteCopy(error.message), time: null, titlePrefix: "Vote not counted", tone: "rejection" };
@@ -258,6 +267,8 @@ const postVoteResultsFrom = (view: ResultsView): PostVoteResultsView => {
         : { kind: view.kind, body: RESULTS_COPY.afterCloseHidden, time: { placeholder: "{deadline}", timestampMs: view.deadlineMs } };
     case "creator_only_hidden":
       return { kind: view.kind, body: RESULTS_COPY.creatorOnlyHidden, time: null };
+    case "ranked_unavailable":
+      return { kind: "unavailable", body: RESULTS_COPY.rankedUnavailable, time: null };
     case "not_found":
       return { kind: "unavailable", body: RESULTS_COPY.unavailable, time: null };
   }
@@ -320,8 +331,9 @@ export async function deliverPollVotingSurface(
   let voterToken = input.voterCookie && VOTER_TOKEN_SHAPE.test(input.voterCookie)
     ? input.voterCookie
     : null;
-  let submissionId = crypto.randomUUID();
+  let submissionId: string = crypto.randomUUID();
   let selectedOptionIds: string[] = [];
+  let rankedPreferences: RankedPreferenceInput[] = [];
   let outcome: VoteOutcomeView | null = null;
   let readOnly = false;
   let actionDisabled = false;
@@ -345,14 +357,24 @@ export async function deliverPollVotingSurface(
   };
 
   if (method === "POST") {
-    if (typeof input.env.VOTE_DIGEST_SECRET !== "string" || input.env.VOTE_DIGEST_SECRET.trim().length === 0) {
-      response = immediate("Voting is unavailable.", 500);
-      return { state: null, status: 500, headers, cookies, response, unavailable };
-    }
     try {
       const formData = await input.request.formData();
       const text = (entry: FormDataEntryValue | null): string => typeof entry === "string" ? entry : "";
       selectedOptionIds = formData.getAll("option_id").map(text);
+      const rankedOptionIds = formData.getAll("ranked_option_id");
+      const rankPositions = formData.getAll("rank_position");
+      if (
+        rankedOptionIds.length !== rankPositions.length ||
+        rankedOptionIds.length > POLL_CAPS.maxOptions ||
+        rankedOptionIds.some((entry) => typeof entry !== "string") ||
+        rankPositions.some((entry) => typeof entry !== "string")
+      ) {
+        throw new UnreadableVoteFormError();
+      }
+      rankedPreferences = rankedOptionIds.map((entry, index) => ({
+        optionId: entry as string,
+        rank: Number(rankPositions[index]),
+      }));
       commentBody = boundedInvalidEcho(
         singletonText(formData, "comment"),
         COMMENT_CAPS.body,
@@ -364,6 +386,7 @@ export async function deliverPollVotingSurface(
       const parsed = formSchema.safeParse({
         submissionId: text(formData.get("submission_id")),
         selectedOptionIds,
+        rankedPreferences,
       });
       if (!parsed.success) {
         outcome = outcomeFromVoteError({ code: "vote_failed", message: VOTE_COPY.retry });
@@ -371,6 +394,80 @@ export async function deliverPollVotingSurface(
         markVoteRejection();
       } else {
         const submittedId = parsed.data.submissionId;
+        const rankAction = singletonText(formData, "rank_action");
+        if (rankAction.length > 0) {
+          // Rank actions mutate only the server-side draft — they never
+          // consume vote admission — but they must not keep an interactive
+          // builder alive against a closed Poll or a counted Ballot.
+          const rankActionClosedMs = Date.now();
+          if (effectivePollStatus(poll, rankActionClosedMs) === "closed") {
+            outcome = { code: "poll_closed_get", heading: VOTE_COPY.closedOnGet, body: "", time: { placeholder: "{when}", timestampMs: poll.closedAtMs ?? poll.deadlineMs ?? rankActionClosedMs }, titlePrefix: "Poll closed", tone: "rejection" };
+            readOnly = true;
+          } else {
+            let rankActionCounted = false;
+            if (voterToken !== null && input.env.VOTE_DIGEST_SECRET) {
+              try {
+                const rankDigest = asVoterClaimDigest(await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: poll.pollId, checkKind: "session", token: voterToken }));
+                if (rankDigest !== null && await votePersistence.findClaim(poll.pollId, "session", rankDigest)) {
+                  rankActionCounted = true;
+                }
+              } catch { /* preflight failure degrades to the interactive builder */ }
+            }
+            if (!rankActionCounted) {
+              try {
+                rankActionCounted = await votePersistence.findVoteBySubmission(poll.pollId, submittedId) !== null;
+              } catch { /* submission lookup failure degrades to the interactive builder */ }
+            }
+            if (rankActionCounted) {
+              outcome = outcomeFromVoteError({ code: "already_voted", message: VOTE_COPY.alreadyVoted });
+              readOnly = true;
+            }
+          }
+        }
+        if (rankAction.length > 0 && !readOnly) {
+          submissionId = submittedId;
+          const knownOptionIds = new Set(poll.options.map((option) => option.id));
+          const rankedDraftValid =
+            poll.pollType === "ranked_choice" &&
+            selectedOptionIds.length === 0 &&
+            knownOptionIds.has(rankAction as PollOptionId) &&
+            rankedPreferences.every(
+              (preference, index, all) =>
+                knownOptionIds.has(preference.optionId as PollOptionId) &&
+                Number.isSafeInteger(preference.rank) &&
+                preference.rank >= 1 &&
+                preference.rank <= all.length &&
+                all.findIndex((entry) => entry.optionId === preference.optionId) === index &&
+                all.findIndex((entry) => entry.rank === preference.rank) === index,
+            ) &&
+            rankedPreferences.every((_, index, all) =>
+              all.some((entry) => entry.rank === index + 1),
+            );
+          if (!rankedDraftValid) {
+            // The Poll definition moved under the draft. Drop the stale
+            // preferences entirely rather than echo gap-bearing ranks into
+            // the re-rendered form.
+            rankedPreferences = [];
+            outcome = outcomeFromVoteError({
+              code: "poll_definition_changed",
+              message: VOTE_COPY.pollDefinitionChanged,
+            });
+            status = 422;
+            markVoteRejection();
+          } else {
+            rankedPreferences = toggleRankedPreference(
+              rankedPreferences.map((preference) => ({
+                optionId: preference.optionId as PollOptionId,
+                rank: preference.rank,
+              })),
+              rankAction as PollOptionId,
+            );
+          }
+        } else if (rankAction.length === 0) {
+        if (typeof input.env.VOTE_DIGEST_SECRET !== "string" || input.env.VOTE_DIGEST_SECRET.trim().length === 0) {
+          response = immediate("Voting is unavailable.", 500);
+          return { state: null, status: 500, headers, cookies, response, unavailable };
+        }
         const existing = await votePersistence.findVoteBySubmission(poll.pollId, submittedId);
         let ipClaimDigest: VoterClaimDigest | null = null;
         let rateLimitDigest: VoteRateLimitDigest | null = null;
@@ -405,11 +502,6 @@ export async function deliverPollVotingSurface(
             humanChallenge = turnstile.proof;
             if (input.requestContext) input.requestContext.providerOutcome = turnstile.providerOutcome;
           }
-          const strategyFor = (pollType: PollType): VotingPollTypeStrategy | null => {
-            if (pollType !== "multiple_choice") return null;
-            const { validateSubmission, persistFacts } = multipleChoiceStrategy;
-            return persistFacts ? { validateSubmission, persistFacts } : null;
-          };
           // Pre-compute the deterministic flash digest BEFORE the commit so
           // no fallible call sits between castVote and the 303: a signing
           // throw here escapes into the broad catch with nothing stored, and
@@ -420,27 +512,40 @@ export async function deliverPollVotingSurface(
           // surface as vote_failed instead — accepted trade-off, since a
           // signing failure still commits nothing.
           const flashDigest = await flashDigestFor(poll.pollId);
+          const sharedVoteInput = {
+            pollId: poll.pollId,
+            submissionId: submittedId,
+            comment: { body: commentBody, displayName: commentDisplayName },
+            browserToken: voterToken,
+            ipDigest: ipClaimDigest,
+            humanChallenge,
+          };
+          const voteInput: CastVoteInput =
+            poll.pollType === "ranked_choice"
+              ? {
+                  ...sharedVoteInput,
+                  pollType: "ranked_choice",
+                  selectedOptionIds: [],
+                  rankedPreferences,
+                }
+              : {
+                  ...sharedVoteInput,
+                  pollType: "multiple_choice",
+                  selectedOptionIds,
+                };
           const result = await castVote(
             {
               findPoll: votePersistence.findPoll,
               findVoteBySubmission: votePersistence.findVoteBySubmission,
               optionsStillReachable: votePersistence.optionsStillReachable,
-              strategyFor,
+              strategyFor: votingStrategyFor,
               createDigest: (digestInput) => createVoteDigest(input.env.VOTE_DIGEST_SECRET, digestInput),
               hashPayload: sha256Hex,
               persistVote: votePersistence.insertVote,
               generateId: () => crypto.randomUUID(),
               nowMs: () => Date.now(),
             },
-            {
-              pollId: poll.pollId,
-              submissionId: submittedId,
-              selectedOptionIds,
-              comment: { body: commentBody, displayName: commentDisplayName },
-              browserToken: voterToken,
-              ipDigest: ipClaimDigest,
-              humanChallenge,
-            },
+            voteInput,
           );
           if (result.ok) {
             cookies.push({
@@ -492,6 +597,9 @@ export async function deliverPollVotingSurface(
               poll = refreshed;
               const reachable = new Set(poll.options.map((option) => option.id));
               selectedOptionIds = selectedOptionIds.filter((id) => reachable.has(id as PollOptionId));
+              rankedPreferences = rankedPreferences.filter((preference) =>
+                reachable.has(preference.optionId as PollOptionId),
+              );
             }
           }
           if (outcome) {
@@ -499,6 +607,7 @@ export async function deliverPollVotingSurface(
             status = result.error.code === "ip_check_unavailable" || result.error.code === "vote_failed" ? 500 : 422;
             markVoteRejection();
           }
+        }
         }
       }
     } catch (error) {
@@ -513,7 +622,10 @@ export async function deliverPollVotingSurface(
       submissionId = crypto.randomUUID();
       if (voterToken === null) issueVoterCookie();
     }
-    if (readOnly) selectedOptionIds = [];
+    if (readOnly) {
+      selectedOptionIds = [];
+      rankedPreferences = [];
+    }
   } else {
     if (method === "GET" && voterToken === null) issueVoterCookie();
     let voterDigest: VoterClaimDigest | null = null;
@@ -617,7 +729,8 @@ export async function deliverPollVotingSurface(
   }
 
   const compactCounted = readOnly && outcome?.code === "counted";
-  const showReadOnlyOptions = readOnly && !compactCounted;
+  const showReadOnlyOptions =
+    readOnly && !compactCounted && poll.pollType === "multiple_choice";
   const showTally = postVoteResults?.kind === "visible" && (readOnly || input.includeEditableTally);
   const resultsExplanation = !compactCounted && postVoteResults?.kind !== "visible" ? postVoteResults : null;
   const postVoteComposition = compactCounted && showTally;
@@ -650,6 +763,7 @@ export async function deliverPollVotingSurface(
       poll,
       submissionId,
       selectedOptionIds,
+      rankedPreferences,
       outcome,
       readOnly,
       actionDisabled,

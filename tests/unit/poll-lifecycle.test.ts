@@ -376,7 +376,7 @@ describe("updatePollDefinition", () => {
     }
   });
 
-  it("rejects definition edits for unsupported stored Poll types", async () => {
+  it("supports pre-first-Vote definition edits for Ranked Choice", async () => {
     const updateDef = vi.fn(async () => "updated" as const);
     const result = await updatePollDefinition(
       {
@@ -398,13 +398,12 @@ describe("updatePollDefinition", () => {
       },
     );
     expect(result).toEqual({
-      ok: false,
-      error: {
-        code: "poll_type_unsupported",
-        message: LIFECYCLE_COPY.unsupportedPollType,
-      },
+      ok: true,
+      value: expect.objectContaining({ kind: "updated" }),
     });
-    expect(updateDef).not.toHaveBeenCalled();
+    expect(updateDef).toHaveBeenCalledWith(
+      expect.objectContaining({ pollType: "ranked_choice" }),
+    );
   });
 
   it("maps a stale definition version to an explicit conflict", async () => {

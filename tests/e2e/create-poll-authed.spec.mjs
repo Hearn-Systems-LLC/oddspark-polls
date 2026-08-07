@@ -134,7 +134,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     await expect(page.getByLabel("MIN (OPTIONAL)")).toBeHidden();
     await expect(page.getByLabel("MAX (OPTIONAL)")).toBeHidden();
 
-    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await page.locator('label[for="multi-select-true"]').click();
     await expect(page.getByLabel("MIN (OPTIONAL)")).toBeVisible();
     await expect(page.getByLabel("MAX (OPTIONAL)")).toBeVisible();
 
@@ -157,7 +157,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     await page.getByLabel("QUESTION").fill("Pick two?");
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("A");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("B");
-    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await page.locator('label[for="multi-select-true"]').click();
     const min = page.getByLabel("MIN (OPTIONAL)");
     const max = page.getByLabel("MAX (OPTIONAL)");
     await min.fill("2");
@@ -656,7 +656,7 @@ test.describe("authenticated create flow (seeded session)", () => {
     await page.getByRole("textbox", { name: "OPTION 1" }).fill("Alpha");
     await page.getByRole("textbox", { name: "OPTION 2" }).fill("Beta");
     await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill("Team-Lunch");
-    await page.locator("label.poll-option", { hasText: "SEVERAL" }).click();
+    await page.locator('label[for="multi-select-true"]').click();
     await page.getByLabel("MIN (OPTIONAL)").fill("2");
     await page.getByLabel("MAX (OPTIONAL)").fill("3");
 

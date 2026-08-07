@@ -60,7 +60,7 @@ const form = document.querySelector<HTMLFormElement>("[data-vote-form]");
 
 if (form) {
   const voteButton = form.querySelector<HTMLButtonElement>(
-    'button[type="submit"]',
+    ".vote-button",
   );
   const hint = form.querySelector<HTMLElement>("[data-vote-hint]");
   const boundsHint = form.querySelector<HTMLElement>("[data-bounds-hint]");
@@ -85,6 +85,10 @@ if (form) {
   commentBody?.addEventListener("input", syncCommentCounter);
   syncCommentCounter();
   const locked = form.dataset.voteLocked === "true";
+  const rankedChoice = form.dataset.rankedChoice === "true";
+  const rankActions = Array.from(
+    form.querySelectorAll<HTMLButtonElement>("[data-rank-action]"),
+  );
   const multiSelect = form.dataset.multiSelect === "true";
   const parsedMin = Number(form.dataset.min);
   const parsedMax = Number(form.dataset.max);
@@ -113,6 +117,9 @@ if (form) {
 
   const syncSelectionState = (): void => {
     if (form.dataset.voteInflight === "true") {
+      return;
+    }
+    if (rankedChoice) {
       return;
     }
     const count = selectedCount();
@@ -211,9 +218,21 @@ if (form) {
     if (voteButton) {
       voteButton.textContent = idleVoteLabel;
       voteButton.removeAttribute("aria-busy");
+      if (rankedChoice) {
+        // syncSelectionState defers the ranked VOTE button to the rank
+        // builder; recompute here so an aborted POST never strands the
+        // button disabled behind an unchanged, still-valid draft.
+        const rankedCount = form.querySelectorAll(
+          "[data-rank-position-input]:not(:disabled)",
+        ).length;
+        voteButton.disabled = locked || rankedCount === 0;
+      }
     }
     if (commentBody) commentBody.readOnly = false;
     if (commentDisplayName) commentDisplayName.readOnly = false;
+    rankActions.forEach((action) => {
+      action.disabled = locked;
+    });
     syncSelectionState();
   };
 
@@ -229,6 +248,9 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = true;
     if (commentDisplayName) commentDisplayName.readOnly = true;
+    rankActions.forEach((action) => {
+      action.disabled = true;
+    });
     // Esc/stop mid-POST fires no pageshow. A completed navigation discards
     // this timer with the document; an aborted one restores the usable form.
     // A TIMED restore cannot tell an aborted POST from a slow one — the

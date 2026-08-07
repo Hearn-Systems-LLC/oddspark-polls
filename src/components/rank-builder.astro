@@ -1,0 +1,131 @@
+---
+import type { PollOptionId } from "../shared/domain/index";
+import type { PollPage } from "../adapters/d1/index";
+import {
+  rankSummary,
+  type RankedPreferenceDraft,
+} from "../modules/voting/rank-draft";
+
+interface Props {
+  options: PollPage["options"];
+  preferences: readonly RankedPreferenceDraft[];
+  locked?: boolean;
+}
+
+const { options, preferences, locked = false } = Astro.props;
+const rankByOption = new Map(
+  preferences.map((preference) => [preference.optionId, preference.rank]),
+);
+const total = options.length;
+const summary = rankSummary(preferences.length, total);
+const accessibleName = (
+  label: string,
+  optionId: PollOptionId,
+): string => {
+  const rank = rankByOption.get(optionId);
+  return rank === undefined
+    ? `${label}, unranked, activate to rank next`
+    : `${label}, rank ${rank} of ${total}, activate to unrank`;
+};
+---
+
+<div class="rank-builder" data-rank-builder data-option-total={total}>
+  <p
+    class="rank-summary"
+    data-rank-summary
+    aria-live="polite"
+    aria-atomic="true"
+  >{summary}</p>
+  <fieldset class="rank-options">
+    <legend class="visually-hidden">Rank options in preference order</legend>
+    {
+      options.map((option) => {
+        const rank = rankByOption.get(option.id);
+        return (
+          <div class="rank-row" data-rank-row data-option-id={option.id}>
+            <input
+              type="hidden"
+              name="ranked_option_id"
+              value={option.id}
+              disabled={rank === undefined}
+              data-ranked-option-input
+            />
+            <input
+              type="hidden"
+              name="rank_position"
+              value={rank ?? ""}
+              disabled={rank === undefined}
+              data-rank-position-input
+            />
+            <button
+              class="rank-action"
+              type="submit"
+              name="rank_action"
+              value={option.id}
+              aria-label={accessibleName(option.label, option.id)}
+              aria-pressed={rank !== undefined ? "true" : "false"}
+              data-rank-action
+              disabled={locked}
+            >
+              <span class:list={["rank-marker", rank === undefined && "is-unranked"]} data-rank-marker aria-hidden="true">
+                {rank ?? "–"}
+              </span>
+              <span class="rank-label" data-rank-label>{option.label}</span>
+            </button>
+          </div>
+        );
+      })
+    }
+  </fieldset>
+</div>
+
+<script src="../scripts/rank-builder.ts"></script>
+
+<style>
+  .rank-builder { display: grid; gap: var(--space-3); }
+  .rank-summary {
+    margin: 0;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+  .rank-options { display: grid; margin: 0; padding: 0; border: 0; }
+  .rank-row { border-top: var(--space-hairline) solid var(--color-rule); }
+  .rank-row:last-child { border-bottom: var(--space-hairline) solid var(--color-rule); }
+  .rank-action {
+    display: grid;
+    grid-template-columns: var(--space-10) minmax(0, 1fr);
+    align-items: center;
+    width: 100%;
+    min-height: 48px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .rank-action:hover { background: var(--color-solar-wash); }
+  .rank-action:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+  .rank-action:disabled { cursor: default; }
+  .rank-marker {
+    color: var(--color-entropy);
+    font-family: var(--font-machine);
+    font-size: var(--type-data-size);
+    line-height: var(--type-data-lh);
+    text-align: center;
+  }
+  .rank-marker.is-unranked { color: var(--color-faint); }
+  .rank-label {
+    padding: var(--space-3) var(--space-3) var(--space-3) 0;
+    font-size: var(--type-body-lg-size);
+    line-height: var(--type-body-lg-lh);
+    overflow-wrap: anywhere;
+  }
+</style>

@@ -124,6 +124,7 @@ describe("createResultsPersistence access read", () => {
     // facts — never options, counts, percentages, or representationVersion.
     expect(await persistence.findAccessEnvelope("results-it-link")).toEqual({
       pollId: POLL_ID,
+      pollType: "multiple_choice",
       question: "Choose results",
       resultVisibility: "after_close",
       ownerUserId: "results-it-owner",

@@ -163,7 +163,7 @@ describe("creator dashboard surface contracts (Story 1.11)", () => {
     );
     expect(detailPageSource).toContain("poll_type_unsupported");
     expect(detailPageSource).toContain(
-      'submittedPollType !== "multiple_choice"',
+      "submittedPollType !== poll.pollType",
     );
   });
 

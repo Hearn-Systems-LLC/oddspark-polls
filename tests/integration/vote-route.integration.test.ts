@@ -49,6 +49,7 @@ async function seedPoll(options: {
   reference?: string;
   sessionChecksEnabled?: boolean;
   commentsEnabled?: boolean;
+  pollType?: "multiple_choice" | "ranked_choice";
 }): Promise<{
   optionA: PollOptionId;
   optionB: PollOptionId;
@@ -72,10 +73,11 @@ async function seedPoll(options: {
         session_checks_enabled, ip_checks_enabled, captcha_enabled, comments_enabled, multi_select_enabled,
         min_selections, max_selections, deadline_ms, closed_at_ms,
         representation_version, created_at_ms, updated_at_ms
-      ) VALUES (?1, ?2, 'multiple_choice', 'Route IP?', 'live', ?3, ?4, ?5, ?6, 0, NULL, NULL, NULL, NULL, 1, ?7, ?7)`,
+      ) VALUES (?1, ?2, ?3, 'Route IP?', 'live', ?4, ?5, ?6, ?7, 0, NULL, NULL, NULL, NULL, 1, ?8, ?8)`,
     ).bind(
       pollId,
       OWNER,
+      options.pollType ?? "multiple_choice",
       options.sessionChecksEnabled === false ? 0 : 1,
       options.ipChecksEnabled === true ? 1 : 0,
       options.captchaEnabled === true ? 1 : 0,
@@ -262,6 +264,130 @@ const invalidIdentityCases: Array<{
     headers: { "cf-connecting-ip": "203.0.113.4:443" },
   },
 ];
+
+describe("Ranked Choice delivery boundary", () => {
+  const ORIGIN = "https://polls.example.test";
+  const rankedBody = (
+    submissionId: string,
+    preferences: readonly { optionId: string; rank: number }[],
+    rankAction?: string,
+  ): URLSearchParams => {
+    const body = new URLSearchParams({ submission_id: submissionId });
+    for (const preference of preferences) {
+      body.append("ranked_option_id", preference.optionId);
+      body.append("rank_position", String(preference.rank));
+    }
+    if (rankAction) body.set("rank_action", rankAction);
+    return body;
+  };
+
+  it("renders the server-first rank builder and applies rank actions without casting a Vote", async () => {
+    const poll = await seedPoll({
+      pollType: "ranked_choice",
+      sessionChecksEnabled: false,
+    });
+    const submissionId = crypto.randomUUID();
+
+    const first = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: rankedBody(submissionId, [], poll.optionA),
+        }),
+      ),
+      poll.reference,
+    );
+    const firstHtml = await first.text();
+    expect(first.status).toBe(200);
+    expect(firstHtml).toContain(
+      "RANKED 1 OF 2 · UNRANKED OPTIONS COUNT AS NO PREFERENCE",
+    );
+    expect(firstHtml).toContain("Alpha, rank 1 of 2, activate to unrank");
+
+    const compacted = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: rankedBody(
+            submissionId,
+            [
+              { optionId: poll.optionA, rank: 1 },
+              { optionId: poll.optionB, rank: 2 },
+            ],
+            poll.optionA,
+          ),
+        }),
+      ),
+      poll.reference,
+    );
+    const compactedHtml = await compacted.text();
+    expect(compacted.status).toBe(200);
+    expect(compactedHtml).toContain("Beta, rank 1 of 2, activate to unrank");
+    expect(compactedHtml).toContain(
+      "RANKED 1 OF 2 · UNRANKED OPTIONS COUNT AS NO PREFERENCE",
+    );
+    expect(
+      await testEnv.DB.prepare("SELECT COUNT(*) AS n FROM vote WHERE poll_id = ?1")
+        .bind(poll.pollId)
+        .first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+  });
+
+  it("persists exact ranked order once and rejects skipped ranks without partial facts", async () => {
+    const poll = await seedPoll({
+      pollType: "ranked_choice",
+      sessionChecksEnabled: false,
+    });
+    const malformed = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: rankedBody(crypto.randomUUID(), [
+            { optionId: poll.optionA, rank: 1 },
+            { optionId: poll.optionB, rank: 3 },
+          ]),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(malformed.status).toBe(422);
+    expect(await malformed.text()).toContain("That ranking does not match this Poll.");
+
+    const accepted = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: rankedBody(crypto.randomUUID(), [
+            { optionId: poll.optionB, rank: 1 },
+            { optionId: poll.optionA, rank: 2 },
+          ]),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(accepted.status).toBe(303);
+    expect(
+      await testEnv.DB.prepare(
+        `SELECT rbp.poll_option_id, rbp.preference_rank
+         FROM ranked_vote_preference rbp
+         JOIN vote v ON v.id = rbp.vote_id
+         WHERE v.poll_id = ?1
+         ORDER BY rbp.preference_rank`,
+      )
+        .bind(poll.pollId)
+        .all<{ poll_option_id: string; preference_rank: number }>(),
+    ).toMatchObject({
+      results: [
+        { poll_option_id: poll.optionB, preference_rank: 1 },
+        { poll_option_id: poll.optionA, preference_rank: 2 },
+      ],
+    });
+  });
+});
 
 describe("administrator delisting public Vote contract", () => {
   it("keeps direct viewing and voting unchanged and privacy-safe while delisted", async () => {

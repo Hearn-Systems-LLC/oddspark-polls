@@ -59,7 +59,8 @@ const handle: APIRoute = async ({ request, params, locals }) => {
 
   if (
     view.kind === "after_close_hidden" ||
-    view.kind === "creator_only_hidden"
+    view.kind === "creator_only_hidden" ||
+    view.kind === "ranked_unavailable"
   ) {
     return new Response(null, {
       status: 204,

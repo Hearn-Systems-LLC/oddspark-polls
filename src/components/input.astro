@@ -7,6 +7,7 @@ interface Props {
   value?: string;
   placeholder?: string;
   required?: boolean;
+  disabled?: boolean;
   error?: boolean;
   /** id of the inline error message element, wired to aria-describedby. */
   describedby?: string;
@@ -25,6 +26,7 @@ const {
   value = "",
   placeholder = "",
   required = false,
+  disabled = false,
   error = false,
   describedby,
   autocapitalize,
@@ -44,6 +46,7 @@ const {
     value={value}
     placeholder={placeholder}
     required={required}
+    disabled={disabled}
     autocapitalize={autocapitalize}
     spellcheck={spellcheck}
     autocomplete={autocomplete}

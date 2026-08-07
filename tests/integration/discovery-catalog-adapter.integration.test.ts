@@ -323,6 +323,7 @@ describe("discovery catalog revision triggers", () => {
       "UPDATE poll SET deadline_ms = 456 WHERE id = ?1",
       "UPDATE poll SET question = 'Changed?' WHERE id = ?1",
       "UPDATE poll SET poll_type = 'ranked_choice' WHERE id = ?1",
+      "UPDATE poll SET poll_type = 'multiple_choice' WHERE id = ?1",
     ]) {
       const before = await revision();
       await testEnv.DB.prepare(statement).bind(id).run();

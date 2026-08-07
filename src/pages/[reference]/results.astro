@@ -167,6 +167,11 @@ const afterCloseParts =
           {view.kind === "creator_only_hidden" && (
             <p class="results-explanation">{RESULTS_COPY.creatorOnlyHidden}</p>
           )}
+          {view.kind === "ranked_unavailable" && (
+            <p class="results-explanation" data-ranked-results-unavailable>
+              {RESULTS_COPY.rankedUnavailable}
+            </p>
+          )}
           {/* Share the voting URL (never /results). Lawful even when Tally is hidden. */}
           <section class="share-block" aria-label="Share this Poll">
             <ShareAction

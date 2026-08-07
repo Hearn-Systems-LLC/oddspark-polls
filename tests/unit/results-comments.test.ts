@@ -27,6 +27,7 @@ const envelope = (
 ): ResultsAccessEnvelope => ({
   pollId: POLL_ID,
   question: "Comments?",
+  pollType: "multiple_choice",
   resultVisibility,
   ownerUserId: OWNER,
   deadlineMs: resultVisibility === "after_close" ? NOW + 1 : null,

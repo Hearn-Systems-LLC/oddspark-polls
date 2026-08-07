@@ -72,6 +72,7 @@ describe("validateCreatePoll", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toEqual({
+        pollType: "multiple_choice",
         question: "Where should we eat?",
         description: null,
         options: [

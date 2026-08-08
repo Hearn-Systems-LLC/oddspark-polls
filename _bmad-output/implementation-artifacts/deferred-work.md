@@ -536,8 +536,8 @@ resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 
 ## Deferred from: Story 6.1 Upload Image Options (2026-08-07)
 
-- Temp-key sweeper for unadopted R2 objects older than 24h — owned by Story 6.3. Until then, orphaned temp keys from failed creations accumulate in R2 without cleanup. No public exposure (unadopted keys are not servable).
-- Media replacement/deletion outbox and cron drain — owned by Story 6.3.
+- ~~Temp-key sweeper for unadopted R2 objects older than 24h~~ — resolved by Story 6.3 with a bounded, D1-adoption-first scheduled sweep; adopted `tmp/` keys remain live.
+- ~~Media replacement/deletion outbox and cron drain~~ — resolved by Story 6.3 with same-batch self-contained cleanup rows, guarded replacement mechanics, and a 15-minute idempotent drain.
 - Progressive-enhancement async uploader — explicitly out of scope per AD-2 no-JS mandate.
 - Voting/results rendering of image plates — owned by Story 6.2.
 

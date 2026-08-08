@@ -559,6 +559,7 @@ scaffolding.
 
 ```text
 src/
+  worker.ts              # Astro fetch wrapper plus scheduled Media cleanup entry
   pages/                 # Astro inbound adapters, including owner export.csv and export.xlsx routes
   middleware.ts          # request context → telemetry → session → CSRF → creator guard
   components/            # server-rendered UI bound to DESIGN.md
@@ -573,6 +574,7 @@ src/
     results/             # Tally, Manifest, and format-neutral export projections
     discovery/           # listed-poll eligibility and catalog queries
     comments/            # provider-free Comment normalization and typed Vote contribution
+    media/               # cleanup outbox, temp-key sweep, and replacement policy
   shared/
     domain/              # provider-free value types and errors
     application/         # command/query primitives and outbound ports

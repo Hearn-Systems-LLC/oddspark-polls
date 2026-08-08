@@ -96,7 +96,7 @@ development_status:
   epic-6: in-progress
   6-1-upload-image-options: done
   6-2-vote-on-an-image-poll: done
-  6-3-media-cleanup-lifecycle: in-progress
+  6-3-media-cleanup-lifecycle: review
   epic-6-retrospective: optional
 
   epic-7: backlog

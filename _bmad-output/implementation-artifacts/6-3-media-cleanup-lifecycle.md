@@ -1,10 +1,10 @@
 ---
-baseline_commit: 8843c14352d3fdba5e2601eb1d840cf74b2cad07
+baseline_commit: 6c2f926bd57a7268605893e98bf81be01e22fdd4
 ---
 
 # Story 6.3: Media Cleanup Lifecycle
 
-Status: in-progress
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Ultimate context engine analysis completed 2026-08-08 — comprehensive developer guide created from epics (Story 6.3 L1054–1072, Epic 6 notes L179–182), architecture spine (AD-12 controlling; AD-3/6/11/14/19), Stories 6.1/6.2 artifacts + review findings, deferred-work.md, and a full codebase audit of the delete path, media pipeline, worker entry, wrangler config, migration guard, and test harness. No new libraries. -->
@@ -40,20 +40,20 @@ so that storage never accumulates orphans and deleting a Poll truly removes it.
 - [x] Task 4: R2 adapter (AC: 2, 3)
   - [x] Populate `src/adapters/r2/index.ts` (currently `export {}` placeholder): thin wrapper implementing the Media module's R2 port — `deleteObject(key)` (R2 `delete` of a missing key already succeeds silently — that IS the idempotency), `listTempKeys(cursor?)` using `env.MEDIA.list({ prefix: "tmp/", cursor })` with pagination (`truncated`/`cursor`), exposing each object's `uploaded` timestamp for the 24h check. First-ever use of `list`/`delete` in this repo — no precedent to copy.
   - [x] Sweeper algorithm (in the module, not the adapter): list `tmp/` page → filter `uploaded < now − 24h` → **query D1 `SELECT r2_key FROM media_object WHERE r2_key IN (…)` and drop every hit** → delete the remainder. Chunk the `IN` list (D1 bound-parameter limits; ≤100 per query is safe). Never delete on a D1 query failure — fail closed, skip the page.
-- [ ] Task 5: Optional low-latency drain via `waitUntil` (AC: 2)
-  - [ ] After a successful poll delete, the route may kick the same idempotent drain via `Astro.locals.cfContext?.waitUntil(...)` — follow the injection pattern from `src/adapters/cache/discovery.ts:30,:236` + `src/pages/discover.astro:47–51` (waitUntil is a dep, tests collect promises into an array; never reach for `ctx` directly). This is optional per AD-12 ("may") — if it complicates the route, skip it and note the omission; the cron owns correctness.
-- [ ] Task 6: Tests (all ACs)
-  - [ ] Integration (`tests/integration/`, vitest-pool-workers reads the real `wrangler.jsonc`, Miniflare provides in-memory R2 `MEDIA` + D1; per-test `applyD1Migrations` + FK-ordered `DELETE FROM` per `image-media.integration.test.ts:1–33`, fixed `NOW` constants):
+- [x] Task 5: Optional low-latency drain via `waitUntil` (AC: 2)
+  - [x] After a successful poll delete, the route may kick the same idempotent drain via `Astro.locals.cfContext?.waitUntil(...)` — follow the injection pattern from `src/adapters/cache/discovery.ts:30,:236` + `src/pages/discover.astro:47–51` (waitUntil is a dep, tests collect promises into an array; never reach for `ctx` directly). This is optional per AD-12 ("may") — if it complicates the route, skip it and note the omission; the cron owns correctness.
+- [x] Task 6: Tests (all ACs)
+  - [x] Integration (`tests/integration/`, vitest-pool-workers reads the real `wrangler.jsonc`, Miniflare provides in-memory R2 `MEDIA` + D1; per-test `applyD1Migrations` + FK-ordered `DELETE FROM` per `image-media.integration.test.ts:1–33`, fixed `NOW` constants):
     - delete image poll → outbox rows contain the exact `r2_key`s, poll + children gone in the same batch, link lookup 404s immediately, R2 object still present until drain;
     - delete non-image poll → zero outbox rows; delete by non-owner → no outbox rows, `not_found`;
     - drain → R2 objects deleted, outbox rows removed; drain with a pre-deleted R2 key → row still cleared (idempotent); re-run drain → no-op;
     - sweeper: unadopted `tmp/` key older than 24h deleted; **adopted key with identical `tmp/` prefix and old timestamp NOT deleted** (the money test); young unadopted key kept; D1-check failure → nothing deleted;
     - replacement: superseded key enqueued + reference updated in one batch; replacement blocked once a vote exists.
     - `scheduled()` export: import the handler/module directly per the pool's "application code is imported directly" note (`tests/integration/worker-entry.ts`); no `createExecutionContext` precedent exists — direct invocation with injected deps is the house style.
-  - [ ] Unit: outbox drain/sweep policy logic (bounds, attempt counting, 24h threshold, IN-chunking) with fake ports; migration file listed in any schema-contract tests if present.
-  - [ ] E2E: none for cron (no harness); existing `image-poll.spec.mjs` must stay green. If the replacement UI ships, extend it; otherwise skip.
-- [ ] Task 7: Docs & status
-  - [ ] `CHANGELOG.md` under `[Unreleased]`; resolve the two 6.1 deferred-work entries (temp-key sweeper, replacement/deletion outbox — `deferred-work.md:539–540`) or update them if UI scope was deferred; `sprint-status.yaml` per workflow. Full gate: `pnpm migrations:guard && pnpm test && pnpm check`, `pnpm test:e2e`, `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check` (Node 24.18.0 via nvm). One story = one branch = one PR.
+  - [x] Unit: outbox drain/sweep policy logic (bounds, attempt counting, 24h threshold, IN-chunking) with fake ports; migration file listed in any schema-contract tests if present.
+  - [x] E2E: none for cron (no harness); existing `image-poll.spec.mjs` must stay green. If the replacement UI ships, extend it; otherwise skip.
+- [x] Task 7: Docs & status
+  - [x] `CHANGELOG.md` under `[Unreleased]`; resolve the two 6.1 deferred-work entries (temp-key sweeper, replacement/deletion outbox — `deferred-work.md:539–540`) or update them if UI scope was deferred; `sprint-status.yaml` per workflow. Full gate: `pnpm migrations:guard && pnpm test && pnpm check`, `pnpm test:e2e`, `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check` (Node 24.18.0 via nvm). One story = one branch = one PR.
 
 ## Dev Notes
 
@@ -148,27 +148,43 @@ GPT-5 Codex
 - Task 2: Added the provider-free Media cleanup/replacement policy and D1 persistence. Image deletion now captures keys with an owner guard before the same-batch hard delete; replacement is image/owner/vote guarded and atomically enqueues the superseded key. Added clock threading, policy unit tests, and D1 integration coverage; `pnpm check` and all 1,651 tests pass.
 - Task 3: Repointed Wrangler to an Astro-preserving Worker wrapper, configured the 15-minute cron in local/staging/production, and wired bounded drain then fail-closed sweep with structured failure logging. Verified the wrapper before cleanup logic via production build, Wrangler dry-run, and Astro dev `/api/health` 200; the root returned the expected local-data 503 because the demo Poll was not seeded.
 - Task 4: Replaced the R2 placeholder with thin delete/list pagination ports and exercised real Miniflare R2 behavior, including delete-of-missing-key success. The domain sweeper owns age filtering, 100-key D1 chunks, adopted-key exclusion, and fail-closed behavior. Final bundle contains the scheduled export; all 1,658 tests pass.
+- Task 5: Deliberately omitted the optional request-path `waitUntil` drain. Cron retries are the architecture's correctness owner; adding Media D1/R2 wiring to the creator route would increase coupling only to reduce cleanup latency.
+- Task 6: Completed schema, domain-policy, D1, R2, public-link, and scheduled-entry coverage. Tests prove immediate public 404 while R2 bytes remain, drain/idempotent re-drain, exact owner-guarded enqueue, non-image no-op, replacement/vote lock, old adopted-key preservation, young-key retention, orphan deletion, D1 fail-closed behavior, bounds, attempt increments, 24-hour threshold, and 100-key ownership chunks. Full Vitest result: 118 files and 1,660 tests passed.
+- Task 7: Updated the changelog, architecture topology, deferred-work resolutions, and sprint status. The final gate passed: 15 immutable migrations, 118 Vitest files / 1,660 tests, TypeScript, 181 Playwright tests, binding-type drift check, production build, and `git diff --check`. Gate diagnosis also restored ranked-result Comment delivery and limited cast markers to Image Poll read-only rows.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/6-3-media-cleanup-lifecycle.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/deferred-work.md
+- _bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md
+- CHANGELOG.md
 - db/migrations/0015_cleanup_outbox.sql
 - db/migrations.manifest.json
 - src/adapters/d1/index.ts
 - src/adapters/r2/index.ts
+- src/components/poll-voting-surface.astro
+- src/lib/poll-delivery.ts
 - src/modules/media/index.ts
 - src/modules/polls/poll-lifecycle.ts
 - src/pages/creator/polls/[pollId].astro
 - src/worker.ts
+- tests/e2e/create-poll-authed.spec.mjs
+- tests/e2e/image-poll.spec.mjs
+- tests/e2e/ranked-choice.spec.mjs
 - tests/integration/astro-cloudflare-config-shim.ts
 - tests/integration/media-cleanup.integration.test.ts
 - tests/integration/poll-lifecycle-adapter.integration.test.ts
 - tests/integration/worker-scheduled.integration.test.ts
 - tests/integration/media-cleanup-schema.integration.test.ts
 - tests/unit/media-cleanup.test.ts
+- tests/unit/image-poll-voter-surface.test.mjs
 - tests/unit/poll-lifecycle.test.ts
 - tests/unit/worker-entry-contract.test.mjs
 - vitest.integration.config.ts
 - worker-configuration.d.ts
 - wrangler.jsonc
+
+### Change Log
+
+- 2026-08-08: Implemented the Media cleanup outbox, scheduled drain, D1-safe temporary-key sweep, guarded replacement mechanics, full verification coverage, and documentation/status handoff for review.

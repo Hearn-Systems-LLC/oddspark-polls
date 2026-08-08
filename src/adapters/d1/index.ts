@@ -1053,9 +1053,11 @@ export function createMediaPersistence(db: D1Database) {
     async listDue(limit: number): Promise<CleanupOutboxRow[]> {
       const rows = await db
         .prepare(
+          // Least-attempted first: permanently failing rows must not fill
+          // every batch and starve rows that have never been tried.
           `SELECT id, r2_key, enqueued_at_ms, attempts
            FROM cleanup_outbox
-           ORDER BY enqueued_at_ms, id
+           ORDER BY attempts, enqueued_at_ms, id
            LIMIT ?1`,
         )
         .bind(limit)

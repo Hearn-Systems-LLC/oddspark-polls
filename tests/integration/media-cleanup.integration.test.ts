@@ -192,6 +192,32 @@ describe("Media cleanup D1 persistence", () => {
     expect((await testEnv.DB.prepare("SELECT id FROM cleanup_outbox").all()).results).toEqual([]);
   });
 
+  it("selects fresh rows ahead of repeatedly failing older rows", async () => {
+    // 100 poison rows (old, many attempts) must not starve a newer row that
+    // has never been tried.
+    const statements: D1PreparedStatement[] = [];
+    for (let index = 0; index < 100; index += 1) {
+      statements.push(
+        testEnv.DB.prepare(
+          "INSERT INTO cleanup_outbox (id, r2_key, enqueued_at_ms, attempts) VALUES (?1, ?2, ?3, ?4)",
+        ).bind(`poison-${index}`, `tmp/poison/${index}`, 1 + index, 5),
+      );
+    }
+    statements.push(
+      testEnv.DB.prepare(
+        "INSERT INTO cleanup_outbox (id, r2_key, enqueued_at_ms, attempts) VALUES ('fresh-row', 'tmp/fresh/row', 999_999, 0)",
+      ),
+    );
+    await testEnv.DB.batch(statements);
+
+    const media = createMediaPersistence(testEnv.DB);
+    const due = await media.listDue(100);
+
+    expect(due).toHaveLength(100);
+    expect(due[0]?.id).toBe("fresh-row");
+    expect(due.filter((row) => row.attempts === 5)).toHaveLength(99);
+  });
+
   it("replaces an option image and enqueues the superseded key in one batch", async () => {
     const polls = createPollPersistence(testEnv.DB);
     await polls.insertPoll(pollRows("image"));

@@ -124,6 +124,9 @@
   --space-margin-desktop: 48px;
   --space-section-gap: 56px;
   --space-measure: 68ch;
+  /* lg two-column shells (landing, results): fits a 320px context column beside
+     a live Tally, capped so ultra-wide windows still buy air, not density */
+  --space-measure-wide: 1280px;
 
   /* Component tokens (bound to dark source; runtime mode swaps resolve) */
   --btn-primary-bg: var(--color-solar);

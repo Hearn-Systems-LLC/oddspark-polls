@@ -282,4 +282,35 @@ const afterCloseParts =
       padding-inline: var(--space-margin-desktop);
     }
   }
+
+  /* lg two-column Results (DESIGN.md §Layout): question/context left, live
+     Tally right. Single-column states (not_found, hidden variants) leave
+     column 2 empty and degrade to the stacked look. */
+  @media (min-width: 1024px) {
+    .results-shell {
+      width: min(100%, var(--space-measure-wide));
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr);
+      column-gap: var(--space-8);
+      align-items: start;
+    }
+
+    .results-question,
+    .results-explanation,
+    .not-found {
+      grid-column: 1;
+      min-width: 0;
+    }
+
+    [data-results-region] {
+      grid-column: 2;
+      grid-row: 1 / span 4;
+      min-width: 0;
+    }
+
+    .share-block,
+    .results-shell > :global([data-public-repository-footer]) {
+      grid-column: 1 / -1;
+    }
+  }
 </style>

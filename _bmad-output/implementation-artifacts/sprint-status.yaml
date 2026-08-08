@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-29T11:11:59-0400
-last_updated: 2026-08-08T06:54:03-0400
+last_updated: 2026-08-08T12:36:18-0400
 project: oddspark-polls
 project_key: NOKEY
 tracking_system: file-system
@@ -93,11 +93,11 @@ development_status:
   5-3-per-round-display-ballot-manifest: done
   epic-5-retrospective: done
 
-  epic-6: in-progress
+  epic-6: done
   6-1-upload-image-options: done
   6-2-vote-on-an-image-poll: done
   6-3-media-cleanup-lifecycle: done
-  epic-6-retrospective: optional
+  epic-6-retrospective: done
 
   epic-7: backlog
   7-1-propose-time-slots: backlog
@@ -212,23 +212,23 @@ action_items:
   - epic: 5
     action: "C1: Merge Epic 5 branch / PR to main with full CI gate green"
     owner: "Amelia (Developer) + Justin (Project Lead)"
-    status: open
+    status: done
   - epic: 5
     action: "C2: Deploy Epic 5 to staging -> smoke -> production"
     owner: "Justin (ops) + deploy gate"
-    status: open
+    status: done
   - epic: 5
     action: "C3: Update public docs & CHANGELOG for Ranked-Choice release"
     owner: "Paige (Technical Writer) + Amelia"
-    status: open
+    status: done
   - epic: 5
     action: "C4: Open Epic 6 planning & create-story for 6.1 (Upload Image Options)"
     owner: "John (PM) + Amelia"
-    status: open
+    status: done
   - epic: 5
     action: "P1: Standardize multi-layer review chunking for complex epics"
     owner: "Winston + Amelia"
-    status: open
+    status: in-progress
   - epic: 5
     action: "P2: Monitor Ballot Manifest payload sizes and execution time on staging/prod"
     owner: "Dana (QA Engineer)"
@@ -236,8 +236,56 @@ action_items:
   - epic: 5
     action: "T1: Audit R2 MEDIA binding readiness for Epic 6 Image Polls"
     owner: "Winston"
-    status: open
+    status: done
   - epic: 5
     action: "T2: Maintain multi-factor delivery gate (adversarial review + full gate per story)"
     owner: "Team"
+    status: done
+  - epic: 6
+    action: "C1: Merge PR #37 (Story 6.3) to main with full CI gate green"
+    owner: "Amelia (Developer) + Justin (Project Lead)"
+    status: done
+  - epic: 6
+    action: "C2: Deploy Epic 6 staging -> smoke -> production; verify scheduled handler live"
+    owner: "Justin (ops) + deploy gate"
+    status: open
+  - epic: 6
+    action: "C3: Flip epic-6 to done in sprint-status after merge"
+    owner: "Amelia"
+    status: done
+  - epic: 6
+    action: "P1: Mechanical merge-path check before any story/epic flips to done"
+    owner: "Amelia"
+    status: open
+  - epic: 6
+    action: "P2: Action-item sweep as first step of every retro and story kickoff"
+    owner: "Team (Amelia facilitates)"
+    status: open
+  - epic: 6
+    action: "P3: Route-layer debt decision before Epic 7 kickoff (extract upload command or amend AD-1/AD-19)"
+    owner: "Winston + Amelia"
+    status: open
+  - epic: 6
+    action: "P4: Audit staged deploy config for other dropped wrangler.jsonc declarations"
+    owner: "Winston"
+    status: open
+  - epic: 6
+    action: "T1: Record Ballot Manifest payload-size and execution-time baseline (carried from Epic 5)"
+    owner: "Dana (QA Engineer)"
+    status: open
+  - epic: 6
+    action: "T2: Convert source-text-assertion tests to runtime-behavior tests when touching those surfaces"
+    owner: "Dana + Amelia"
+    status: open
+  - epic: 6
+    action: "T3: Maintain multi-factor delivery gate (adversarial review + full gate per story)"
+    owner: "Team"
+    status: open
+  - epic: 6
+    action: "Prep-1: AD-20 revisable-vote primitive design review before Story 7.1"
+    owner: "Winston + Amelia"
+    status: open
+  - epic: 6
+    action: "Prep-2: fast-check DST/timezone property-test plan for slot rendering (AR-19)"
+    owner: "Dana + Amelia"
     status: open

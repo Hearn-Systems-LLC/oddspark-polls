@@ -19,7 +19,8 @@ production on every merge, but no version has been cut or tagged.
   D1-owned surface immediately while a same-Worker 15-minute cron drains
   self-contained R2 cleanup work. The scheduler also removes unadopted
   temporary uploads after 24 hours while preserving every D1-adopted `tmp/`
-  key. Pre-Vote image replacement mechanics enqueue superseded objects through
+  key. Creators can replace an option's image before the first Vote
+  (`POST /creator/media/replace`); the superseded object is enqueued through
   the same retryable lifecycle.
 - Image Poll creation on `/creator/new`. Creators can now choose the IMAGE poll
   type, upload one JPEG/PNG/WebP image per option (5 MB cap, server-side

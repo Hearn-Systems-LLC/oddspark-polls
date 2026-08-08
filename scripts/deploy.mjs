@@ -181,12 +181,23 @@ await build({
   logLevel: "info",
 });
 
-// 4. Copy static assets
+// 4. The Astro build compiles wrangler.jsonc's `main` (src/worker.ts) into
+// dist/server/entry.mjs via the Cloudflare vite plugin, so the bundled graph
+// must export a scheduled handler — a fetch-only entry would silently drop
+// the media cleanup cron. Fail the deploy instead of shipping that.
+const bundledEntry = await readFile(join(workerDir, "index.mjs"), "utf8");
+if (!bundledEntry.includes("scheduled")) {
+  throw new Error(
+    "Bundled worker lost the scheduled handler; the cleanup cron would never fire.",
+  );
+}
+
+// 5. Copy static assets
 await cp(join(root, "dist/client"), join(outDir, "client"), {
   recursive: true,
 });
 
-// 5. Write deploy wrangler config (vars/secrets/ratelimits from target env)
+// 6. Write deploy wrangler config (vars/secrets/ratelimits/triggers from target env)
 const deployConfig = buildRemoteDeployConfig(wranglerJson, envName);
 
 await writeFile(
@@ -195,7 +206,7 @@ await writeFile(
 );
 await assertNoLocalSecretValues(outDir);
 
-// 6. Deploy from the staged directory
+// 7. Deploy from the staged directory
 console.log(`Deploying ${envCfg.name}…`);
 await run("pnpm", ["exec", "wrangler", "deploy", "--config", "wrangler.json"], {
   cwd: outDir,

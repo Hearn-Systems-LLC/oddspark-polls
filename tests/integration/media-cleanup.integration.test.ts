@@ -3,13 +3,18 @@ import {
   type D1Migration,
 } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { experimental_AstroContainer as AstroContainer } from "astro/container";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   createMediaPersistence,
   createPollPersistence,
 } from "../../src/adapters/d1/index";
 import { createR2MediaStorage } from "../../src/adapters/r2/index";
-import { replaceOptionImage } from "../../src/modules/media/index";
+import {
+  drainCleanupOutbox,
+  replaceOptionImage,
+  sweepTempKeys,
+} from "../../src/modules/media/index";
 import {
   deletePoll,
   type PollPersistenceRows,
@@ -19,6 +24,7 @@ import type {
   PollOptionId,
   UserId,
 } from "../../src/shared/domain/index";
+import PublicPoll from "../../src/pages/[reference].astro";
 
 type MigrationTestEnv = Cloudflare.Env & {
   TEST_MIGRATIONS: D1Migration[];
@@ -115,6 +121,10 @@ describe("Media cleanup D1 persistence", () => {
   it("enqueues exact image keys and hard-deletes the Poll children atomically", async () => {
     const polls = createPollPersistence(testEnv.DB);
     await polls.insertPoll(pollRows("image"));
+    await Promise.all([
+      testEnv.MEDIA.put("tmp/poll-cleanup/media-a", "a"),
+      testEnv.MEDIA.put("tmp/poll-cleanup/media-b", "b"),
+    ]);
 
     const result = await deletePoll(
       {
@@ -127,15 +137,40 @@ describe("Media cleanup D1 persistence", () => {
     );
 
     expect(result).toEqual({ ok: true, value: { kind: "deleted" } });
-    const cleanup = await testEnv.DB.prepare(
+    const outboxRows = await testEnv.DB.prepare(
       "SELECT r2_key, enqueued_at_ms, attempts FROM cleanup_outbox ORDER BY r2_key",
     ).all<{ r2_key: string; enqueued_at_ms: number; attempts: number }>();
-    expect(cleanup.results).toEqual([
+    expect(outboxRows.results).toEqual([
       { r2_key: "tmp/poll-cleanup/media-a", enqueued_at_ms: NOW + 50, attempts: 0 },
       { r2_key: "tmp/poll-cleanup/media-b", enqueued_at_ms: NOW + 50, attempts: 0 },
     ]);
     expect(await testEnv.DB.prepare("SELECT id FROM poll WHERE id = ?1").bind(POLL_ID).first()).toBeNull();
     expect((await testEnv.DB.prepare("SELECT id FROM media_object WHERE poll_id = ?1").bind(POLL_ID).all()).results).toEqual([]);
+
+    const container = await AstroContainer.create();
+    const response = await container.renderToResponse(PublicPoll, {
+      request: new Request("https://polls.example.test/cleanup-ref"),
+      params: { reference: "cleanup-ref" },
+      locals: {} as unknown as App.Locals,
+    });
+    expect(response.status).toBe(404);
+    expect(await testEnv.MEDIA.head("tmp/poll-cleanup/media-a")).not.toBeNull();
+    expect(await testEnv.MEDIA.head("tmp/poll-cleanup/media-b")).not.toBeNull();
+
+    const cleanupPersistence = createMediaPersistence(testEnv.DB);
+    const storage = createR2MediaStorage(testEnv.MEDIA);
+    expect(await drainCleanupOutbox({ outbox: cleanupPersistence, objects: storage })).toEqual({
+      selected: 2,
+      deleted: 2,
+      failed: 0,
+    });
+    expect(await testEnv.MEDIA.head("tmp/poll-cleanup/media-a")).toBeNull();
+    expect(await testEnv.MEDIA.head("tmp/poll-cleanup/media-b")).toBeNull();
+    expect(await drainCleanupOutbox({ outbox: cleanupPersistence, objects: storage })).toEqual({
+      selected: 0,
+      deleted: 0,
+      failed: 0,
+    });
   });
 
   it("does not enqueue cleanup for non-image or non-owner deletion", async () => {
@@ -243,5 +278,64 @@ describe("Media cleanup R2 adapter", () => {
     const storage = createR2MediaStorage(testEnv.MEDIA);
 
     await expect(storage.deleteObject("tmp/adapter/missing")).resolves.toBeUndefined();
+  });
+
+  it("keeps old adopted tmp keys, deletes old orphans, and keeps young orphans", async () => {
+    const polls = createPollPersistence(testEnv.DB);
+    await polls.insertPoll(pollRows("image"));
+    const oldAdopted = "tmp/poll-cleanup/media-a";
+    const oldOrphan = "tmp/sweep/old-orphan";
+    const youngOrphan = "tmp/sweep/young-orphan";
+    await Promise.all([
+      testEnv.MEDIA.put(oldAdopted, "adopted"),
+      testEnv.MEDIA.put(oldOrphan, "old"),
+      testEnv.MEDIA.put(youngOrphan, "young"),
+    ]);
+    const persistence = createMediaPersistence(testEnv.DB);
+    const storage = createR2MediaStorage(testEnv.MEDIA);
+
+    const result = await sweepTempKeys({
+      objects: {
+        listTempKeys: async () => ({
+          objects: [
+            { key: oldAdopted, uploadedAtMs: NOW - 86_400_001 },
+            { key: oldOrphan, uploadedAtMs: NOW - 86_400_001 },
+            { key: youngOrphan, uploadedAtMs: NOW - 86_399_999 },
+          ],
+          truncated: false,
+        }),
+        deleteObject: storage.deleteObject,
+      },
+      ownership: persistence,
+      nowMs: () => NOW,
+    });
+
+    expect(result).toEqual({ listed: 3, eligible: 2, adopted: 1, deleted: 1 });
+    expect(await testEnv.MEDIA.head(oldAdopted)).not.toBeNull();
+    expect(await testEnv.MEDIA.head(oldOrphan)).toBeNull();
+    expect(await testEnv.MEDIA.head(youngOrphan)).not.toBeNull();
+  });
+
+  it("deletes nothing when the D1 adoption check fails", async () => {
+    const key = "tmp/sweep/fail-closed";
+    await testEnv.MEDIA.put(key, "keep");
+    const storage = createR2MediaStorage(testEnv.MEDIA);
+
+    await expect(sweepTempKeys({
+      objects: {
+        listTempKeys: async () => ({
+          objects: [{ key, uploadedAtMs: 0 }],
+          truncated: false,
+        }),
+        deleteObject: storage.deleteObject,
+      },
+      ownership: {
+        findAdoptedKeys: async () => {
+          throw new Error("D1 unavailable");
+        },
+      },
+      nowMs: () => NOW,
+    })).rejects.toThrow("D1 unavailable");
+    expect(await testEnv.MEDIA.head(key)).not.toBeNull();
   });
 });

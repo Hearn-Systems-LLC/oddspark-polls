@@ -87,11 +87,15 @@ const title = unavailable
 >
   <div class="site-shell">
     <SiteHeader />
-    <main class="landing-page">
+    <main
+      class:list={["landing-page", outcomeBearing && "landing-page--demo-first"]}
+    >
       {
         regionOrder.map((region) =>
           region === "intro" ? (
-            <LandingIntro solarHex={solarHex} />
+            <div class="landing-intro-region">
+              <LandingIntro solarHex={solarHex} />
+            </div>
           ) : unavailable ? (
             <section class="demo-unavailable" data-demo-region aria-labelledby="demo-unavailable-heading">
               <h1 id="demo-unavailable-heading" tabindex="-1" autofocus>{DEMO_POLL_COPY.unavailableHeading}</h1>
@@ -139,4 +143,19 @@ const title = unavailable
   .landing-label { margin: 0 0 var(--space-4); }
   .landing-text-link { display: inline-flex; align-items: center; min-height: 48px; margin-top: var(--space-4); color: var(--color-entropy); text-decoration: none; }
   .landing-text-link:hover { color: var(--color-text); }
+
+  /* lg two-column landing (DESIGN.md §Layout): intro column beside the Demo
+     Poll. Column pinning follows the server-side regionOrder so visual order
+     always matches DOM/focus order. Shell widens for this page only. */
+  @media (min-width: 1024px) {
+    .site-shell:has(.landing-page) { max-width: var(--space-measure-wide); }
+    .landing-page { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr); column-gap: var(--space-8); align-items: start; }
+    .landing-intro-region, .landing-block, .rule { grid-column: 1; min-width: 0; }
+    [data-demo-region] { grid-column: 2; grid-row: 1 / span 10; min-width: 0; }
+    .landing-page--demo-first .landing-intro-region,
+    .landing-page--demo-first .landing-block,
+    .landing-page--demo-first .rule { grid-column: 2; }
+    .landing-page--demo-first [data-demo-region] { grid-column: 1; }
+    .landing-demo::after, .demo-unavailable::after { display: none; }
+  }
 </style>

@@ -147,6 +147,7 @@ spacing:
   margin-desktop: 48px
   section-gap: 56px
   measure: 68ch
+  measure-wide: 1280px
 # Light-mode resolution rule: a component token that references a `-dark` color
 # resolves in light mode by swapping the suffix to `-light`, EXCEPT where an
 # explicit `…Light` twin is bound on the component. The exceptions below are the
@@ -506,7 +507,7 @@ An 8px base unit. Mobile margins are `{spacing.margin-mobile}` 20px; desktop ope
 
 - below `{breakpoints.sm}` — one column. Poll question, options, then results stacked below.
 - `{breakpoints.sm}` to below `{breakpoints.lg}` — one column, wider margins; results still below options.
-- `{breakpoints.lg}` and up — the results surface splits into two columns: ballot on the left, live Tally on the right, so a Voter watching results sees their own choice and the moving bars at once. The creator surface splits the same way: Poll list left, selected Poll's detail right. Everything else stays single-column and centered.
+- `{breakpoints.lg}` and up — two columns wherever a live Tally or a second block earns the width: the post-vote surface (ballot left, live Tally right); any poll surface whose Tally is visible alongside the vote form (form and context left, live Tally right); the standalone Results route (question and context left, Tally right); the landing page (statement and build notes left, Demo Poll right — with the Demo Poll's own vote-form/Tally split inside its column); and the creator surface (Poll list left, selected Poll's detail right). Wide shells cap at `{spacing.measure-wide}` 1280px so ultra-wide windows still buy air, not density. Everything else stays single-column and centered.
 
 `{spacing.section-gap}` 56px separates major blocks and is where a hairline goes if one is needed. Related items sit 8–16px apart. **Whitespace is the grouping mechanism.** If something looks ungrouped, add space before you add a rule, and add a rule before you ever add a box.
 

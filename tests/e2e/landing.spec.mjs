@@ -78,7 +78,7 @@ function watchPage(page) {
   };
 }
 
-async function expectLandingGeometry(page) {
+async function expectLandingGeometry(page, { twoColumn = false } = {}) {
   const geometry = await page.evaluate(() => {
     const element = (selector) => {
       const match = document.querySelector(selector);
@@ -105,6 +105,10 @@ async function expectLandingGeometry(page) {
         };
       },
     );
+    const rectOf = (node) => {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, left: rect.left };
+    };
 
     return {
       blocks,
@@ -114,6 +118,11 @@ async function expectLandingGeometry(page) {
       order: [statement, build, demo, create, discover].map(
         (node) => node.getBoundingClientRect().top,
       ),
+      statementRect: rectOf(statement),
+      buildRect: rectOf(build),
+      createRect: rectOf(create),
+      discoverRect: rectOf(discover),
+      demoRect: rectOf(demo),
       primaryHeight: primary.getBoundingClientRect().height,
       shellMaxWidth: Number.parseFloat(shellStyle.maxWidth),
       shellWidth: shell.getBoundingClientRect().width,
@@ -123,7 +132,28 @@ async function expectLandingGeometry(page) {
   expect(geometry.horizontalOverflow).toBeLessThanOrEqual(0);
   expect(geometry.shellWidth).toBeLessThanOrEqual(geometry.shellMaxWidth + 1);
   expect(geometry.primaryHeight).toBeGreaterThanOrEqual(48);
-  expect(geometry.order.every((top, index, values) => index === 0 || top > values[index - 1])).toBe(true);
+  if (twoColumn) {
+    // lg silhouette (DESIGN.md §Layout): intro column left, Demo Poll right.
+    // The intro-column blocks keep their vertical stacking; the demo region
+    // sits beside them, starting at the same top row as the statement.
+    const leftColumn = [
+      geometry.statementRect,
+      geometry.buildRect,
+      geometry.createRect,
+      geometry.discoverRect,
+    ];
+    expect(
+      leftColumn.every(
+        (rect, index) => index === 0 || rect.top > leftColumn[index - 1].top,
+      ),
+    ).toBe(true);
+    expect(geometry.demoRect.left).toBeGreaterThan(
+      geometry.statementRect.left,
+    );
+    expect(Math.abs(geometry.demoRect.top - geometry.statementRect.top)).toBeLessThanOrEqual(2);
+  } else {
+    expect(geometry.order.every((top, index, values) => index === 0 || top > values[index - 1])).toBe(true);
+  }
   for (const block of geometry.blocks) {
     expect(block).toEqual({
       background: "rgba(0, 0, 0, 0)",
@@ -285,7 +315,7 @@ test.describe("Landing page", () => {
     assertClean();
   });
 
-  test("proves the one-column landing silhouette in mobile dark and desktop light", async ({
+  test("proves the one-column mobile silhouette and the two-column desktop silhouette", async ({
     page,
   }) => {
     const assertClean = watchPage(page);
@@ -308,7 +338,7 @@ test.describe("Landing page", () => {
 
     await page.emulateMedia({ colorScheme: "light" });
     await page.setViewportSize({ width: 1280, height: 900 });
-    await expectLandingGeometry(page);
+    await expectLandingGeometry(page, { twoColumn: true });
     await page.screenshot({
       path: `${proofDir}/landing-1280-light.png`,
       fullPage: true,

@@ -80,6 +80,10 @@ const stripTimedToken = (text: string): string =>
   text.replace(/\s*\{(?:when|deadline)\}/g, "");
 const outcomeHeadingTime = outcome ? splitTimedText(outcome.heading, outcome.time) : null;
 const outcomeBodyTime = outcome ? splitTimedText(outcome.body, outcome.time) : null;
+// lg two-column split whenever a live Tally is visible beside an active vote
+// form (pre-vote editable Tally). Post-vote uses the data-post-vote grid
+// instead; the two states never co-occur (splitTally requires !compactCounted).
+const splitTally = showTally && !compactCounted;
 const resultsExplanationTime = resultsExplanation
   ? splitTimedText(resultsExplanation.body, resultsExplanation.time)
   : null;
@@ -91,6 +95,7 @@ const tallyOwnsBadge = readOnly;
   class:list={["poll-shell", embedded && "is-embedded"]}
   data-poll-voting-surface
   data-post-vote={postVoteComposition ? "true" : undefined}
+  data-split-tally={splitTally ? "true" : undefined}
   aria-labelledby={embedded ? "demo-poll-question" : undefined}
 >
   {
@@ -343,5 +348,18 @@ const tallyOwnsBadge = readOnly;
     .poll-shell[data-post-vote="true"] :global(.comment-list) { grid-column: 2; grid-row: 7; }
     .poll-shell[data-post-vote="true"] > .share-block { grid-column: 1 / -1; grid-row: 8; }
     .poll-shell[data-post-vote="true"] > :global([data-public-repository-footer]) { grid-column: 1 / -1; grid-row: 9; }
+    /* Pre-vote / editable-Tally split: vote form left, live Tally right.
+       Applies to embedded shells too (the landing Demo Poll is the one
+       pre-vote Tally surface); never co-occurs with data-post-vote. */
+    .poll-shell[data-split-tally="true"] { display: grid; grid-template-columns: minmax(320px, 2fr) minmax(0, 3fr); column-gap: var(--space-8); align-items: start; width: 100%; }
+    .poll-shell[data-split-tally="true"] > .vote-outcome,
+    .poll-shell[data-split-tally="true"] > .poll-meta,
+    .poll-shell[data-split-tally="true"] > .poll-question,
+    .poll-shell[data-split-tally="true"] > .poll-description,
+    .poll-shell[data-split-tally="true"] > .poll-options,
+    .poll-shell[data-split-tally="true"] > [data-vote-form] { grid-column: 1; }
+    .poll-shell[data-split-tally="true"] > .tally-region { grid-column: 2; grid-row: 1 / span 12; margin-top: 0; padding-top: 0; border-top: 0; }
+    .poll-shell[data-split-tally="true"] > .share-block { grid-column: 1 / -1; }
+    .poll-shell[data-split-tally="true"] > :global([data-public-repository-footer]) { grid-column: 1 / -1; }
   }
 </style>

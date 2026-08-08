@@ -59,12 +59,22 @@ export async function drainCleanupOutbox(deps: {
   outbox: CleanupOutboxPort;
   objects: CleanupObjectPort;
   onFailure?: CleanupFailureReporter;
-}): Promise<{ selected: number; deleted: number; failed: number }> {
-  const rows = await deps.outbox.listDue(CLEANUP_BATCH_LIMIT);
+}): Promise<{
+  selected: number;
+  deleted: number;
+  failed: number;
+  /** True when rows remain beyond this batch for the next cron tick. */
+  hasMore: boolean;
+}> {
+  // Select one past the batch limit so a backlog of exactly the limit does
+  // not masquerade as "more work remains".
+  const rows = await deps.outbox.listDue(CLEANUP_BATCH_LIMIT + 1);
+  const hasMore = rows.length > CLEANUP_BATCH_LIMIT;
+  const batch = rows.slice(0, CLEANUP_BATCH_LIMIT);
   let deleted = 0;
   let failed = 0;
 
-  for (const row of rows) {
+  for (const row of batch) {
     // Report the phase that actually failed: "delete" is the R2 object
     // removal, "remove_row" the D1 outbox-row removal. A row-delete failure
     // after a successful object delete is retried next tick; the R2 delete
@@ -86,7 +96,7 @@ export async function drainCleanupOutbox(deps: {
     }
   }
 
-  return { selected: rows.length, deleted, failed };
+  return { selected: batch.length, deleted, failed, hasMore };
 }
 
 export async function sweepTempKeys(deps: {
@@ -94,19 +104,31 @@ export async function sweepTempKeys(deps: {
   ownership: MediaOwnershipPort;
   nowMs: () => number;
   onDeleteFailure?: (object: TempObject, cause: unknown) => void;
-}): Promise<{ listed: number; eligible: number; adopted: number; deleted: number }> {
-  const listed: TempObject[] = [];
+}): Promise<{
+  listed: number;
+  eligible: number;
+  adopted: number;
+  deleted: number;
+  /** True when unlisted keys remain beyond this scan for the next tick. */
+  hasMore: boolean;
+}> {
+  // Scan one past the list limit so exactly-at-limit backlogs do not read as
+  // "more keys remain".
+  const SCAN_LIMIT = TEMP_LIST_LIMIT + 1;
+  const scanned: TempObject[] = [];
   let cursor: string | undefined;
 
   do {
     const page = await deps.objects.listTempKeys(
       cursor,
-      TEMP_LIST_LIMIT - listed.length,
+      SCAN_LIMIT - scanned.length,
     );
-    listed.push(...page.objects.slice(0, TEMP_LIST_LIMIT - listed.length));
+    scanned.push(...page.objects.slice(0, SCAN_LIMIT - scanned.length));
     cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor !== undefined && listed.length < TEMP_LIST_LIMIT);
+  } while (cursor !== undefined && scanned.length < SCAN_LIMIT);
 
+  const hasMore = scanned.length > TEMP_LIST_LIMIT;
+  const listed = scanned.slice(0, TEMP_LIST_LIMIT);
   const cutoffMs = deps.nowMs() - TEMP_KEY_MAX_AGE_MS;
   const eligible = listed.filter(({ uploadedAtMs }) => uploadedAtMs < cutoffMs);
 
@@ -138,6 +160,7 @@ export async function sweepTempKeys(deps: {
     eligible: eligible.length,
     adopted,
     deleted,
+    hasMore,
   };
 }
 

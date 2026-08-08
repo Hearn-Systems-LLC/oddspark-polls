@@ -33,10 +33,10 @@ export async function runMediaCleanup(
         });
       },
     });
-    if (result.drain.selected === 100) {
+    if (result.drain.hasMore) {
       console.warn("media_cleanup_drain_bound_reached", {
         processed: result.drain.selected,
-        note: "Additional cleanup rows may remain for the next cron tick.",
+        note: "Additional cleanup rows remain for the next cron tick.",
       });
     }
   } catch (cause) {
@@ -57,10 +57,10 @@ export async function runMediaCleanup(
         });
       },
     });
-    if (result.sweep.listed === 1_000) {
+    if (result.sweep.hasMore) {
       console.warn("media_temp_sweep_bound_reached", {
         listed: result.sweep.listed,
-        note: "Additional temporary keys may remain for the next cron tick.",
+        note: "Additional temporary keys remain for the next cron tick.",
       });
     }
   } catch (cause) {

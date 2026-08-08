@@ -163,6 +163,7 @@ describe("Media cleanup D1 persistence", () => {
       selected: 2,
       deleted: 2,
       failed: 0,
+      hasMore: false,
     });
     expect(await testEnv.MEDIA.head("tmp/poll-cleanup/media-a")).toBeNull();
     expect(await testEnv.MEDIA.head("tmp/poll-cleanup/media-b")).toBeNull();
@@ -170,6 +171,7 @@ describe("Media cleanup D1 persistence", () => {
       selected: 0,
       deleted: 0,
       failed: 0,
+      hasMore: false,
     });
   });
 
@@ -336,7 +338,7 @@ describe("Media cleanup R2 adapter", () => {
       nowMs: () => NOW,
     });
 
-    expect(result).toEqual({ listed: 3, eligible: 2, adopted: 1, deleted: 1 });
+    expect(result).toEqual({ listed: 3, eligible: 2, adopted: 1, deleted: 1, hasMore: false });
     expect(await testEnv.MEDIA.head(oldAdopted)).not.toBeNull();
     expect(await testEnv.MEDIA.head(oldOrphan)).toBeNull();
     expect(await testEnv.MEDIA.head(youngOrphan)).not.toBeNull();

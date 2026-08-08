@@ -39,12 +39,29 @@ describe("drainCleanupOutbox", () => {
       objects: { deleteObject },
     });
 
-    expect(listDue).toHaveBeenCalledWith(100);
+    expect(listDue).toHaveBeenCalledWith(101);
     expect(deleteObject).toHaveBeenCalledTimes(100);
     expect(deleteRow).toHaveBeenCalledTimes(99);
     expect(deleteRow).not.toHaveBeenCalledWith("cleanup-3");
     expect(incrementAttempts).toHaveBeenCalledWith("cleanup-3");
-    expect(result).toEqual({ selected: 100, deleted: 99, failed: 1 });
+    expect(result).toEqual({ selected: 100, deleted: 99, failed: 1, hasMore: false });
+  });
+
+  it("selects one past the limit to know whether rows remain", async () => {
+    const rows = Array.from({ length: 101 }, (_, index) => cleanupRow(index));
+    const deleteObject = vi.fn(async () => undefined);
+
+    const result = await drainCleanupOutbox({
+      outbox: {
+        listDue: async () => rows,
+        deleteRow: async () => undefined,
+        incrementAttempts: async () => undefined,
+      },
+      objects: { deleteObject },
+    });
+
+    expect(deleteObject).toHaveBeenCalledTimes(100);
+    expect(result).toEqual({ selected: 100, deleted: 100, failed: 0, hasMore: true });
   });
 
   it("reports the phase that actually failed for each system", async () => {
@@ -69,7 +86,7 @@ describe("drainCleanupOutbox", () => {
     expect(failures).toEqual(["delete", "remove_row"]);
     expect(incrementAttempts).toHaveBeenCalledWith("cleanup-1");
     expect(incrementAttempts).toHaveBeenCalledWith("cleanup-2");
-    expect(result).toEqual({ selected: 2, deleted: 0, failed: 2 });
+    expect(result).toEqual({ selected: 2, deleted: 0, failed: 2, hasMore: false });
   });
 });
 
@@ -95,7 +112,7 @@ describe("sweepTempKeys", () => {
 
     expect(deleteObject).toHaveBeenCalledOnce();
     expect(deleteObject).toHaveBeenCalledWith("tmp/poll/orphan");
-    expect(result).toEqual({ listed: 3, eligible: 2, adopted: 1, deleted: 1 });
+    expect(result).toEqual({ listed: 3, eligible: 2, adopted: 1, deleted: 1, hasMore: false });
   });
 
   it("re-checks adoption per chunk so a key adopted mid-sweep survives", async () => {
@@ -125,7 +142,7 @@ describe("sweepTempKeys", () => {
     expect(checks).toBe(2);
     expect(deleteObject).toHaveBeenCalledTimes(100);
     expect(deleteObject).not.toHaveBeenCalledWith("tmp/poll/orphan-100");
-    expect(result).toEqual({ listed: 101, eligible: 101, adopted: 1, deleted: 100 });
+    expect(result).toEqual({ listed: 101, eligible: 101, adopted: 1, deleted: 100, hasMore: false });
   });
 
   it("fails closed when the D1 adoption check fails", async () => {

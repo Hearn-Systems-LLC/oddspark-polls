@@ -54,6 +54,14 @@ describe("desktop two-column layout contract (DESIGN.md §Layout)", () => {
       );
     });
 
+    it("gives the Demo Poll the wide track in demo-first order", () => {
+      // Outcome-bearing landings place the demo left; it must keep the wide
+      // track or its internal vote-form/Tally split crushes the Tally.
+      expect(landingSource).toMatch(
+        /\.landing-page--demo-first \{ grid-template-columns: minmax\(0, 2fr\) minmax\(280px, 1fr\); \}/,
+      );
+    });
+
     it("widens only the landing shell at lg via the wide measure token", () => {
       expect(landingSource).toMatch(
         /\.site-shell:has\(\.landing-page\) \{ max-width: var\(--space-measure-wide\); \}/,

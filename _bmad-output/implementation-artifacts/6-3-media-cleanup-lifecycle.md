@@ -4,7 +4,7 @@ baseline_commit: 6c2f926bd57a7268605893e98bf81be01e22fdd4
 
 # Story 6.3: Media Cleanup Lifecycle
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Ultimate context engine analysis completed 2026-08-08 — comprehensive developer guide created from epics (Story 6.3 L1054–1072, Epic 6 notes L179–182), architecture spine (AD-12 controlling; AD-3/6/11/14/19), Stories 6.1/6.2 artifacts + review findings, deferred-work.md, and a full codebase audit of the delete path, media pipeline, worker entry, wrangler config, migration guard, and test harness. No new libraries. -->
@@ -188,3 +188,19 @@ GPT-5 Codex
 ### Change Log
 
 - 2026-08-08: Implemented the Media cleanup outbox, scheduled drain, D1-safe temporary-key sweep, guarded replacement mechanics, full verification coverage, and documentation/status handoff for review.
+
+### Review Findings
+
+Code review 2026-08-08 (three layers: adversarial, edge-case, acceptance). Dismissed as noise: 8 (per-row sequential D1 round-trips tolerable at batch 100; missing bundle guard subsumed by Patch 1; no `due` predicate is spec-compliant retry cadence; sweeper lexicographic-cap starvation requires implausible sustained >1,000-young-key churn; D1 bind-param headroom at exactly 100 works as written; R2/worker clock skew absorbed by the 24h window; overlapping cron ticks are idempotent; replacement tmp-key existence check folded into Decision 1).
+
+- [x] [Review][Decision] Image-replacement command is dead code and its deferral is unrecorded — `replaceOptionImage` (module + adapter + vote-lock guard) has no inbound caller; AC 4's ruled default permits deferring the UI only if recorded in deferred-work.md, yet the two 6.1 deferrals were instead struck through as "resolved by Story 6.3" (deferred-work.md:539-540). Decide: record the deferral honestly, or wire the narrow command route now. RESOLVED 2026-08-08: wired via POST /creator/media/replace (commit 2bfc4a6).
+- [x] [Review][Decision] Out-of-scope fixes ride this branch — `b5715d8 fix(results): restore ranked result rendering` (src/lib/poll-delivery.ts:142-143,281-282; src/components/poll-voting-surface.astro:184 changes read-only `checked` to image-polls-only) and `b3b7dc6 test(e2e): target capped option inputs` violate the story's "Do NOT touch results/voting surfaces" note and the one-story-one-PR convention. Decide: keep on this branch or split to a `fix/*` branch. The `checked` change also silently drops the cast-marker for returning voters on multiple-choice/ranked polls — confirm that was intended. RESOLVED 2026-08-08: kept on branch; cast-marker change accepted as intended.
+- [x] [Review][Patch] Deployed workers never get the cron trigger or scheduled handler — deploys are local-only [scripts/deploy-config.mjs:82-104, scripts/deploy.mjs:164-167]: `buildRemoteDeployConfig` hardcodes `main: "worker/index.mjs"` and does not copy `triggers`, and the esbuild entry is `dist/server/entry.mjs` (Astro fetch-only entry), not `src/worker.ts`. AC 2/AC 3 are nullified in staging/production; the claimed dry-run verification exercised wrangler.jsonc, not the `.deploy/<env>/wrangler.json` CI actually deploys. HIGH.
+- [x] [Review][Patch] Drain queue starvation: poison rows are re-selected first forever [src/adapters/d1/index.ts:1053-1069, src/modules/media/index.ts:66-80] — `listDue` orders by `enqueued_at_ms ASC LIMIT 100` and `attempts` is incremented but never read; ~100 permanently failing rows fill every batch and newer rows never drain. Order by `attempts ASC, enqueued_at_ms ASC` (or equivalent) so fresh rows drain first.
+- [x] [Review][Patch] Sweeper/adoption TOCTOU: a key adopted between `findAdoptedKeys` and `deleteObject` destroys a live image [src/modules/media/index.ts:100-140] — re-check adoption per chunk immediately before its deletes to narrow the window.
+- [x] [Review][Patch] Drain failure logging mislabels `deleteRow` failures as R2 delete failures [src/modules/media/index.ts:68-76] — the try wraps both `deleteObject` and `deleteRow`; a D1 row-delete failure after a successful R2 delete reports `phase: "delete"`, sending operators to the wrong system.
+- [x] [Review][Patch] worker.ts hardcodes limits the module exports [src/worker.ts:36,60] — `=== 100` / `=== 1_000` duplicate `CLEANUP_BATCH_LIMIT` / `TEMP_LIST_LIMIT`; changing the module constants silently orphans the bound warnings.
+- [x] [Review][Patch] Bound-reached warnings false-positive at exactly the limit [src/worker.ts:36-41,60-65] — `selected === 100` / `listed === 1_000` fires even when the backlog is exactly exhausted, paging nobody every 15 minutes.
+- [x] [Review][Patch] Worker-entry contract test asserts config by substring [tests/unit/worker-entry-contract.test.mjs:9-12] — raw-text `toContain` on wrangler.jsonc passes/fails on comments and formatting; parse the JSONC (parser exists in scripts/deploy-config.mjs) and assert the parsed triggers.
+- [x] [Review][Patch] E2E tests share `voterCookies` across tests [tests/e2e/image-poll.spec.mjs:225,343,355] — the "already-voted" tests depend on a cookie jar populated by an earlier test; running either in isolation fails for reasons unrelated to the behavior under test.
+- [x] [Review][Patch] CHANGELOG overstates what shipped [CHANGELOG.md:18-24] — pre-Vote replacement "mechanics" are unreachable from any route; per the repo's user-facing-only rule this entry should follow Decision 1's outcome.

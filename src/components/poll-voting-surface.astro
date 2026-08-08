@@ -181,7 +181,7 @@ const tallyOwnsBadge = readOnly;
       <ul class="poll-options">
         {poll.options.map((option) => (
           <li>
-            <PollOption id={`option-${option.id}`} name="option_id" value={option.id} label={option.label} checked={false} type={multiSelect ? "checkbox" : "radio"} readOnly />
+            <PollOption id={`option-${option.id}`} name="option_id" value={option.id} label={option.label} checked={yourBallotOptionIds.includes(option.id)} type={multiSelect ? "checkbox" : "radio"} readOnly media={option.media} />
           </li>
         ))}
       </ul>
@@ -212,7 +212,7 @@ const tallyOwnsBadge = readOnly;
           <fieldset class="poll-options" aria-describedby={multiSelect ? "vote-bounds-hint" : undefined}>
             <legend class="visually-hidden">Options</legend>
             {poll.options.map((option) => (
-              <PollOption id={`option-${option.id}`} name="option_id" value={option.id} label={option.label} checked={selected.has(option.id)} type={multiSelect ? "checkbox" : "radio"} />
+              <PollOption id={`option-${option.id}`} name="option_id" value={option.id} label={option.label} checked={selected.has(option.id)} type={multiSelect ? "checkbox" : "radio"} media={option.media} />
             ))}
           </fieldset>
         )}

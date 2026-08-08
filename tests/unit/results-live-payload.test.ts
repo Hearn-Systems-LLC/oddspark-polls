@@ -119,3 +119,26 @@ describe("live Results Comment payload validation", () => {
     ).toBe(false);
   });
 });
+
+describe("live Results payload rejects media keys on options (Story 6.2)", () => {
+  it("rejects options carrying media fields", () => {
+    expect(
+      isLiveResultsPayload({
+        ...payload,
+        options: [{
+          ...payload.options[0],
+          media: { mediaId: "m-1", altText: "A photo", caption: null },
+        }],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects options carrying a mediaId field directly", () => {
+    expect(
+      isLiveResultsPayload({
+        ...payload,
+        options: [{ ...payload.options[0], mediaId: "m-1" }],
+      }),
+    ).toBe(false);
+  });
+});

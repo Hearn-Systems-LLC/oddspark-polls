@@ -15,6 +15,21 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Image Poll creation on `/creator/new`. Creators can now choose the IMAGE poll
+  type, upload one JPEG/PNG/WebP image per option (5 MB cap, server-side
+  magic-byte validation), and provide required alt text and optional captions.
+  Images are stored in R2 with temp-key adoption: files land at scoped temporary
+  keys and become publicly servable only after the D1 creation batch adopts them.
+  Upload failures preserve all other form fields so the Creator retries only the
+  failed file.
+- Image Poll voting on `/{link}`. Voters on Image Polls see square-cropped
+  image plates at full column width with captions below. Tapping the image
+  selects it — the image is the option, never a lightbox. Selection, bounds,
+  submission, confirmation, and duplicate rejection behave exactly as
+  Multiple-Choice. Already-voted and closed states show plates with the
+  cast selection marked ◆. Results show plates above each option's bar.
+- Public media serving at `/media/{id}`. Adopted images are served with
+  immutable caching headers; unadopted or unknown IDs return 404.
 - Per-round IRV table on Ranked-Choice Results. Every Round shows per-option
   counts, elimination statements (fewest votes, safe batch, backward tie-break),
   and exhausted-Ballot counts. Eliminated options are struck through from their

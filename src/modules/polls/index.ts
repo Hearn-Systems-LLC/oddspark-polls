@@ -450,6 +450,17 @@ export type PollPersistenceRows = {
     kind: "generated" | "custom";
     createdAtMs: number;
   };
+  media?: {
+    id: string;
+    pollId: PollId;
+    optionId: PollOptionId;
+    r2Key: string;
+    contentType: string;
+    sizeBytes: number;
+    altText: string;
+    caption: string | null;
+    createdAtMs: number;
+  }[];
 };
 
 // Thrown by the persistence adapter when the batch fails on the poll PRIMARY

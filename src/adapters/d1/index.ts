@@ -231,6 +231,12 @@ const DISCOVERY_SITEMAP_ACTIVE_DEADLINE_END_QUERY = discoverySitemapQuery(
   "end",
 );
 
+export type PollOptionMedia = {
+  mediaId: string;
+  altText: string;
+  caption: string | null;
+};
+
 export type PollPage = {
   pollId: PollId;
   canonicalReference: string;
@@ -250,7 +256,14 @@ export type PollPage = {
   commentsEnabled: boolean;
   deadlineMs: number | null;
   closedAtMs: number | null;
-  options: { id: PollOptionId; label: string; position: number }[];
+  options: {
+    id: PollOptionId;
+    label: string;
+    position: number;
+    /** Adopted image plate (Story 6.2) — present only for image-poll
+     * options; the LEFT JOIN keeps it absent for every other type. */
+    media?: PollOptionMedia;
+  }[];
 };
 
 export type OwnedPoll = PollPage & {
@@ -296,13 +309,42 @@ async function loadOptions(
   db: D1Database,
   pollId: PollId,
 ): Promise<PollPage["options"]> {
+  // LEFT JOIN media_object: only image polls have rows (0014 guard
+  // triggers enforce poll_type='image'), so every other type's media
+  // columns come back NULL and the option carries no media field.
   const options = await db
     .prepare(
-      "SELECT id, label, position FROM poll_option WHERE poll_id = ?1 ORDER BY position",
+      `SELECT po.id AS id, po.label AS label, po.position AS position,
+         mo.id AS media_id, mo.alt_text AS media_alt_text,
+         mo.caption AS media_caption
+       FROM poll_option po
+       LEFT JOIN media_object mo ON mo.option_id = po.id
+       WHERE po.poll_id = ?1
+       ORDER BY po.position`,
     )
     .bind(pollId)
-    .all<{ id: PollOptionId; label: string; position: number }>();
-  return options.results;
+    .all<{
+      id: PollOptionId;
+      label: string;
+      position: number;
+      media_id: string | null;
+      media_alt_text: string | null;
+      media_caption: string | null;
+    }>();
+  return options.results.map((row) =>
+    row.media_id === null || row.media_alt_text === null
+      ? { id: row.id, label: row.label, position: row.position }
+      : {
+          id: row.id,
+          label: row.label,
+          position: row.position,
+          media: {
+            mediaId: row.media_id,
+            altText: row.media_alt_text,
+            caption: row.media_caption,
+          },
+        },
+  );
 }
 
 function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
@@ -344,7 +386,7 @@ export function createPollPersistence(db: D1Database) {
     // The one AD-3 creation batch: poll + options + reference commit
     // together or not at all — a failed batch leaves no reachable Poll.
     async insertPoll(rows: PollPersistenceRows): Promise<void> {
-      const { poll, options, reference } = rows;
+      const { poll, options, reference, media } = rows;
       try {
         await db.batch([
           db
@@ -395,6 +437,23 @@ export function createPollPersistence(db: D1Database) {
               reference.kind,
               reference.createdAtMs,
             ),
+          ...(media ?? []).map((m) =>
+            db
+              .prepare(
+                "INSERT INTO media_object (id, poll_id, option_id, r2_key, content_type, size_bytes, alt_text, caption, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              )
+              .bind(
+                m.id,
+                m.pollId,
+                m.optionId,
+                m.r2Key,
+                m.contentType,
+                m.sizeBytes,
+                m.altText,
+                m.caption,
+                m.createdAtMs,
+              ),
+          ),
         ]);
       } catch (error) {
         // Poll-ID precedence preserves D4 dedupe when a replay collides on
@@ -1789,6 +1848,9 @@ export function createResultsPersistence(db: D1Database) {
            )
            SELECT po.id AS id, po.label AS label, po.position AS position,
              COALESCE(oc.option_count, 0) AS option_count,
+             mo.id AS media_id,
+             mo.alt_text AS media_alt_text,
+             mo.caption AS media_caption,
              totals.voter_count AS voter_count,
              totals.selection_count AS selection_count,
              p.representation_version AS representation_version,
@@ -1821,6 +1883,7 @@ export function createResultsPersistence(db: D1Database) {
            CROSS JOIN totals
            LEFT JOIN poll_option po ON po.poll_id = p.id
            LEFT JOIN option_counts oc ON oc.poll_option_id = po.id
+           LEFT JOIN media_object mo ON mo.option_id = po.id
            WHERE p.id = ?1
            ORDER BY po.position`,
         )
@@ -1830,6 +1893,9 @@ export function createResultsPersistence(db: D1Database) {
           label: string | null;
           position: number | null;
           option_count: number;
+          media_id: string | null;
+          media_alt_text: string | null;
+          media_caption: string | null;
           voter_count: number;
           selection_count: number;
           representation_version: number;
@@ -1885,12 +1951,22 @@ export function createResultsPersistence(db: D1Database) {
         ) {
           throw new Error("Malformed tally projection: invalid option row");
         }
-        return {
+        const option: ResultsTallyProjection["options"][number] = {
           id: row.id,
           label: row.label,
           position: row.position,
           count: toCount(row.option_count, "option_count"),
         };
+        // Only image polls carry media rows; the LEFT JOIN leaves every
+        // other type's columns NULL and the option media-free.
+        if (row.media_id !== null && row.media_alt_text !== null) {
+          option.media = {
+            mediaId: row.media_id,
+            altText: row.media_alt_text,
+            caption: row.media_caption,
+          };
+        }
+        return option;
       });
       const voterCount = toCount(first.voter_count, "voter_count");
       const selectionCount = toCount(first.selection_count, "selection_count");

@@ -92,6 +92,7 @@ describe("public repository contract", () => {
     expect(componentConsumers).toEqual([
       "src/components/landing-intro.astro",
       "src/components/poll-voting-surface.astro",
+      "src/pages/[reference]/manifest.astro",
       "src/pages/[reference]/results.astro",
     ]);
 

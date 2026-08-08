@@ -1,5 +1,5 @@
 # generated: 2026-07-29T11:11:59-0400
-# last_updated: 2026-08-07T12:00:00-0400
+# last_updated: 2026-08-07T23:30:00-0400
 # project: oddspark-polls
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-29T11:11:59-0400
-last_updated: 2026-08-07T12:30:00-0400
+last_updated: 2026-08-08T00:00:00-0000
 project: oddspark-polls
 project_key: NOKEY
 tracking_system: file-system
@@ -93,9 +93,9 @@ development_status:
   5-3-per-round-display-ballot-manifest: done
   epic-5-retrospective: done
 
-  epic-6: backlog
-  6-1-upload-image-options: backlog
-  6-2-vote-on-an-image-poll: backlog
+  epic-6: in-progress
+  6-1-upload-image-options: done
+  6-2-vote-on-an-image-poll: done
   6-3-media-cleanup-lifecycle: backlog
   epic-6-retrospective: optional
 

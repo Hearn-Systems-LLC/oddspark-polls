@@ -146,15 +146,31 @@ const {
     <div class="results-tally-bars" data-tally-final>
       {
         tally.options.map((option) => (
-          <ResultsBar
-            optionId={option.id}
-            label={option.label}
-            percent={option.percent}
-            pieShare={option.pieShare}
-            count={option.count}
-            leader={option.leading}
-            yourOption={yourBallotOptionIds.includes(option.id)}
-          />
+          <>
+            {option.media && (
+              <div class="results-tally-plate">
+                <img
+                  class="results-tally-plate-image"
+                  src={`/media/${option.media.mediaId}`}
+                  alt={option.media.altText}
+                  loading="lazy"
+                  decoding="async"
+                />
+                {option.media.caption !== null && (
+                  <span class="results-tally-plate-caption">{option.media.caption}</span>
+                )}
+              </div>
+            )}
+            <ResultsBar
+              optionId={option.id}
+              label={option.label}
+              percent={option.percent}
+              pieShare={option.pieShare}
+              count={option.count}
+              leader={option.leading}
+              yourOption={yourBallotOptionIds.includes(option.id)}
+            />
+          </>
         ))
       }
     </div>
@@ -291,6 +307,30 @@ const {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+  }
+
+  /* Story 6.2: image plate + caption block sits as a sibling above each
+     option's bar. The bar internals stay byte-identical (34/38px track,
+     overflow:hidden) — plates cannot live inside the bar. */
+  .results-tally-plate {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-2);
+  }
+
+  .results-tally-plate-image {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 0;
+  }
+
+  .results-tally-plate-caption {
+    color: var(--color-text);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
   }
 
   /* Badge follows the bars with a 24px rise (key-tally.html); the post-vote

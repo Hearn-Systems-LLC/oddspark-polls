@@ -95,6 +95,10 @@ export type ResultsTallyProjection = {
     label: string;
     position: number;
     count: number;
+    /** Adopted image plate (Story 6.2) — present only for image-poll
+     * options. Rides the existing authorized projection (AD-21); never
+     * serialized into the live payload (exact-key contract). */
+    media?: { mediaId: string; altText: string; caption: string | null };
   }[];
   voterCount: number;
   selectionCount: number;
@@ -175,6 +179,10 @@ export type ResultsTallyOptionView = {
   /** Unrounded share of Voters, supplied for exact PIE geometry. */
   pieShare: number;
   leading: boolean;
+  /** Adopted image plate (Story 6.2) — server-rendered surfaces only.
+   * The live route strips it before serialization so the exact-key
+   * payload contract is untouched. */
+  media?: { mediaId: string; altText: string; caption: string | null };
 };
 
 // The outward projection — the only result shape delivery may render. It

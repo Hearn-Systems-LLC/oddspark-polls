@@ -65,11 +65,46 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
     const ranked = pollTypeChoices.some(
       (choice) => choice.value === "ranked_choice" && choice.checked,
     );
-    multipleChoiceFields.hidden = ranked;
+    const image = pollTypeChoices.some(
+      (choice) => choice.value === "image" && choice.checked,
+    );
+    multipleChoiceFields.hidden = ranked || image;
     for (const input of multipleChoiceFields.querySelectorAll<HTMLInputElement>(
       'input[name="multiSelect"], input[name="minSelections"], input[name="maxSelections"]',
     )) {
-      input.disabled = ranked;
+      input.disabled = ranked || image;
+    }
+    // Toggle image upload fields.
+    const imageFields = form!.querySelectorAll<HTMLElement>("[data-image-upload-fields]");
+    for (const field of imageFields) {
+      field.hidden = !image;
+      for (const input of field.querySelectorAll<HTMLInputElement>('input[type="file"], input[id^="media-alt-"], input[id^="media-caption-"]')) {
+        input.disabled = !image;
+      }
+      for (const fileInput of field.querySelectorAll<HTMLInputElement>('input[type="file"]')) {
+        const idx = fileInput.id.replace("media-file-", "");
+        if (image) {
+          fileInput.setAttribute("name", `media_file_${idx}`);
+        } else {
+          fileInput.removeAttribute("name");
+        }
+      }
+      for (const altInput of field.querySelectorAll<HTMLInputElement>('input[id^="media-alt-"]')) {
+        const idx = altInput.id.replace("media-alt-", "");
+        if (image) {
+          altInput.setAttribute("name", `media_alt_${idx}`);
+        } else {
+          altInput.removeAttribute("name");
+        }
+      }
+      for (const capInput of field.querySelectorAll<HTMLInputElement>('input[id^="media-caption-"]')) {
+        const idx = capInput.id.replace("media-caption-", "");
+        if (image) {
+          capInput.setAttribute("name", `media_caption_${idx}`);
+        } else {
+          capInput.removeAttribute("name");
+        }
+      }
     }
   }
 
@@ -108,6 +143,25 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
   // Track option count so we clamp bounds only when options shrink — not on
   // every keystroke into min/max (that would hide the server 422 path).
   let lastOptionCountForBounds = Math.max(1, nonBlankRows());
+
+  // Strip image-upload state from a cloned row before appending. The
+  // preserved refs and previews belong to the source row only.
+  function clearClonedMediaState(row: HTMLElement): void {
+    for (const ref of Array.from(row.querySelectorAll('input[name="media_ref"]'))) {
+      ref.remove();
+    }
+    for (const plate of Array.from(row.querySelectorAll(".image-preview-plate"))) {
+      plate.remove();
+    }
+    for (const fileInput of Array.from(row.querySelectorAll<HTMLInputElement>('input[type="file"]'))) {
+      fileInput.value = "";
+    }
+    for (const mediaText of Array.from(row.querySelectorAll<HTMLInputElement>('input[id^="media-alt-"], input[id^="media-caption-"]'))) {
+      mediaText.value = "";
+      mediaText.classList.remove("is-error");
+      mediaText.removeAttribute("aria-invalid");
+    }
+  }
   function syncMultiSelectBounds(): void {
     if (!bounds) {
       return;
@@ -198,6 +252,29 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
         label.htmlFor = id;
         input.id = id;
       }
+      // Keep per-row media fields addressable by their new position.
+      const fileInput = row.querySelector<HTMLInputElement>('input[type="file"]');
+      if (fileInput) {
+        fileInput.id = `media-file-${index}`;
+        if (fileInput.getAttribute("name")) {
+          fileInput.setAttribute("name", `media_file_${index}`);
+        }
+        row.querySelector<HTMLLabelElement>('label[for^="media-file-"]')?.setAttribute("for", `media-file-${index}`);
+      }
+      const altInput = row.querySelector<HTMLInputElement>('input[id^="media-alt-"]');
+      if (altInput) {
+        altInput.id = `media-alt-${index}`;
+        if (altInput.getAttribute("name")) {
+          altInput.setAttribute("name", `media_alt_${index}`);
+        }
+      }
+      const captionInput = row.querySelector<HTMLInputElement>('input[id^="media-caption-"]');
+      if (captionInput) {
+        captionInput.id = `media-caption-${index}`;
+        if (captionInput.getAttribute("name")) {
+          captionInput.setAttribute("name", `media_caption_${index}`);
+        }
+      }
       // Every remove control names its row.
       row
         .querySelector("[data-remove-option]")
@@ -221,6 +298,9 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
       input.classList.remove("is-error");
       input.removeAttribute("aria-invalid");
     }
+    // Strip any cloned image-upload state: previews, preserved refs, and
+    // field values belong to the source row only.
+    clearClonedMediaState(next);
     optionList.appendChild(next);
     attachRemove(next);
     renumber();

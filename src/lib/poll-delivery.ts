@@ -767,8 +767,14 @@ export async function deliverPollVotingSurface(
   }
 
   const compactCounted = readOnly && outcome?.code === "counted";
+  // Story 6.2: image polls share MC single-select read-only semantics —
+  // the option list (with plates) must render for already-voted / closed
+  // states so the cast selection can be marked ◆. Multi-select stays
+  // MC-only (image rejects multi-select per migration 0014 + definition).
   const showReadOnlyOptions =
-    readOnly && !compactCounted && poll.pollType === "multiple_choice";
+    readOnly &&
+    !compactCounted &&
+    (poll.pollType === "multiple_choice" || poll.pollType === "image");
   const showTally =
     (postVoteResults?.kind === "visible" ||
       postVoteResults?.kind === "ranked_visible") &&

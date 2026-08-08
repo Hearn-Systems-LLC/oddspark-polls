@@ -6,6 +6,7 @@ import type {
   MultipleChoiceVoteSubmission,
   VotingPollTypeStrategy,
 } from "../../voting/index";
+import { imageStrategy } from "./image";
 import { multipleChoiceStrategy } from "./multiple-choice";
 import {
   rankedChoiceStrategy,
@@ -15,6 +16,7 @@ import {
 export const pollTypeStrategies = {
   multiple_choice: multipleChoiceStrategy,
   ranked_choice: rankedChoiceStrategy,
+  image: imageStrategy,
 } as const;
 
 export type RegisteredPollType = keyof typeof pollTypeStrategies;
@@ -34,7 +36,7 @@ export function pollTypeStrategyFor(pollType: PollType) {
 export function votingStrategyFor(
   pollType: PollType,
 ): VotingPollTypeStrategy | null {
-  if (pollType === "multiple_choice") {
+  if (pollType === "multiple_choice" || pollType === "image") {
     return {
       type: "multiple_choice",
       validateSubmission: (submission, facts) => {

@@ -533,3 +533,29 @@ resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 
 - Unbounded Manifest / in-memory sort for large polls [src/adapters/d1/index.ts:projectBallotManifest, src/pages/[reference]/manifest.astro] — loads all votes+preferences into Map/array and renders one `<li>` per ballot with no LIMIT; 50k ballots OOMs Worker / multi-MB HTML. Spec says “Rounds never collapse or paginate” for completeness, but no memory guard specified. Monitor; consider streaming/size cap if observed.
 - Zero-preference / orphan vote undercounts ballotCount [src/adapters/d1/index.ts:projectBallotManifest] — `ballotMap` only from `prefRows`; a vote with zero `ranked_vote_preference` rows is invisible so ballotCount diverges from vote table/exhaustedCount. Requires product decision on manifest exhausted-ballot representation.
+
+## Deferred from: Story 6.1 Upload Image Options (2026-08-07)
+
+- Temp-key sweeper for unadopted R2 objects older than 24h — owned by Story 6.3. Until then, orphaned temp keys from failed creations accumulate in R2 without cleanup. No public exposure (unadopted keys are not servable).
+- Media replacement/deletion outbox and cron drain — owned by Story 6.3.
+- Progressive-enhancement async uploader — explicitly out of scope per AD-2 no-JS mandate.
+- Voting/results rendering of image plates — owned by Story 6.2.
+
+## Deferred from: code review of 6-1-upload-image-options (2026-08-07)
+
+- CSRF clone double-buffers multipart bodies (~5 MB × N × 2 Worker memory) — pre-existing trap from spec §Traps-1, accepted as documented and bounded by POLL_CAPS.maxOptions [src/lib/csrf.ts:209, src/pages/creator/new.astro:135] — spec-noted, bounded by maxOptions
+
+## Deferred from: code review of 6-2-vote-on-an-image-poll (2026-08-08)
+
+- Tests assert on source-text patterns rather than runtime behavior — pre-existing pattern in codebase (poll-card.test.mjs precedent), not blocking
+- Read-only branch media plumbing test uses fragile regex — test quality issue, not blocking
+- No test verifies actual accessible name computation — accessibility testing gap, not blocking
+- No verification that lazy loading prevents layout shift — performance testing gap, not blocking
+- Live payload contract test checks source text instead of actual payload — test quality issue, not blocking
+- Caption color test uses regex that could match incorrect selectors — test quality issue, not blocking
+
+## Deferred from: Story 6.2 Vote on an Image Poll (2026-08-08)
+
+- Results layout: plate + caption as sibling block above each option's bar — needs design review. The UX spine has no Image-Poll Tally spec and the 34/38px bar cannot hold a plate. This is the minimal reading of "images served on results" + "same results-bar Tally". Flagged for design follow-up.
+- Desktop plate size: full ballot-column width at every breakpoint. If plates feel oversized at lg breakpoint, that's a design-review follow-up, not a grid change. Spec text says "full column width" and layout forbids breakpoint-only components.
+- Caption color: `{colors.text-dark}` via `{typography.caption}` — ruled NOT dim/faint because caption is option-identifying information. Parallel: results-bar count rejected dim for the same reason. DESIGN.md bans faint on must-read text. Accepted as-is, flag for design confirmation.

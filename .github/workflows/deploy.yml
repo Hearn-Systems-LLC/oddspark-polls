@@ -9,9 +9,11 @@ on:
 
 concurrency:
   group: deploy-${{ github.ref }}
-  # Never cancel mid-flight: a cancelled run between production migration and
-  # production deploy would leave prod schema ahead of code. Queue instead.
-  cancel-in-progress: false
+  # Main pushes (the deploy path) still queue and never cancel: a cancelled
+  # run between production migration and production deploy would leave prod
+  # schema ahead of code. Non-main runs (PRs) are cancelled when superseded
+  # by a newer push to the same ref to avoid wasted wall time.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   NODE_VERSION: "24.18.0"
@@ -57,6 +59,49 @@ jobs:
       - name: Type check
         run: pnpm check
 
+      # E2E runs as a separate sharded job (see `e2e` below) so the two legs
+      # run in parallel instead of paying the full suite serially here.
+      - name: Refresh binding types
+        run: pnpm types
+
+      # Fail the gate when the committed worker-configuration.d.ts is stale
+      # relative to what `wrangler types` generates from wrangler.jsonc
+      # (`secrets.required` plus public `vars`, not `.dev.vars` inference).
+      - name: Binding types drift check
+        run: git diff --exit-code worker-configuration.d.ts
+
+      # Build the production-flavored artifact — the same CLOUDFLARE_ENV the
+      # deploy jobs rebuild with — so the gate tests what actually ships.
+      - name: Build
+        run: pnpm build:production
+
+  # Sharded Playwright leg. Each matrix shard is a separate runner with its
+  # own filesystem, its own dev server, and its own Wrangler local-persistence
+  # D1, so the workers:1 serialization in playwright.config.ts (shared local
+  # D1 directory) does not apply across shards. fail-fast is off so one
+  # shard's failure still reports the full picture.
+  e2e:
+    name: E2E (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
       # E2E runs the real dev server: it needs Playwright's browser, local D1
       # migrations applied, and a throwaway .dev.vars — generated here, never
       # a real secret (no OAuth round-trip happens in e2e).
@@ -83,25 +128,11 @@ jobs:
           } > .dev.vars
 
       - name: E2E tests
-        run: pnpm test:e2e
-
-      - name: Refresh binding types
-        run: pnpm types
-
-      # Fail the gate when the committed worker-configuration.d.ts is stale
-      # relative to what `wrangler types` generates from wrangler.jsonc plus
-      # the throwaway .dev.vars above (key order matters — see its comment).
-      - name: Binding types drift check
-        run: git diff --exit-code worker-configuration.d.ts
-
-      # Build the production-flavored artifact — the same CLOUDFLARE_ENV the
-      # deploy jobs rebuild with — so the gate tests what actually ships.
-      - name: Build
-        run: pnpm build:production
+        run: pnpm test:e2e --shard=${{ matrix.shard }}/4
 
   deploy-staging:
     name: Staging preflight → migrate → deploy → smoke
-    needs: test-and-build
+    needs: [test-and-build, e2e]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging

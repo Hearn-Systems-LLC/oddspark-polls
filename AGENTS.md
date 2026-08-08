@@ -151,10 +151,13 @@ How to *prove* a change is good, and which layer to run for which change.
 | `pnpm build:production` | The artifact that actually ships | — |
 | `pnpm smoke:staging` | Deployed staging returns 200, serves the token marker, and answers the auth + binding liveness probes (`/api/auth/ok`, `/api/health`) | yes, deployed |
 
-The CI gate (`.github/workflows/deploy.yml`) runs, in order: migration guard → `pnpm test`
-→ `pnpm check` → `pnpm test:e2e` → `pnpm types` → binding-types drift check
-(`git diff --exit-code worker-configuration.d.ts`) → `pnpm build:production`. Match that
-locally before pushing. Binding types are driven by `secrets.required` plus public `vars` in
+The CI gate (`.github/workflows/deploy.yml`) runs two parallel jobs: `test-and-build`
+(migration guard → `pnpm test` → `pnpm check` → `pnpm types` → binding-types drift check
+(`git diff --exit-code worker-configuration.d.ts`) → `pnpm build:production`) and `e2e`,
+a 4-way Playwright shard matrix (`pnpm test:e2e --shard=N/4`) whose shards are separate
+runners with their own dev server and local-persistence D1, so the local `workers: 1`
+serialization does not apply across them. Deploy jobs need both. Match that locally before
+pushing. Binding types are driven by `secrets.required` plus public `vars` in
 `wrangler.jsonc` (not `.dev.vars` inference). Keep `.dev.vars` provisioning order
 with `VOTE_DIGEST_SECRET` last for script consistency with `.dev.vars.example`.
 

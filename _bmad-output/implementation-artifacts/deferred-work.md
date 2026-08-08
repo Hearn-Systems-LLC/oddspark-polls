@@ -565,7 +565,8 @@ origin: Epic 6 retrospective follow-up / PR #39-#40 cycle, 2026-08-08
 location: playwright.config.mjs (workers: 1), .github/workflows/deploy.yml
 severity: medium
 reason: Every PR and main deploy pays a ~23-minute Tests → build job dominated by 181 serially-run Playwright tests. workers: 1 is deliberate (SQLite contention determinism), so speeding up means sharding across CI jobs with isolated D1 databases and ports per shard, not flipping the workers flag. Candidate: --shard=1/4..4/4 across parallel jobs; splitting unit/integration from E2E gives faster feedback but does not shorten the critical path.
-status: open
+status: done 2026-08-08
+resolution: E2E moved out of test-and-build into a parallel e2e job with a 4-way shard matrix (--shard=N/4; 52/50/35/45 split of 182 tests); each shard is a separate runner with its own dev server and local-persistence D1, so workers: 1 stays. Deploy jobs now need both legs, and non-main concurrency runs cancel-in-progress while main pushes still queue.
 
 ### DW-116: Turnstile human check rejected a vote on polls.oddspark.dev
 origin: Justin report with screenshot, 2026-08-08

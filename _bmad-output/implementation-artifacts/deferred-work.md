@@ -588,3 +588,10 @@ location: tests/e2e/comment-list-moderation.spec.mjs:198 (ownerPage.reload())
 severity: low
 reason: Locally, `pnpm test:e2e --shard=1/4` failed this test 3/3 runs with `page.reload: net::ERR_ABORTED; maybe frame was detached` — the test's explicit reload races the page's own live-poll whole-page reload after the Administrator deletion at line 190. The same test passed standalone, in the full unsharded suite (182/182), and shard 1 passed with `--retries=1` (CI parity, playwright.config.ts sets retries: 1 under CI), so the deploy gate absorbs it. Likely fix: wait for the owner page's live state to settle (or disarm its poller) before the explicit reload instead of relying on timing.
 status: open
+
+### DW-119: Landing Create/Browse links should become a full-width footer
+origin: Justin report with screenshot, 2026-08-08
+location: src/pages/index.astro (landing Create/Browse blocks + lg two-column grid)
+severity: low
+reason: At ≥1024px the intro column trails off into orphaned "Create / Create a Poll" and "Browse / Discover Polls" blocks separated by rules — reads as scattered text at the bottom of the column (worse in the demo-first variant where the poll occupies the wide left track). Product direction: move them to a full-width footer band below the grid. Scoped as a **feature change for a later cycle, to go through adversarial review protocols when picked up** — per Justin, 2026-08-08. An implementation pass was started on fix/landing-footer-nav (footer `<nav>` with Create left / Discover right, DESIGN.md/EXPERIENCE.md/CHANGELOG edits, geometry assertions in tests/e2e/landing.spec.mjs + tests/unit/landing-page.test.mjs) and deliberately discarded uncommitted; the approach notes above survive as a starting point only, not as approved design.
+status: open

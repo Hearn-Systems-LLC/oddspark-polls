@@ -368,6 +368,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
         loadOwnedPoll: (id, owner) =>
           persistence.loadLifecycleForOwner(id, owner),
         deletePoll: (input) => persistence.deletePollForOwner(input),
+        nowMs: () => NOW + 40,
       },
       POLL_A,
       OWNER_A,
@@ -563,6 +564,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
       persistence.deletePollForOwner({
         pollId: POLL_A,
         ownerUserId: OWNER_B,
+        enqueuedAtMs: NOW + 30,
       }),
     ).resolves.toBe("not_found");
 
@@ -692,6 +694,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
       persistence.deletePollForOwner({
         pollId: POLL_A,
         ownerUserId: OWNER_A,
+        enqueuedAtMs: NOW + 40,
       }),
     ).resolves.toBe("deleted");
     await expect(
@@ -709,6 +712,7 @@ describe("poll lifecycle D1 adapter (Story 1.12)", () => {
     await persistence.deletePollForOwner({
       pollId: POLL_B,
       ownerUserId: OWNER_A,
+      enqueuedAtMs: NOW + 50,
     });
     await expect(votePersistence.insertVote(staleVote)).rejects.toBeInstanceOf(
       PollGoneError,

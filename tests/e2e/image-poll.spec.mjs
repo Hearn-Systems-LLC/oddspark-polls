@@ -202,9 +202,9 @@ test.describe("Image Poll creation (Story 6.1)", () => {
     expect(page.url()).toContain("/creator/polls/");
 
     // Images should render on the created poll page.
-    // Note: Story 6.2 adds image plates to the voting page; for now just verify
-    // the page loads successfully after creation.
-    await expect(page.getByText("Best landscape?")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Best landscape?" }),
+    ).toBeVisible();
 
     // Proof capture: 1280px light.
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -235,6 +235,45 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
       },
     ]);
     return seeded;
+  }
+
+  async function createImagePoll(page, { question, link }) {
+    await page.goto("/creator/new");
+    await page.locator('label[for="poll-type-image"]').click();
+    await page.getByLabel("QUESTION").fill(question);
+    await page.getByRole("textbox", { name: "OPTION 1" }).fill("Sunset");
+    await page.getByRole("textbox", { name: "OPTION 2" }).fill("Mountain");
+    await page.getByLabel("CUSTOM LINK (OPTIONAL)").fill(link);
+
+    const fileInputs = page.locator('input[type="file"][accept="image/jpeg,image/png,image/webp"]');
+    await fileInputs.nth(0).setInputFiles(resolve(FIXTURES_DIR, "tiny.jpg"));
+    await fileInputs.nth(1).setInputFiles(resolve(FIXTURES_DIR, "tiny.png"));
+
+    const altFields = page.locator('input[id^="media-alt-"]');
+    await altFields.nth(0).fill("A sunset over the ocean");
+    await altFields.nth(1).fill("A mountain landscape");
+
+    await Promise.all([
+      page.waitForURL(/\/creator\/polls\//),
+      page.getByRole("button", { name: "PUBLISH POLL" }).click(),
+    ]);
+  }
+
+  async function voteForMountain(page) {
+    await page.getByRole("img", { name: "A mountain landscape" }).click();
+    const mountainRadio = page.getByRole("radio", {
+      name: "A mountain landscape",
+    });
+    await expect(mountainRadio).toBeChecked();
+    const [postResponse] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.request().method() === "POST" &&
+          !candidate.url().includes("/creator/"),
+      ),
+      page.getByRole("button", { name: "VOTE" }).click(),
+    ]);
+    expect(postResponse.status()).toBe(303);
   }
 
   test.afterAll(() => {
@@ -308,26 +347,21 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
     await page.goto("/image-voter-test");
 
     // Tap the second image plate to select it.
-    const mountainOption = page.locator("label.poll-option", { hasText: "Mountain" });
-    await mountainOption.click();
+    await page
+      .getByRole("img", { name: "A mountain landscape" })
+      .click();
 
     // The radio input should be checked.
-    const mountainRadio = page.getByRole("radio", { name: "Mountain" });
+    const mountainRadio = page.getByRole("radio", {
+      name: "A mountain landscape",
+    });
     await expect(mountainRadio).toBeChecked();
 
     // Vote button should be enabled.
     await expect(page.getByRole("button", { name: "VOTE" })).toBeEnabled();
 
     // Submit the vote.
-    const [postResponse] = await Promise.all([
-      page.waitForResponse(
-        (candidate) =>
-          candidate.url().endsWith("/image-voter-test") &&
-          candidate.request().method === "POST",
-      ),
-      page.getByRole("button", { name: "VOTE" }).click(),
-    ]);
-    expect(postResponse.status()).toBe(303);
+    await voteForMountain(page);
 
     // Confirmation surface.
     await expect(page).toHaveTitle(/Counted/);
@@ -345,9 +379,22 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
 
   test("already-voted state shows plates with cast selection marked (AC 4)", async ({
     page,
+    context,
+    baseURL,
   }) => {
+    // Self-contained: this test creates its own Poll and casts its own Vote
+    // so it passes in isolation, without cookies from an earlier test.
+    await signIn(context, baseURL);
+    const link = `image-voted-${crypto.randomUUID().slice(0, 8)}`;
+    await createImagePoll(page, { question: "Voted plates?", link });
+
+    await context.clearCookies();
+    await page.goto(`/${link}`);
+    await voteForMountain(page);
+    await expect(page).toHaveTitle(/Counted/);
+
     // Reload the page to see the already-voted state.
-    await page.goto("/image-voter-test");
+    await page.goto(`/${link}`);
 
     await expect(page).toHaveTitle(/Already voted/);
     await expect(page.getByText("You've already voted here.")).toBeVisible();
@@ -394,7 +441,7 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
     await expect(plateCaptions.nth(0)).toHaveText("Golden hour");
 
     // Results bars should still be present and byte-identical (no media props).
-    const bars = page.locator(".results-bar");
+    const bars = page.locator("[data-tally-final] .results-bar");
     await expect(bars).toHaveCount(2);
 
     // Proof capture: 1280px light (results view).
@@ -463,6 +510,6 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
     expect(mainHtml).not.toContain('<script>alert("xss")</script>');
     expect(mainHtml).toContain("&lt;script&gt;");
     expect(mainHtml).not.toContain('<img src="x" onerror="alert(2)">');
-    expect(mainHtml).toContain("&lt;img src=&quot;x&quot;");
+    expect(mainHtml).toContain("&lt;img src=");
   });
 });

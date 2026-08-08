@@ -86,6 +86,9 @@ export function buildRemoteDeployConfig(wranglerJson, envName) {
     rules: [{ type: "ESModule", globs: ["**/*.js", "**/*.mjs"] }],
     compatibility_date: wranglerJson.compatibility_date,
     compatibility_flags: wranglerJson.compatibility_flags,
+    // Cron triggers bind per environment; without them the scheduled media
+    // cleanup handler never fires on the deployed Worker.
+    triggers: envCfg.triggers ?? wranglerJson.triggers,
     assets: {
       binding: "ASSETS",
       directory: "./client",

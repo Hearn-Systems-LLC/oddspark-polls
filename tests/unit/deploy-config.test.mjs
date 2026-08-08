@@ -1,58 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { buildRemoteDeployConfig } from "../../scripts/deploy-config.mjs";
-
-/**
- * Strip JSONC // line comments and trailing commas (mirrors deploy.mjs).
- */
-function parseJsonc(text) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inString) {
-      out += ch;
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-      out += "\n";
-      continue;
-    }
-    out += ch;
-  }
-  const chars = [...out];
-  inString = false;
-  escaped = false;
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === ",") {
-      let j = i + 1;
-      while (j < chars.length && /\s/.test(chars[j])) j++;
-      if (chars[j] === "}" || chars[j] === "]") chars[i] = " ";
-    }
-  }
-  return JSON.parse(chars.join(""));
-}
+import {
+  buildRemoteDeployConfig,
+  parseJsonc,
+} from "../../scripts/deploy-config.mjs";
 
 const wranglerJson = parseJsonc(readFileSync("wrangler.jsonc", "utf8"));
 const ALWAYS_PASS = "1x00000000000000000000AA";
@@ -105,5 +56,23 @@ describe("buildRemoteDeployConfig", () => {
     expect(() => buildRemoteDeployConfig(wranglerJson, "local")).toThrow(
       /Unsupported deploy environment/,
     );
+  });
+
+  it("carries the cleanup cron trigger into both deploy configs", () => {
+    for (const envName of ["staging", "production"]) {
+      const config = buildRemoteDeployConfig(wranglerJson, envName);
+      expect(config.triggers).toEqual(wranglerJson.env[envName].triggers);
+      expect(config.triggers.crons).toContain("*/15 * * * *");
+    }
+  });
+
+  it("falls back to the root triggers when an environment omits them", () => {
+    const stripped = structuredClone(wranglerJson);
+    delete stripped.env.staging.triggers;
+
+    const config = buildRemoteDeployConfig(stripped, "staging");
+
+    expect(config.triggers).toEqual(wranglerJson.triggers);
+    expect(config.triggers.crons).toContain("*/15 * * * *");
   });
 });

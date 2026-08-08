@@ -81,6 +81,10 @@ import {
   makeSecurityToggles,
   POLL_TYPES,
 } from "../../shared/domain/index";
+import type {
+  CleanupOutboxRow,
+  ReplaceOptionImagePersistenceInput,
+} from "../../modules/media/index";
 
 const DISCOVERY_CATALOG_COLUMNS = `p.id,
        pr.reference AS canonical_reference,
@@ -921,12 +925,27 @@ export function createPollPersistence(db: D1Database) {
       return "conflict";
     },
 
-    // Hard delete: single owner-qualified DELETE; FK cascades remove children.
+    // Hard delete: capture self-contained Media cleanup keys and remove the
+    // Poll plus D1 children in one atomic batch (AD-12).
     async deletePollForOwner(input: {
       pollId: PollId;
       ownerUserId: UserId;
+      enqueuedAtMs: number;
     }): Promise<"deleted" | "not_found"> {
-      const [result] = await db.batch([
+      const [, result] = await db.batch([
+        db
+          .prepare(
+            `INSERT INTO cleanup_outbox (id, r2_key, enqueued_at_ms)
+             SELECT lower(hex(randomblob(16))), media.r2_key, ?3
+             FROM media_object AS media
+             WHERE media.poll_id = ?1
+               AND EXISTS (
+                 SELECT 1 FROM poll
+                 WHERE poll.id = ?1
+                   AND poll.owner_user_id = ?2
+               )`,
+          )
+          .bind(input.pollId, input.ownerUserId, input.enqueuedAtMs),
         db
           .prepare("DELETE FROM poll WHERE id = ?1 AND owner_user_id = ?2")
           .bind(input.pollId, input.ownerUserId),
@@ -1025,6 +1044,132 @@ export function createPollPersistence(db: D1Database) {
         }
       }
       throw new Error("Security toggle update guard changed no row");
+    },
+  };
+}
+
+export function createMediaPersistence(db: D1Database) {
+  return {
+    async listDue(limit: number): Promise<CleanupOutboxRow[]> {
+      const rows = await db
+        .prepare(
+          // Least-attempted first: permanently failing rows must not fill
+          // every batch and starve rows that have never been tried.
+          `SELECT id, r2_key, enqueued_at_ms, attempts
+           FROM cleanup_outbox
+           ORDER BY attempts, enqueued_at_ms, id
+           LIMIT ?1`,
+        )
+        .bind(limit)
+        .all<{
+          id: string;
+          r2_key: string;
+          enqueued_at_ms: number;
+          attempts: number;
+        }>();
+      return rows.results.map((row) => ({
+        id: row.id,
+        r2Key: row.r2_key,
+        enqueuedAtMs: row.enqueued_at_ms,
+        attempts: row.attempts,
+      }));
+    },
+
+    async deleteRow(id: string): Promise<void> {
+      await db.prepare("DELETE FROM cleanup_outbox WHERE id = ?1").bind(id).run();
+    },
+
+    async incrementAttempts(id: string): Promise<void> {
+      await db
+        .prepare("UPDATE cleanup_outbox SET attempts = attempts + 1 WHERE id = ?1")
+        .bind(id)
+        .run();
+    },
+
+    async findAdoptedKeys(keys: string[]): Promise<Set<string>> {
+      if (keys.length === 0) return new Set();
+      const placeholders = keys.map((_, index) => `?${index + 1}`).join(", ");
+      const rows = await db
+        .prepare(`SELECT r2_key FROM media_object WHERE r2_key IN (${placeholders})`)
+        .bind(...keys)
+        .all<{ r2_key: string }>();
+      return new Set(rows.results.map(({ r2_key }) => r2_key));
+    },
+
+    async replaceOptionImage(
+      input: ReplaceOptionImagePersistenceInput,
+    ): Promise<"replaced" | "locked" | "not_found"> {
+      const ownerAndVoteGuard = `EXISTS (
+        SELECT 1 FROM poll
+        WHERE poll.id = ?1
+          AND poll.owner_user_id = ?2
+          AND poll.poll_type = 'image'
+          AND NOT EXISTS (SELECT 1 FROM vote WHERE vote.poll_id = poll.id)
+      )`;
+      const [, update] = await db.batch([
+        db
+          .prepare(
+            `INSERT INTO cleanup_outbox (id, r2_key, enqueued_at_ms)
+             SELECT lower(hex(randomblob(16))), media.r2_key, ?9
+             FROM media_object AS media
+             WHERE media.poll_id = ?1
+               AND media.option_id = ?3
+               AND media.r2_key <> ?4
+               AND ${ownerAndVoteGuard}`,
+          )
+          .bind(
+            input.pollId,
+            input.ownerUserId,
+            input.optionId,
+            input.r2Key,
+            input.contentType,
+            input.sizeBytes,
+            input.altText,
+            input.caption,
+            input.enqueuedAtMs,
+          ),
+        db
+          .prepare(
+            `UPDATE media_object
+             SET r2_key = ?4,
+                 content_type = ?5,
+                 size_bytes = ?6,
+                 alt_text = ?7,
+                 caption = ?8
+             WHERE poll_id = ?1
+               AND option_id = ?3
+               AND ${ownerAndVoteGuard}`,
+          )
+          .bind(
+            input.pollId,
+            input.ownerUserId,
+            input.optionId,
+            input.r2Key,
+            input.contentType,
+            input.sizeBytes,
+            input.altText,
+            input.caption,
+          ),
+      ]);
+      if ((update?.meta.changes ?? 0) >= 1) return "replaced";
+
+      const existing = await db
+        .prepare(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM media_object AS media
+             JOIN poll ON poll.id = media.poll_id
+             WHERE media.poll_id = ?1
+               AND media.option_id = ?2
+               AND poll.owner_user_id = ?3
+               AND poll.poll_type = 'image'
+           ) AS owned,
+           EXISTS (SELECT 1 FROM vote WHERE poll_id = ?1) AS has_vote`,
+        )
+        .bind(input.pollId, input.optionId, input.ownerUserId)
+        .first<{ owned: number; has_vote: number }>();
+      if (existing?.owned === 1 && existing.has_vote === 1) return "locked";
+      return "not_found";
     },
   };
 }

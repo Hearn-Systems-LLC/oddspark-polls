@@ -802,7 +802,10 @@ test.describe("authenticated create flow (seeded session)", () => {
     // Filling all 30 hits the non-blank cap — the server enforces the same
     // rule on the no-JS round-trip.
     for (let index = 0; index < 30; index += 1) {
-      await rows.nth(index).locator("input").fill(`Option ${index + 1}`);
+      await rows
+        .nth(index)
+        .locator('input[name="option"]')
+        .fill(`Option ${index + 1}`);
     }
     await expect(addButton).toBeDisabled();
 

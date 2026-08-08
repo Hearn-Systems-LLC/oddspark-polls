@@ -28,11 +28,11 @@ so that storage never accumulates orphans and deleting a Poll truly removes it.
 - [x] Task 1: Migration `0015_cleanup_outbox.sql` (AC: 1, 5)
   - [x] Table per spine ER (`POLL ||--o{ CLEANUP_OUTBOX : schedules` is scheduling lineage only — **no FK to poll**, rows must survive the poll hard-delete): `cleanup_outbox(id TEXT PK, r2_key TEXT NOT NULL, enqueued_at_ms INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)`. Keep it minimal — no status column; presence = pending, delete row on success. Index on `enqueued_at_ms` for drain ordering. Follow 0013/0014 style (snake_case, `_ms` suffix, header comment).
   - [x] Guard discipline: four-digit contiguous name `0015_…`; run `pnpm migrations:checksum` and commit the manifest **in the same commit** as the migration (`scripts/migrations-guard.mjs` fails otherwise); forward-only, never edit 0001–0014.
-- [ ] Task 2: Media module + outbox persistence (AC: 1, 4, 5)
-  - [ ] Create `src/modules/media/index.ts` (new module — AD-19 assigns cleanup to Media; nothing exists yet). Ports follow house style (bare function types + deps object + `nowMs: () => number`): a `drainCleanupOutbox` command and a `sweepTempKeys` command, plus the port types the D1/R2 adapters implement. Keep domain logic (batching, attempt counting, 24h threshold) in the module; adapters stay dumb.
-  - [ ] `src/adapters/d1/index.ts` — extend `deletePollForOwner` (`:924–939`): it is already a one-statement `db.batch`; prepend `INSERT INTO cleanup_outbox (id, r2_key, enqueued_at_ms) SELECT …, m.r2_key, ?now FROM media_object m WHERE m.poll_id = ?1 AND EXISTS (SELECT 1 FROM poll p WHERE p.id = ?1 AND p.owner_user_id = ?2)` before the `DELETE FROM poll`. The owner guard inside the SELECT is mandatory — the batch must not enqueue keys when the delete will match zero rows. UUID generation for outbox ids: SQLite can't make UUIDs — either pre-read `media_object` rows in the adapter and build bound INSERTs (acceptable: read-then-batch, the batch itself stays atomic and the EXISTS guard still applies) or use `lower(hex(randomblob(16)))`; pick one and test it.
-  - [ ] `deletePoll` command (`src/modules/polls/poll-lifecycle.ts:572–612`) currently has **no `nowMs` dep** — add it (pattern: `closePoll`/`updatePollDefinition` at `:236,:339,:423`) and thread from the route (`src/pages/creator/polls/[pollId].astro:286–309`, which already computes `nowMs` at `:265`).
-  - [ ] Replacement enqueue (AC 4, bounded): add a Media-owned `replaceOptionImage` persistence op — one `db.batch`: `UPDATE media_object SET r2_key/content_type/size_bytes/alt_text/caption/... WHERE option_id = ?` + `INSERT INTO cleanup_outbox` for the superseded key, guarded by the FR-5 vote lock (`NOT EXISTS (SELECT 1 FROM vote v WHERE v.poll_id = …)`, same guard style as `updateDefinitionForOwner:822–863`). Do NOT extend `updatePollDefinition` to image polls (its delete-and-recreate option strategy would cascade `media_object` away — Traps 4).
+- [x] Task 2: Media module + outbox persistence (AC: 1, 4, 5)
+  - [x] Create `src/modules/media/index.ts` (new module — AD-19 assigns cleanup to Media; nothing exists yet). Ports follow house style (bare function types + deps object + `nowMs: () => number`): a `drainCleanupOutbox` command and a `sweepTempKeys` command, plus the port types the D1/R2 adapters implement. Keep domain logic (batching, attempt counting, 24h threshold) in the module; adapters stay dumb.
+  - [x] `src/adapters/d1/index.ts` — extend `deletePollForOwner` (`:924–939`): it is already a one-statement `db.batch`; prepend `INSERT INTO cleanup_outbox (id, r2_key, enqueued_at_ms) SELECT …, m.r2_key, ?now FROM media_object m WHERE m.poll_id = ?1 AND EXISTS (SELECT 1 FROM poll p WHERE p.id = ?1 AND p.owner_user_id = ?2)` before the `DELETE FROM poll`. The owner guard inside the SELECT is mandatory — the batch must not enqueue keys when the delete will match zero rows. UUID generation for outbox ids: SQLite can't make UUIDs — either pre-read `media_object` rows in the adapter and build bound INSERTs (acceptable: read-then-batch, the batch itself stays atomic and the EXISTS guard still applies) or use `lower(hex(randomblob(16)))`; pick one and test it.
+  - [x] `deletePoll` command (`src/modules/polls/poll-lifecycle.ts:572–612`) currently has **no `nowMs` dep** — add it (pattern: `closePoll`/`updatePollDefinition` at `:236,:339,:423`) and thread from the route (`src/pages/creator/polls/[pollId].astro:286–309`, which already computes `nowMs` at `:265`).
+  - [x] Replacement enqueue (AC 4, bounded): add a Media-owned `replaceOptionImage` persistence op — one `db.batch`: `UPDATE media_object SET r2_key/content_type/size_bytes/alt_text/caption/... WHERE option_id = ?` + `INSERT INTO cleanup_outbox` for the superseded key, guarded by the FR-5 vote lock (`NOT EXISTS (SELECT 1 FROM vote v WHERE v.poll_id = …)`, same guard style as `updateDefinitionForOwner:822–863`). Do NOT extend `updatePollDefinition` to image polls (its delete-and-recreate option strategy would cascade `media_object` away — Traps 4).
 - [ ] Task 3: Worker entry with `scheduled()` + cron (AC: 2, 3)
   - [ ] **Structural change, flag in PR:** `wrangler.jsonc:6` `main` points at `@astrojs/cloudflare/entrypoints/server`, which default-exports `{ fetch }` only, and adapter 14.1.6 has no `workerEntryPoint` option. Create `src/worker.ts` (or similar) that re-exports the adapter's fetch and adds `scheduled`: `import server from "@astrojs/cloudflare/entrypoints/server"; export default { fetch: server.fetch, scheduled }`. Point `main` at it. **Verify `pnpm build:production` + `wrangler deploy --dry-run` still bundle correctly and `astro dev` still works before writing any drain logic** — if the adapter fights the wrapper, research the adapter-documented alternative first and record the decision.
   - [ ] Add `"triggers": { "crons": ["*/15 * * * *"] }` in wrangler.jsonc — **top-level AND repeated in `env.staging` + `env.production`** (triggers are non-inheritable; the file already repeats every binding per env, lines 62–176). Then `pnpm types && git diff --exit-code worker-configuration.d.ts` (regenerate if the Env shape changes).
@@ -145,6 +145,7 @@ GPT-5 Codex
 ### Completion Notes List
 
 - Task 1: Added forward-only migration 0015 with a self-contained, no-FK cleanup outbox and enqueue-time index; regenerated the 15-entry migration manifest. Verified with schema integration tests, `pnpm migrations:guard`, and the full 1,642-test suite.
+- Task 2: Added the provider-free Media cleanup/replacement policy and D1 persistence. Image deletion now captures keys with an owner guard before the same-batch hard delete; replacement is image/owner/vote guarded and atomically enqueues the superseded key. Added clock threading, policy unit tests, and D1 integration coverage; `pnpm check` and all 1,651 tests pass.
 
 ### File List
 
@@ -152,4 +153,12 @@ GPT-5 Codex
 - _bmad-output/implementation-artifacts/sprint-status.yaml
 - db/migrations/0015_cleanup_outbox.sql
 - db/migrations.manifest.json
+- src/adapters/d1/index.ts
+- src/modules/media/index.ts
+- src/modules/polls/poll-lifecycle.ts
+- src/pages/creator/polls/[pollId].astro
+- tests/integration/media-cleanup.integration.test.ts
+- tests/integration/poll-lifecycle-adapter.integration.test.ts
 - tests/integration/media-cleanup-schema.integration.test.ts
+- tests/unit/media-cleanup.test.ts
+- tests/unit/poll-lifecycle.test.ts

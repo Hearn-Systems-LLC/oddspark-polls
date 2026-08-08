@@ -486,12 +486,17 @@ describe("deletePoll", () => {
       {
         loadOwnedPoll: async () => snapshot({ voterCount: 4 }),
         deletePoll: del,
+        nowMs: () => NOW,
       },
       POLL_ID,
       OWNER,
     );
     expect(result.ok).toBe(true);
-    expect(del).toHaveBeenCalledOnce();
+    expect(del).toHaveBeenCalledWith({
+      pollId: POLL_ID,
+      ownerUserId: OWNER,
+      enqueuedAtMs: NOW,
+    });
   });
 
   it("returns poll_not_found without deleting a foreign Poll", async () => {
@@ -500,6 +505,7 @@ describe("deletePoll", () => {
       {
         loadOwnedPoll: async () => null,
         deletePoll: del,
+        nowMs: () => NOW,
       },
       POLL_ID,
       OWNER,

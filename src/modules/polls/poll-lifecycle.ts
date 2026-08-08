@@ -127,6 +127,7 @@ export type UpdateDefinitionPort = (input: {
 export type DeletePollPort = (input: {
   pollId: PollId;
   ownerUserId: UserId;
+  enqueuedAtMs: number;
 }) => Promise<"deleted" | "not_found">;
 
 export type LoadOwnedPollPort = (
@@ -567,6 +568,7 @@ export async function updatePollDefinition(
 export type DeletePollDeps = {
   loadOwnedPoll: LoadOwnedPollPort;
   deletePoll: DeletePollPort;
+  nowMs: () => number;
 };
 
 export async function deletePoll(
@@ -594,7 +596,11 @@ export async function deletePoll(
 
   let result: "deleted" | "not_found";
   try {
-    result = await deps.deletePoll({ pollId, ownerUserId });
+    result = await deps.deletePoll({
+      pollId,
+      ownerUserId,
+      enqueuedAtMs: deps.nowMs(),
+    });
   } catch (cause) {
     return {
       ok: false,

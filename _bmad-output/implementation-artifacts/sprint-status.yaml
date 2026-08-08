@@ -248,7 +248,7 @@ action_items:
   - epic: 6
     action: "C2: Deploy Epic 6 staging -> smoke -> production; verify scheduled handler live"
     owner: "Justin (ops) + deploy gate"
-    status: open
+    status: done
   - epic: 6
     action: "C3: Flip epic-6 to done in sprint-status after merge"
     owner: "Amelia"

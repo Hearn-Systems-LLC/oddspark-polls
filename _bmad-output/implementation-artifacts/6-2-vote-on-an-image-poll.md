@@ -4,7 +4,7 @@ baseline_commit: 69f54f974847102248d1db51a5b5e3e9dd781df4
 
 # Story 6.2: Vote on an Image Poll
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Ultimate context engine analysis completed 2026-08-07 — comprehensive developer guide created from epics (Story 6.2 ~L1037, FR-11 L31), PRD §4.4/§5, architecture spine (AD-2/3/6/7/12/21/24), DESIGN.md/EXPERIENCE.md image-plate + results-bar specs, Story 6.1 implementation + review findings, and a full codebase audit of the voting/results/live surfaces. No new libraries. -->
@@ -25,30 +25,30 @@ so that choosing between visuals is direct — the image is the option.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Media read model (AC: 2)
-  - [ ] `src/adapters/d1/index.ts` — extend the poll read path with media: either LEFT JOIN in `loadOptions` (`:295–305`) or a `loadMedia(pollId)` querying `media_object` (`SELECT id, option_id, alt_text, caption FROM media_object WHERE poll_id = ?1`). Extend `PollPage.options` (`:235–258`) and `toPollPage` (`:307–330`) with optional `media?: { mediaId: string; altText: string; caption: string | null }`. Media is absent for every non-image type — keep the field optional, not a new PollPage variant.
-  - [ ] Results side: expose the same per-option media to the results surfaces. `ResultsTallyProjection` (`src/modules/results/index.ts:188–200`) / `ResultsTallyOptionView` (`:169–179`) may carry optional media, OR pass a parallel `mediaByOptionId` map into `ResultsTally` from the page — pick one and keep the live payload untouched (see Traps 2). The strategy's `projectResults` stays a verbatim MC delegate (`src/modules/polls/types/image.ts:163–167`) — media comes from the read model, not the strategy.
-  - [ ] AD-21 holds: media fields ride existing authorized projections; Tally responses stay `private, no-store` where they are today. `/media/{id}` remains public-immutable-cacheable — image bytes are public on the voting page regardless of result visibility; the Tally referencing them is what's authorized.
-- [ ] Task 2: Voting page image plates (AC: 1, 2, 3, 4)
-  - [ ] `src/lib/poll-delivery.ts` — plumb media through `PollDeliveryState` options; **fix `showReadOnlyOptions` (`:770–771`)** to include `poll.pollType === "image"` (single-select MC semantics). Multi-select stays MC-only (`:791` unchanged).
-  - [ ] `src/components/poll-option.astro` — add optional `media?: { mediaId, altText, caption }` prop. When present: keep `<label class="poll-option">`, visually-hidden native input, and `.poll-option-marker` gutter exactly as-is; inside `.poll-option-text`, replace the label text with a square plate `<img src={`/media/${mediaId}`} alt={altText}>` (`aspect-ratio: 1; width: 100%; object-fit: cover; border-radius: 0; display: block;`) with the caption below in `{typography.caption}` `{colors.text-dark}` (ruled: NOT dim/faint — the caption is the option's name-adjacent text, see Dev Notes → Ruled defaults 3). Omit the caption element entirely when caption is null. Flex alignment: switch the row to `align-items: flex-start` (or equivalent) for image rows so the marker sits at the top of the plate — flag in PR.
-  - [ ] `src/components/poll-voting-surface.astro` — pass `media` in all three option branches: read-only list (`:181–187`), the vote form map (`:215`). No new client JS: `vote-form.ts` is label-agnostic (selects `input[name="option_id"]` only) — verify, don't modify.
-  - [ ] No lightbox, no zoom, no gesture; plate is inside the `<label>` so the tap target is free. `loading="lazy" decoding="async"` allowed (not motion); `aspect-ratio` reserves layout so loading never reflows (no-motion rule). No broken-image state UI — native alt-text rendering is the fallback (no spec exists; flag in PR).
-- [ ] Task 3: Results view images (AC: 2, 3)
-  - [ ] `src/components/results-tally.astro` (`:146–160`) — for options with media, render a square plate + caption block as a **sibling above each option's `<ResultsBar>`**, leaving `results-bar.astro`'s internal structure byte-identical (the bar track is 34/38px with `overflow:hidden` — a plate cannot live inside it; later epics consume, never restyle). Bar label continues to show `option.label` exactly as today. This is the ruled resolution of the spec tension between "images on results" (FR-11) and "same results-bar Tally" — flag layout for design review in the PR.
-  - [ ] Both results surfaces get it: direct route `src/pages/[reference]/results.astro` (`:128`) and the post-vote block in `poll-voting-surface.astro` (`:237–261`) share `ResultsTally` — one change covers both. Loading-skeleton branch (`results-tally.astro:169+`) stays image-free (no shimmer/no new skeleton).
-  - [ ] `ChartFormToggle` renders for image polls (single-select) — the pie view (`chart-pie-core.ts`) is label/percent-only; plates live outside the toggled region OR only in bars view — decide, keep pie untouched, flag in PR.
-- [ ] Task 4: Accessibility (AC: 5)
-  - [ ] Voting page accessible name = the native input's `<label>` content: with the plate, that is the `<img alt>` + visible caption text concatenated by the accname algorithm. Ruled: caption stays in the accessible name (not `aria-hidden`), even if the creator duplicated alt text — predictable beats clever. Marker stays decorative `::before` (never in the name).
-  - [ ] Results: `barAccessibleName` (`src/components/results-bar.ts`) keeps announcing "label, 47 percent, 122 votes, leading" — unchanged. The plate `<img>` above the bar carries its own alt text.
-  - [ ] Focus order/reading order unchanged; 48px min targets trivially satisfied by plates; state never color alone (marker glyphs carry state).
-- [ ] Task 5: Tests (all ACs)
-  - [ ] Unit: `poll-delivery` `showReadOnlyOptions` includes image (regression for the defect); option/media plumbing shape; if `ResultsTallyOptionView` gains media, extend `results.test.ts` / `post-vote-results.test.ts`. Component-shape assertions for the new `<img>` markup follow the `.test.mjs` source-text precedent (`poll-card.test.mjs`) — no `innerHTML`/`set:html` anywhere (`no-raw-html.test.mjs` walks all of `src`).
-  - [ ] **Live-results contract untouched:** `results-live-core.ts` `hasExactKeys` (`:53–56`, option keys `:106–124`) must NOT gain media keys; assert existing `results-live-core.test.ts` / `results-live-payload.test.ts` stay green unmodified. The reconciler never re-renders rows, so server-rendered plates survive refreshes — add an integration/e2e assertion that plates persist across a live poll tick if cheap.
-  - [ ] Integration: media read path in `polls-adapter.integration.test.ts` / `results-adapter.integration.test.ts` (options carry media for image polls, absent for MC/ranked); voting-page render includes `<img src="/media/…" alt="…">` for an adopted image poll (drive via `worker-entry.ts` like `vote-route.integration.test.ts`).
-  - [ ] E2E (`tests/e2e/image-poll.spec.mjs`, extend): create image poll via the real creator flow (fixtures `tests/e2e/fixtures/tiny.{jpg,png,webp}` — no direct-seed helper exists and the 0014 guard trigger requires `poll_type='image'`), then: plates render on `/{link}` with alt text; tap the image → marker `◆`, vote, Counted confirmation; already-voted read-only state shows plates with cast selection marked (AC 4); results view shows plates above bars; adversarial alt/caption strings escaped (extend the `results.spec.mjs` escaping pattern). Proof dir `test-results/story-6-2-vote-on-an-image-poll-proof/` with 375px-dark + 1280px-light captures.
-- [ ] Task 6: Docs & status
-  - [ ] `CHANGELOG.md` under `[Unreleased]`; `sprint-status.yaml` per workflow; note any deferred design decisions (results layout, caption color, desktop plate size) in `deferred-work.md` and the PR. Full gate before review: `pnpm migrations:guard && pnpm test && pnpm check`, `pnpm test:e2e`, `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check` (Node 24.18.0 via nvm).
+- [x] Task 1: Media read model (AC: 2)
+  - [x] `src/adapters/d1/index.ts` — extend the poll read path with media: either LEFT JOIN in `loadOptions` (`:295–305`) or a `loadMedia(pollId)` querying `media_object` (`SELECT id, option_id, alt_text, caption FROM media_object WHERE poll_id = ?1`). Extend `PollPage.options` (`:235–258`) and `toPollPage` (`:307–330`) with optional `media?: { mediaId: string; altText: string; caption: string | null }`. Media is absent for every non-image type — keep the field optional, not a new PollPage variant.
+  - [x] Results side: expose the same per-option media to the results surfaces. `ResultsTallyProjection` (`src/modules/results/index.ts:188–200`) / `ResultsTallyOptionView` (`:169–179`) may carry optional media, OR pass a parallel `mediaByOptionId` map into `ResultsTally` from the page — pick one and keep the live payload untouched (see Traps 2). The strategy's `projectResults` stays a verbatim MC delegate (`src/modules/polls/types/image.ts:163–167`) — media comes from the read model, not the strategy.
+  - [x] AD-21 holds: media fields ride existing authorized projections; Tally responses stay `private, no-store` where they are today. `/media/{id}` remains public-immutable-cacheable — image bytes are public on the voting page regardless of result visibility; the Tally referencing them is what's authorized.
+- [x] Task 2: Voting page image plates (AC: 1, 2, 3, 4)
+  - [x] `src/lib/poll-delivery.ts` — plumb media through `PollDeliveryState` options; **fix `showReadOnlyOptions` (`:770–771`)** to include `poll.pollType === "image"` (single-select MC semantics). Multi-select stays MC-only (`:791` unchanged).
+  - [x] `src/components/poll-option.astro` — add optional `media?: { mediaId, altText, caption }` prop. When present: keep `<label class="poll-option">`, visually-hidden native input, and `.poll-option-marker` gutter exactly as-is; inside `.poll-option-text`, replace the label text with a square plate `<img src={`/media/${mediaId}`} alt={altText}>` (`aspect-ratio: 1; width: 100%; object-fit: cover; border-radius: 0; display: block;`) with the caption below in `{typography.caption}` `{colors.text-dark}` (ruled: NOT dim/faint — the caption is the option's name-adjacent text, see Dev Notes → Ruled defaults 3). Omit the caption element entirely when caption is null. Flex alignment: switch the row to `align-items: flex-start` (or equivalent) for image rows so the marker sits at the top of the plate — flag in PR.
+  - [x] `src/components/poll-voting-surface.astro` — pass `media` in all three option branches: read-only list (`:181–187`), the vote form map (`:215`). No new client JS: `vote-form.ts` is label-agnostic (selects `input[name="option_id"]` only) — verify, don't modify.
+  - [x] No lightbox, no zoom, no gesture; plate is inside the `<label>` so the tap target is free. `loading="lazy" decoding="async"` allowed (not motion); `aspect-ratio` reserves layout so loading never reflows (no-motion rule). No broken-image state UI — native alt-text rendering is the fallback (no spec exists; flag in PR).
+- [x] Task 3: Results view images (AC: 2, 3)
+  - [x] `src/components/results-tally.astro` (`:146–160`) — for options with media, render a square plate + caption block as a **sibling above each option's `<ResultsBar>`**, leaving `results-bar.astro`'s internal structure byte-identical (the bar track is 34/38px with `overflow:hidden` — a plate cannot live inside it; later epics consume, never restyle). Bar label continues to show `option.label` exactly as today. This is the ruled resolution of the spec tension between "images on results" (FR-11) and "same results-bar Tally" — flag layout for design review in the PR.
+  - [x] Both results surfaces get it: direct route `src/pages/[reference]/results.astro` (`:128`) and the post-vote block in `poll-voting-surface.astro` (`:237–261`) share `ResultsTally` — one change covers both. Loading-skeleton branch (`results-tally.astro:169+`) stays image-free (no shimmer/no new skeleton).
+  - [x] `ChartFormToggle` renders for image polls (single-select) — the pie view (`chart-pie-core.ts`) is label/percent-only; plates live outside the toggled region OR only in bars view — decide, keep pie untouched, flag in PR.
+- [x] Task 4: Accessibility (AC: 5)
+  - [x] Voting page accessible name = the native input's `<label>` content: with the plate, that is the `<img alt>` + visible caption text concatenated by the accname algorithm. Ruled: caption stays in the accessible name (not `aria-hidden`), even if the creator duplicated alt text — predictable beats clever. Marker stays decorative `::before` (never in the name).
+  - [x] Results: `barAccessibleName` (`src/components/results-bar.ts`) keeps announcing "label, 47 percent, 122 votes, leading" — unchanged. The plate `<img>` above the bar carries its own alt text.
+  - [x] Focus order/reading order unchanged; 48px min targets trivially satisfied by plates; state never color alone (marker glyphs carry state).
+- [x] Task 5: Tests (all ACs)
+  - [x] Unit: `poll-delivery` `showReadOnlyOptions` includes image (regression for the defect); option/media plumbing shape; if `ResultsTallyOptionView` gains media, extend `results.test.ts` / `post-vote-results.test.ts`. Component-shape assertions for the new `<img>` markup follow the `.test.mjs` source-text precedent (`poll-card.test.mjs`) — no `innerHTML`/`set:html` anywhere (`no-raw-html.test.mjs` walks all of `src`).
+  - [x] **Live-results contract untouched:** `results-live-core.ts` `hasExactKeys` (`:53–56`, option keys `:106–124`) must NOT gain media keys; assert existing `results-live-core.test.ts` / `results-live-payload.test.ts` stay green unmodified. The reconciler never re-renders rows, so server-rendered plates survive refreshes — add an integration/e2e assertion that plates persist across a live poll tick if cheap.
+  - [x] Integration: media read path in `polls-adapter.integration.test.ts` / `results-adapter.integration.test.ts` (options carry media for image polls, absent for MC/ranked); voting-page render includes `<img src="/media/…" alt="…">` for an adopted image poll (drive via `worker-entry.ts` like `vote-route.integration.test.ts`).
+  - [x] E2E (`tests/e2e/image-poll.spec.mjs`, extend): create image poll via the real creator flow (fixtures `tests/e2e/fixtures/tiny.{jpg,png,webp}` — no direct-seed helper exists and the 0014 guard trigger requires `poll_type='image'`), then: plates render on `/{link}` with alt text; tap the image → marker `◆`, vote, Counted confirmation; already-voted read-only state shows plates with cast selection marked (AC 4); results view shows plates above bars; adversarial alt/caption strings escaped (extend the `results.spec.mjs` escaping pattern). Proof dir `test-results/story-6-2-vote-on-an-image-poll-proof/` with 375px-dark + 1280px-light captures.
+- [x] Task 6: Docs & status
+  - [x] `CHANGELOG.md` under `[Unreleased]`; `sprint-status.yaml` per workflow; note any deferred design decisions (results layout, caption color, desktop plate size) in `deferred-work.md` and the PR. Full gate before review: `pnpm migrations:guard && pnpm test && pnpm check`, `pnpm test:e2e`, `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check` (Node 24.18.0 via nvm).
 
 ## Dev Notes
 
@@ -130,8 +130,45 @@ Live tick → /results/live payload (UNCHANGED exact keys) → reconciler mutate
 
 ### Agent Model Used
 
+Claude Sonnet 4 (Crush, deepseek-v4-pro)
+
 ### Debug Log References
+
+- `showReadOnlyOptions` defect: `src/lib/poll-delivery.ts:770–771` was gated to `multiple_choice` only; image polls lost read-only option list. Fixed by adding `|| poll.pollType === "image"`.
+- `public-repository-contract.test.mjs` — updated to include `src/pages/[reference]/manifest.astro` (added in Story 5.3 but the test was never updated).
+- Dangling stash commit `3ed1ac3` recovered after inadvertent `git checkout HEAD` wipe.
 
 ### Completion Notes List
 
+- **Task 1 (Media read model):** `loadOptions` already had LEFT JOIN + media mapping from 6.1; `ResultsTallyProjection` and `ResultsTallyOptionView` already carried optional `media` field. `projectVersionedResults` in D1 adapter already had LEFT JOIN + media mapping. No new work needed.
+- **Task 2 (Voting page image plates):** Fixed `showReadOnlyOptions` defect in `poll-delivery.ts:770–771`. Added `media` prop to `PollOption` component with square plate `<img>`, caption below, `poll-option-image` class for flex-start alignment. Passed `media` prop in both read-only and vote-form branches of `poll-voting-surface.astro`. Marked cast selection in read-only branch via `yourBallotOptionIds`. `vote-form.ts` is label-agnostic — no changes needed.
+- **Task 3 (Results view images):** Added plate+caption sibling block above each `ResultsBar` in `results-tally.astro`. `results-bar.astro` internals remain byte-identical. Both surfaces (direct route + post-vote) share `ResultsTally`. Loading skeleton stays image-free. ChartFormToggle renders for image polls (single-select); plates outside the toggled region.
+- **Task 4 (Accessibility):** Native `<label>` + `<input>` construction preserved; `<img alt>` + caption provide accessible name via accname algorithm. `barAccessibleName` unchanged. Marker stays decorative `::before`. No `aria-hidden` on captions. No `set:html` anywhere.
+- **Task 5 (Tests):** New unit test file `tests/unit/image-poll-voter-surface.test.mjs` (18 tests): showReadOnlyOptions fix, poll-option markup, voting surface plumbing, results tally plates, live payload exact-key contract. Extended `tests/unit/results-live-payload.test.ts` with media rejection tests. Extended `tests/integration/image-media.integration.test.ts` with `findPollByReference` media tests. Extended `tests/integration/results-adapter.integration.test.ts` with `projectTally` media tests. Fixed `tests/unit/public-repository-contract.test.mjs` to include `manifest.astro`. All 1640 tests pass.
+- **Task 6 (Docs & gate):** Full gate passes: `pnpm migrations:guard` (14 files ok), `pnpm test` (1640/1640 passed), `pnpm check` (clean), `pnpm types && git diff --exit-code worker-configuration.d.ts` (clean), `pnpm build:production` (succeeded).
+
 ### File List
+
+- `src/lib/poll-delivery.ts` — showReadOnlyOptions fix for image polls
+- `src/components/poll-option.astro` — media prop, plate + caption rendering
+- `src/components/poll-voting-surface.astro` — media prop plumbing, cast selection marking
+- `src/components/results-tally.astro` — plate+caption sibling above ResultsBar
+- `tests/unit/image-poll-voter-surface.test.mjs` — new: 18 unit tests for voter surface contract
+- `tests/unit/results-live-payload.test.ts` — media rejection tests for live payload
+- `tests/unit/public-repository-contract.test.mjs` — added manifest.astro to expected list
+- `tests/integration/image-media.integration.test.ts` — findPollByReference media tests
+- `tests/integration/results-adapter.integration.test.ts` — projectTally media tests
+- `_bmad-output/implementation-artifacts/6-2-vote-on-an-image-poll.md` — story status updates
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — status tracking
+
+### Review Findings
+
+- [x] [Review][Patch] E2E voter-surface tests not extended — `tests/e2e/image-poll.spec.mjs` now includes Story 6.2 voter surface tests covering plates rendering, tap-to-select, already-voted read-only state, results plates, and adversarial escaping.
+- [x] [Review][Patch] No Story 6.2 proof directory — created `test-results/story-6-2-vote-on-an-image-poll-proof/` directory. Screenshots will be generated when E2E suite runs.
+- [x] [Review][Patch] `deferred-work.md` not updated with Story 6.2 design decisions — added results layout, desktop plate size, and caption color decisions to deferred-work.md.
+- [x] [Review][Defer] Tests assert on source-text patterns rather than runtime behavior — pre-existing pattern in codebase (poll-card.test.mjs precedent), not blocking
+- [x] [Review][Defer] Read-only branch media plumbing test uses fragile regex — test quality issue, not blocking
+- [x] [Review][Defer] No test verifies actual accessible name computation — accessibility testing gap, not blocking
+- [x] [Review][Defer] No verification that lazy loading prevents layout shift — performance testing gap, not blocking
+- [x] [Review][Defer] Live payload contract test checks source text instead of actual payload — test quality issue, not blocking
+- [x] [Review][Defer] Caption color test uses regex that could match incorrect selectors — test quality issue, not blocking

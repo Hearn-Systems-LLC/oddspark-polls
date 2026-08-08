@@ -565,7 +565,8 @@ origin: Epic 6 retrospective follow-up / PR #39-#40 cycle, 2026-08-08
 location: playwright.config.mjs (workers: 1), .github/workflows/deploy.yml
 severity: medium
 reason: Every PR and main deploy pays a ~23-minute Tests → build job dominated by 181 serially-run Playwright tests. workers: 1 is deliberate (SQLite contention determinism), so speeding up means sharding across CI jobs with isolated D1 databases and ports per shard, not flipping the workers flag. Candidate: --shard=1/4..4/4 across parallel jobs; splitting unit/integration from E2E gives faster feedback but does not shorten the critical path.
-status: open
+status: done 2026-08-08
+resolution: E2E moved out of test-and-build into a parallel e2e job with a 4-way shard matrix (--shard=N/4; 52/50/35/45 split of 182 tests); each shard is a separate runner with its own dev server and local-persistence D1, so workers: 1 stays. Deploy jobs now need both legs, and non-main concurrency runs cancel-in-progress while main pushes still queue.
 
 ### DW-116: Turnstile human check rejected a vote on polls.oddspark.dev
 origin: Justin report with screenshot, 2026-08-08
@@ -579,4 +580,11 @@ origin: PR #39 merge cycle, 2026-08-08
 location: GitHub repo rules (refs/heads/main)
 severity: medium
 reason: gh pr merge succeeds while CI is still running — "merge when green" is convention, not enforcement. The main-push deploy gate re-runs the full suite before anything ships, so production is protected, but a red main blocks deploys and violates the repo's own "no commit lands on main with failing tests" rule. Fix is repo settings: add the Tests → build check as a required status check on main (and enable auto-merge while there).
+status: open
+
+### DW-118: comment-list-moderation "stale live tab" e2e test is timing-flaky
+origin: DW-115 sharded-e2e verification runs, 2026-08-08
+location: tests/e2e/comment-list-moderation.spec.mjs:198 (ownerPage.reload())
+severity: low
+reason: Locally, `pnpm test:e2e --shard=1/4` failed this test 3/3 runs with `page.reload: net::ERR_ABORTED; maybe frame was detached` — the test's explicit reload races the page's own live-poll whole-page reload after the Administrator deletion at line 190. The same test passed standalone, in the full unsharded suite (182/182), and shard 1 passed with `--retries=1` (CI parity, playwright.config.ts sets retries: 1 under CI), so the deploy gate absorbs it. Likely fix: wait for the owner page's live state to settle (or disarm its poller) before the explicit reload instead of relying on timing.
 status: open

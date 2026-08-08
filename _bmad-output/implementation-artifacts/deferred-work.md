@@ -559,3 +559,24 @@ resolution: resolved by sweep bundle dw-epic-4-followup-reviews
 - Results layout: plate + caption as sibling block above each option's bar — needs design review. The UX spine has no Image-Poll Tally spec and the 34/38px bar cannot hold a plate. This is the minimal reading of "images served on results" + "same results-bar Tally". Flagged for design follow-up.
 - Desktop plate size: full ballot-column width at every breakpoint. If plates feel oversized at lg breakpoint, that's a design-review follow-up, not a grid change. Spec text says "full column width" and layout forbids breakpoint-only components.
 - Caption color: `{colors.text-dark}` via `{typography.caption}` — ruled NOT dim/faint because caption is option-identifying information. Parallel: results-bar count rejected dim for the same reason. DESIGN.md bans faint on must-read text. Accepted as-is, flag for design confirmation.
+
+### DW-115: Deploy gate E2E leg runs fully serial (~15-18 min of a ~23-min job)
+origin: Epic 6 retrospective follow-up / PR #39-#40 cycle, 2026-08-08
+location: playwright.config.mjs (workers: 1), .github/workflows/deploy.yml
+severity: medium
+reason: Every PR and main deploy pays a ~23-minute Tests → build job dominated by 181 serially-run Playwright tests. workers: 1 is deliberate (SQLite contention determinism), so speeding up means sharding across CI jobs with isolated D1 databases and ports per shard, not flipping the workers flag. Candidate: --shard=1/4..4/4 across parallel jobs; splitting unit/integration from E2E gives faster feedback but does not shorten the critical path.
+status: open
+
+### DW-116: Turnstile human check rejected a vote on polls.oddspark.dev
+origin: Justin report with screenshot, 2026-08-08
+location: production Turnstile widget configuration; src/components/turnstile.astro
+severity: high
+reason: A vote on the production Demo Poll re-rendered with "The human check didn't pass." If reproducible, the most likely cause is the production widget's hostname allowlist not including the custom domain polls.oddspark.dev (AGENTS.md still records the domain as "not bound yet", yet it serves live traffic — the docs and the widget config may both lag reality). Verify: reproduce a vote on the custom domain, check the widget's allowed hostnames in the Cloudflare dashboard, confirm which site key the production Worker serves (TURNSTILE_SITE_KEY var vs the widget actually loaded).
+status: open
+
+### DW-117: main branch protection requires a PR but no status checks
+origin: PR #39 merge cycle, 2026-08-08
+location: GitHub repo rules (refs/heads/main)
+severity: medium
+reason: gh pr merge succeeds while CI is still running — "merge when green" is convention, not enforcement. The main-push deploy gate re-runs the full suite before anything ships, so production is protected, but a red main blocks deploys and violates the repo's own "no commit lands on main with failing tests" rule. Fix is repo settings: add the Tests → build check as a required status check on main (and enable auto-merge while there).
+status: open

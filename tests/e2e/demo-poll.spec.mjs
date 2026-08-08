@@ -232,4 +232,61 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
     await pendingContext.close();
     await ownerContext.close();
   });
+
+  test("lays out the rejected-vote (demo-first) landing in two columns at desktop width", async ({
+    page,
+  }) => {
+    // A vote POST without a Turnstile token re-renders with the
+    // captcha_failed outcome, flipping the landing to demo-first order — the
+    // state where the Demo Poll must keep the wide track so its internal
+    // vote-form/Tally split does not crush the Tally column.
+    await page.goto("/");
+    await page.locator("label.poll-option", { hasText: "Friday" }).click();
+    await page.getByRole("button", { name: "VOTE" }).click();
+    await expect(
+      page.locator('[data-outcome-code="captcha_failed"]'),
+    ).toBeVisible({ timeout: 20_000 });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await setDemoMode(page, "light");
+    const geometry = await page.evaluate(() => {
+      const rectOf = (selector) => {
+        const node = document.querySelector(selector);
+        if (!(node instanceof HTMLElement)) {
+          throw new Error(`Missing element: ${selector}`);
+        }
+        return node.getBoundingClientRect();
+      };
+      return {
+        demo: rectOf("[data-demo-region]"),
+        intro: rectOf(".landing-intro-region"),
+        tally: rectOf("[data-demo-region] .tally-region"),
+        horizontalOverflow:
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      };
+    });
+    expect(geometry.horizontalOverflow).toBeLessThanOrEqual(0);
+    expect(geometry.demo.left).toBeLessThan(geometry.intro.left);
+    expect(geometry.demo.width).toBeGreaterThan(geometry.intro.width);
+    expect(geometry.tally.width).toBeGreaterThanOrEqual(300);
+    await page.screenshot({
+      path: `${PROOF_DIR}/vote-rejected-1280-light.png`,
+      fullPage: true,
+    });
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await setDemoMode(page, "dark");
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBeLessThanOrEqual(0);
+    await page.screenshot({
+      path: `${PROOF_DIR}/vote-rejected-375-dark.png`,
+      fullPage: true,
+    });
+  });
 });

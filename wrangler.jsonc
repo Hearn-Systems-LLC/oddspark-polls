@@ -1,9 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // Local default (wrangler dev). Staging/production selected at build time via CLOUDFLARE_ENV.
-  // main is the Astro Cloudflare adapter entry (adapter emits dist worker on build).
+  // Application wrapper preserves Astro fetch and adds scheduled Media cleanup.
   "name": "oddspark-polls-local",
-  "main": "@astrojs/cloudflare/entrypoints/server",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-07-29",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -12,6 +12,9 @@
   },
   "observability": {
     "enabled": true
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
   },
   // Astro sessions KV (adapter default binding name SESSION)
   "kv_namespaces": [
@@ -68,6 +71,9 @@
   "env": {
     "staging": {
       "name": "oddspark-polls-staging",
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
       "vars": {
         "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT53x0EwB5qscd",
         "DEMO_POLL_REFERENCE": "demo"
@@ -118,6 +124,9 @@
     },
     "production": {
       "name": "oddspark-polls",
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
       "vars": {
         "TURNSTILE_SITE_KEY": "0x4AAAAAAEFT6LCSXHS59uSr",
         "DEMO_POLL_REFERENCE": "demo"

@@ -8,6 +8,7 @@ import {
   createMediaPersistence,
   createPollPersistence,
 } from "../../src/adapters/d1/index";
+import { createR2MediaStorage } from "../../src/adapters/r2/index";
 import { replaceOptionImage } from "../../src/modules/media/index";
 import {
   deletePoll,
@@ -221,5 +222,26 @@ describe("Media cleanup D1 persistence", () => {
     });
     expect((await testEnv.DB.prepare("SELECT id FROM cleanup_outbox").all()).results).toEqual([]);
     expect((await testEnv.DB.prepare("SELECT r2_key FROM media_object WHERE option_id = 'option-a'").first<{ r2_key: string }>())?.r2_key).toBe("tmp/poll-cleanup/media-a");
+  });
+});
+
+describe("Media cleanup R2 adapter", () => {
+  it("lists only tmp keys with upload timestamps and pagination metadata", async () => {
+    await testEnv.MEDIA.put("tmp/adapter/a", "a");
+    await testEnv.MEDIA.put("adopted/adapter/b", "b");
+    const storage = createR2MediaStorage(testEnv.MEDIA);
+
+    const page = await storage.listTempKeys(undefined, 100);
+
+    expect(page.objects).toHaveLength(1);
+    expect(page.objects[0]?.key).toBe("tmp/adapter/a");
+    expect(page.objects[0]?.uploadedAtMs).toEqual(expect.any(Number));
+    expect(page.truncated).toBe(false);
+  });
+
+  it("treats deleting a missing key as an idempotent success", async () => {
+    const storage = createR2MediaStorage(testEnv.MEDIA);
+
+    await expect(storage.deleteObject("tmp/adapter/missing")).resolves.toBeUndefined();
   });
 });

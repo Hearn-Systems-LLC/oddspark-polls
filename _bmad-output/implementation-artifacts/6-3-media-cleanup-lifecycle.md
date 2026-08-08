@@ -33,13 +33,13 @@ so that storage never accumulates orphans and deleting a Poll truly removes it.
   - [x] `src/adapters/d1/index.ts` — extend `deletePollForOwner` (`:924–939`): it is already a one-statement `db.batch`; prepend `INSERT INTO cleanup_outbox (id, r2_key, enqueued_at_ms) SELECT …, m.r2_key, ?now FROM media_object m WHERE m.poll_id = ?1 AND EXISTS (SELECT 1 FROM poll p WHERE p.id = ?1 AND p.owner_user_id = ?2)` before the `DELETE FROM poll`. The owner guard inside the SELECT is mandatory — the batch must not enqueue keys when the delete will match zero rows. UUID generation for outbox ids: SQLite can't make UUIDs — either pre-read `media_object` rows in the adapter and build bound INSERTs (acceptable: read-then-batch, the batch itself stays atomic and the EXISTS guard still applies) or use `lower(hex(randomblob(16)))`; pick one and test it.
   - [x] `deletePoll` command (`src/modules/polls/poll-lifecycle.ts:572–612`) currently has **no `nowMs` dep** — add it (pattern: `closePoll`/`updatePollDefinition` at `:236,:339,:423`) and thread from the route (`src/pages/creator/polls/[pollId].astro:286–309`, which already computes `nowMs` at `:265`).
   - [x] Replacement enqueue (AC 4, bounded): add a Media-owned `replaceOptionImage` persistence op — one `db.batch`: `UPDATE media_object SET r2_key/content_type/size_bytes/alt_text/caption/... WHERE option_id = ?` + `INSERT INTO cleanup_outbox` for the superseded key, guarded by the FR-5 vote lock (`NOT EXISTS (SELECT 1 FROM vote v WHERE v.poll_id = …)`, same guard style as `updateDefinitionForOwner:822–863`). Do NOT extend `updatePollDefinition` to image polls (its delete-and-recreate option strategy would cascade `media_object` away — Traps 4).
-- [ ] Task 3: Worker entry with `scheduled()` + cron (AC: 2, 3)
-  - [ ] **Structural change, flag in PR:** `wrangler.jsonc:6` `main` points at `@astrojs/cloudflare/entrypoints/server`, which default-exports `{ fetch }` only, and adapter 14.1.6 has no `workerEntryPoint` option. Create `src/worker.ts` (or similar) that re-exports the adapter's fetch and adds `scheduled`: `import server from "@astrojs/cloudflare/entrypoints/server"; export default { fetch: server.fetch, scheduled }`. Point `main` at it. **Verify `pnpm build:production` + `wrangler deploy --dry-run` still bundle correctly and `astro dev` still works before writing any drain logic** — if the adapter fights the wrapper, research the adapter-documented alternative first and record the decision.
-  - [ ] Add `"triggers": { "crons": ["*/15 * * * *"] }` in wrangler.jsonc — **top-level AND repeated in `env.staging` + `env.production`** (triggers are non-inheritable; the file already repeats every binding per env, lines 62–176). Then `pnpm types && git diff --exit-code worker-configuration.d.ts` (regenerate if the Env shape changes).
-  - [ ] `scheduled()` body: wire the Media module's `drainCleanupOutbox` then `sweepTempKeys` with real deps (D1 `env.DB`, R2 `env.MEDIA`, `() => Date.now()`); catch and log per-row failures (row remains, `attempts` incremented), never throw the whole handler for one bad key. Bound each run (e.g. drain ≤100 rows, list ≤1000 temp keys per tick) — the next tick continues; log what was skipped.
-- [ ] Task 4: R2 adapter (AC: 2, 3)
-  - [ ] Populate `src/adapters/r2/index.ts` (currently `export {}` placeholder): thin wrapper implementing the Media module's R2 port — `deleteObject(key)` (R2 `delete` of a missing key already succeeds silently — that IS the idempotency), `listTempKeys(cursor?)` using `env.MEDIA.list({ prefix: "tmp/", cursor })` with pagination (`truncated`/`cursor`), exposing each object's `uploaded` timestamp for the 24h check. First-ever use of `list`/`delete` in this repo — no precedent to copy.
-  - [ ] Sweeper algorithm (in the module, not the adapter): list `tmp/` page → filter `uploaded < now − 24h` → **query D1 `SELECT r2_key FROM media_object WHERE r2_key IN (…)` and drop every hit** → delete the remainder. Chunk the `IN` list (D1 bound-parameter limits; ≤100 per query is safe). Never delete on a D1 query failure — fail closed, skip the page.
+- [x] Task 3: Worker entry with `scheduled()` + cron (AC: 2, 3)
+  - [x] **Structural change, flag in PR:** `wrangler.jsonc:6` `main` points at `@astrojs/cloudflare/entrypoints/server`, which default-exports `{ fetch }` only, and adapter 14.1.6 has no `workerEntryPoint` option. Create `src/worker.ts` (or similar) that re-exports the adapter's fetch and adds `scheduled`: `import server from "@astrojs/cloudflare/entrypoints/server"; export default { fetch: server.fetch, scheduled }`. Point `main` at it. **Verify `pnpm build:production` + `wrangler deploy --dry-run` still bundle correctly and `astro dev` still works before writing any drain logic** — if the adapter fights the wrapper, research the adapter-documented alternative first and record the decision.
+  - [x] Add `"triggers": { "crons": ["*/15 * * * *"] }` in wrangler.jsonc — **top-level AND repeated in `env.staging` + `env.production`** (triggers are non-inheritable; the file already repeats every binding per env, lines 62–176). Then `pnpm types && git diff --exit-code worker-configuration.d.ts` (regenerate if the Env shape changes).
+  - [x] `scheduled()` body: wire the Media module's `drainCleanupOutbox` then `sweepTempKeys` with real deps (D1 `env.DB`, R2 `env.MEDIA`, `() => Date.now()`); catch and log per-row failures (row remains, `attempts` incremented), never throw the whole handler for one bad key. Bound each run (e.g. drain ≤100 rows, list ≤1000 temp keys per tick) — the next tick continues; log what was skipped.
+- [x] Task 4: R2 adapter (AC: 2, 3)
+  - [x] Populate `src/adapters/r2/index.ts` (currently `export {}` placeholder): thin wrapper implementing the Media module's R2 port — `deleteObject(key)` (R2 `delete` of a missing key already succeeds silently — that IS the idempotency), `listTempKeys(cursor?)` using `env.MEDIA.list({ prefix: "tmp/", cursor })` with pagination (`truncated`/`cursor`), exposing each object's `uploaded` timestamp for the 24h check. First-ever use of `list`/`delete` in this repo — no precedent to copy.
+  - [x] Sweeper algorithm (in the module, not the adapter): list `tmp/` page → filter `uploaded < now − 24h` → **query D1 `SELECT r2_key FROM media_object WHERE r2_key IN (…)` and drop every hit** → delete the remainder. Chunk the `IN` list (D1 bound-parameter limits; ≤100 per query is safe). Never delete on a D1 query failure — fail closed, skip the page.
 - [ ] Task 5: Optional low-latency drain via `waitUntil` (AC: 2)
   - [ ] After a successful poll delete, the route may kick the same idempotent drain via `Astro.locals.cfContext?.waitUntil(...)` — follow the injection pattern from `src/adapters/cache/discovery.ts:30,:236` + `src/pages/discover.astro:47–51` (waitUntil is a dep, tests collect promises into an array; never reach for `ctx` directly). This is optional per AD-12 ("may") — if it complicates the route, skip it and note the omission; the cron owns correctness.
 - [ ] Task 6: Tests (all ACs)
@@ -146,6 +146,8 @@ GPT-5 Codex
 
 - Task 1: Added forward-only migration 0015 with a self-contained, no-FK cleanup outbox and enqueue-time index; regenerated the 15-entry migration manifest. Verified with schema integration tests, `pnpm migrations:guard`, and the full 1,642-test suite.
 - Task 2: Added the provider-free Media cleanup/replacement policy and D1 persistence. Image deletion now captures keys with an owner guard before the same-batch hard delete; replacement is image/owner/vote guarded and atomically enqueues the superseded key. Added clock threading, policy unit tests, and D1 integration coverage; `pnpm check` and all 1,651 tests pass.
+- Task 3: Repointed Wrangler to an Astro-preserving Worker wrapper, configured the 15-minute cron in local/staging/production, and wired bounded drain then fail-closed sweep with structured failure logging. Verified the wrapper before cleanup logic via production build, Wrangler dry-run, and Astro dev `/api/health` 200; the root returned the expected local-data 503 because the demo Poll was not seeded.
+- Task 4: Replaced the R2 placeholder with thin delete/list pagination ports and exercised real Miniflare R2 behavior, including delete-of-missing-key success. The domain sweeper owns age filtering, 100-key D1 chunks, adopted-key exclusion, and fail-closed behavior. Final bundle contains the scheduled export; all 1,658 tests pass.
 
 ### File List
 
@@ -154,11 +156,19 @@ GPT-5 Codex
 - db/migrations/0015_cleanup_outbox.sql
 - db/migrations.manifest.json
 - src/adapters/d1/index.ts
+- src/adapters/r2/index.ts
 - src/modules/media/index.ts
 - src/modules/polls/poll-lifecycle.ts
 - src/pages/creator/polls/[pollId].astro
+- src/worker.ts
+- tests/integration/astro-cloudflare-config-shim.ts
 - tests/integration/media-cleanup.integration.test.ts
 - tests/integration/poll-lifecycle-adapter.integration.test.ts
+- tests/integration/worker-scheduled.integration.test.ts
 - tests/integration/media-cleanup-schema.integration.test.ts
 - tests/unit/media-cleanup.test.ts
 - tests/unit/poll-lifecycle.test.ts
+- tests/unit/worker-entry-contract.test.mjs
+- vitest.integration.config.ts
+- worker-configuration.d.ts
+- wrangler.jsonc

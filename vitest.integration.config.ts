@@ -70,6 +70,13 @@ export default getViteConfig({
           import.meta.url,
         ).pathname,
       },
+      {
+        find: "virtual:astro-cloudflare:config",
+        replacement: new URL(
+          "./tests/integration/astro-cloudflare-config-shim.ts",
+          import.meta.url,
+        ).pathname,
+      },
       // workerd prohibits runtime WebAssembly compilation; Astro's test
       // container only needs the lexer's equivalent JavaScript build.
       { find: /^es-module-lexer$/, replacement: "es-module-lexer/js" },

@@ -46,6 +46,31 @@ describe("drainCleanupOutbox", () => {
     expect(incrementAttempts).toHaveBeenCalledWith("cleanup-3");
     expect(result).toEqual({ selected: 100, deleted: 99, failed: 1 });
   });
+
+  it("reports the phase that actually failed for each system", async () => {
+    const rows = [cleanupRow(1), cleanupRow(2)];
+    const deleteObject = vi.fn(async (key: string) => {
+      if (key.endsWith("media-1")) throw new Error("R2 unavailable");
+    });
+    const deleteRow = vi.fn(async (id: string) => {
+      if (id === "cleanup-2") throw new Error("D1 unavailable");
+    });
+    const incrementAttempts = vi.fn(async () => undefined);
+    const failures: string[] = [];
+
+    const result = await drainCleanupOutbox({
+      outbox: { listDue: async () => rows, deleteRow, incrementAttempts },
+      objects: { deleteObject },
+      onFailure: (phase) => {
+        failures.push(phase);
+      },
+    });
+
+    expect(failures).toEqual(["delete", "remove_row"]);
+    expect(incrementAttempts).toHaveBeenCalledWith("cleanup-1");
+    expect(incrementAttempts).toHaveBeenCalledWith("cleanup-2");
+    expect(result).toEqual({ selected: 2, deleted: 0, failed: 2 });
+  });
 });
 
 describe("sweepTempKeys", () => {

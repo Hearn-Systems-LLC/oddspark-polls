@@ -50,7 +50,7 @@ export type MediaOwnershipPort = {
 };
 
 export type CleanupFailureReporter = (
-  phase: "delete" | "attempt_increment",
+  phase: "delete" | "remove_row" | "attempt_increment",
   row: CleanupOutboxRow,
   cause: unknown,
 ) => void;
@@ -65,13 +65,19 @@ export async function drainCleanupOutbox(deps: {
   let failed = 0;
 
   for (const row of rows) {
+    // Report the phase that actually failed: "delete" is the R2 object
+    // removal, "remove_row" the D1 outbox-row removal. A row-delete failure
+    // after a successful object delete is retried next tick; the R2 delete
+    // is idempotent, so the replay is safe.
+    let objectDeleted = false;
     try {
       await deps.objects.deleteObject(row.r2Key);
+      objectDeleted = true;
       await deps.outbox.deleteRow(row.id);
       deleted += 1;
     } catch (cause) {
       failed += 1;
-      deps.onFailure?.("delete", row, cause);
+      deps.onFailure?.(objectDeleted ? "remove_row" : "delete", row, cause);
       try {
         await deps.outbox.incrementAttempts(row.id);
       } catch (attemptCause) {

@@ -44,15 +44,40 @@ export const GET: APIRoute = async ({ params, request, locals }) => {
   });
 };
 
-export const HEAD: APIRoute = async (context) => {
-  const response = await GET(context);
-  if (response.status !== 200) {
-    return response;
+export const HEAD: APIRoute = async ({ params, request, locals }) => {
+  const requestContext = locals.requestContext;
+  const principal = requestContext?.principal ?? null;
+  if (!principal) {
+    return new Response(null, { status: 404 });
   }
-  // HEAD must not return a body.
+
+  const mediaId = params.id;
+  if (!mediaId || !isUuidShape(mediaId)) {
+    return new Response(null, { status: 404 });
+  }
+
+  const url = new URL(request.url);
+  const pollId = url.searchParams.get("poll");
+  if (!pollId || !isUuidShape(pollId)) {
+    return new Response(null, { status: 404 });
+  }
+
+  const r2Key = `tmp/${pollId}/${mediaId}`;
+  // HEAD should not fetch the object body — use head() instead of get().
+  const head = await env.MEDIA.head(r2Key);
+  if (!head) {
+    return new Response(null, { status: 404 });
+  }
+
+  const contentType =
+    head.httpMetadata?.contentType ?? "application/octet-stream";
+
   return new Response(null, {
-    status: response.status,
-    headers: response.headers,
+    status: 200,
+    headers: {
+      "content-type": contentType,
+      "cache-control": "private, no-store",
+    },
   });
 };
 

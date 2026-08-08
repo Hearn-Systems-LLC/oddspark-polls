@@ -12,6 +12,12 @@ interface Props {
   readOnly?: boolean;
   disabled?: boolean;
   class?: string;
+  /** Story 6.2 — adopted image plate for Image Poll options. When present,
+   * the plate replaces the label text inside `.poll-option-text`; the
+   * caption renders below the plate in `{typography.caption}` only when
+   * non-null. The native input + marker gutter stay exactly as-is so the
+   * tap target and accessible name algorithm are unchanged. */
+  media?: { mediaId: string; altText: string; caption: string | null };
 }
 
 const {
@@ -25,6 +31,7 @@ const {
   readOnly = false,
   disabled = false,
   class: className = "",
+  media,
 } = Astro.props;
 ---
 
@@ -34,6 +41,7 @@ const {
       class:list={[
         "poll-option",
         "poll-option-readonly",
+        media && "poll-option-image",
         type === "checkbox" && "poll-option-checkbox",
         className,
       ]}
@@ -49,12 +57,29 @@ const {
       ></span>
       <span class="poll-option-text">
         {checked && <span class="visually-hidden">Your vote</span>}
-        <span class="poll-option-label">{label}</span>
-        {description && <span class="poll-option-description">{description}</span>}
+        {media ? (
+          <>
+            <img
+              class="poll-option-plate"
+              src={`/media/${media.mediaId}`}
+              alt={media.altText}
+              loading="lazy"
+              decoding="async"
+            />
+            {media.caption !== null && (
+              <span class="poll-option-caption">{media.caption}</span>
+            )}
+          </>
+        ) : (
+          <>
+            <span class="poll-option-label">{label}</span>
+            {description && <span class="poll-option-description">{description}</span>}
+          </>
+        )}
       </span>
     </div>
   ) : (
-    <label class:list={["poll-option", className]} for={id}>
+    <label class:list={["poll-option", media && "poll-option-image", className]} for={id}>
       <input
         class="visually-hidden poll-option-input"
         type={type}
@@ -66,8 +91,25 @@ const {
       />
       <span class="poll-option-marker" aria-hidden="true"></span>
       <span class="poll-option-text">
-        <span class="poll-option-label">{label}</span>
-        {description && <span class="poll-option-description">{description}</span>}
+        {media ? (
+          <>
+            <img
+              class="poll-option-plate"
+              src={`/media/${media.mediaId}`}
+              alt={media.altText}
+              loading="lazy"
+              decoding="async"
+            />
+            {media.caption !== null && (
+              <span class="poll-option-caption">{media.caption}</span>
+            )}
+          </>
+        ) : (
+          <>
+            <span class="poll-option-label">{label}</span>
+            {description && <span class="poll-option-description">{description}</span>}
+          </>
+        )}
       </span>
     </label>
   )
@@ -87,6 +129,12 @@ const {
     font-size: var(--type-body-size);
     line-height: var(--type-body-lh);
     cursor: pointer;
+  }
+
+  /* Story 6.2: image plates sit at full column width and the marker needs
+     to align with the top of the plate rather than the vertical center. */
+  .poll-option-image {
+    align-items: flex-start;
   }
 
   .poll-option:hover {
@@ -110,6 +158,26 @@ const {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+  }
+
+  /* Story 6.2: square plate at full column width. aspect-ratio reserves
+     layout before the image loads (no reflow, no motion); object-fit
+     crops to the square without needing stored dimensions. */
+  .poll-option-plate {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 0;
+  }
+
+  /* Story 6.2: caption is option-identifying text (parallel to the label),
+     so it uses the body-dark color rather than dim/faint. DESIGN.md bans
+     faint on must-read text. */
+  .poll-option-caption {
+    color: var(--color-text);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
   }
 
   .poll-option-description {

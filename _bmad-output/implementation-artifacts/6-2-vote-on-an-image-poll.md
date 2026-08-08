@@ -1,6 +1,10 @@
+---
+baseline_commit: 69f54f974847102248d1db51a5b5e3e9dd781df4
+---
+
 # Story 6.2: Vote on an Image Poll
 
-Status: ready-for-dev
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Ultimate context engine analysis completed 2026-08-07 — comprehensive developer guide created from epics (Story 6.2 ~L1037, FR-11 L31), PRD §4.4/§5, architecture spine (AD-2/3/6/7/12/21/24), DESIGN.md/EXPERIENCE.md image-plate + results-bar specs, Story 6.1 implementation + review findings, and a full codebase audit of the voting/results/live surfaces. No new libraries. -->

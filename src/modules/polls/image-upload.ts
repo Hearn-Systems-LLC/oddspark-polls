@@ -3,15 +3,23 @@
 
 export const IMAGE_UPLOAD_CAPS = {
   maxBytes: 5 * 1024 * 1024,
+  maxAltTextLength: 500,
+  maxCaptionLength: 200,
 } as const;
 
 export const IMAGE_UPLOAD_COPY = {
   uploadFailed: (filename: string): string =>
-    `${filename} didn't upload. The rest of the form is intact \u2014 try that one again.`,
+    `${filename || "The image"} didn't upload. The rest of the form is intact \u2014 try that one again.`,
+  preservedRefLost:
+    "A previously uploaded image is no longer available. Try uploading it again.",
   formatInvalid:
     "Only JPEG, PNG, and WebP images are accepted.",
   tooLarge:
     "That image is too large. Keep it under 5 MB.",
+  altTextTooLong:
+    `Alt text is too long. Keep it to ${IMAGE_UPLOAD_CAPS.maxAltTextLength} characters.`,
+  captionTooLong:
+    `Caption is too long. Keep it to ${IMAGE_UPLOAD_CAPS.maxCaptionLength} characters.`,
 } as const;
 
 export type ImageValidationResult =

@@ -5,12 +5,13 @@
 
 import { env } from "cloudflare:workers";
 import type { APIRoute } from "astro";
+import { isUuidShape } from "../../modules/polls/index";
 
 export const prerender = false;
 
 const handleRequest: APIRoute = async ({ params }) => {
   const mediaId = params.id;
-  if (!mediaId) {
+  if (!mediaId || !isUuidShape(mediaId)) {
     return new Response(null, { status: 404 });
   }
 
@@ -36,22 +37,44 @@ const handleRequest: APIRoute = async ({ params }) => {
     status: 200,
     headers: {
       "content-type": row.content_type,
-      etag: `"${object.httpEtag ?? object.key}"`,
+      "x-content-type-options": "nosniff",
+      etag: object.httpEtag ?? `"${object.key}"`,
       "cache-control": "public, max-age=31536000, immutable",
     },
   });
 };
 
 export const GET = handleRequest;
-export const HEAD: APIRoute = async (context) => {
-  const response = await handleRequest(context);
-  if (response.status !== 200) {
-    return response;
+export const HEAD: APIRoute = async ({ params }) => {
+  const mediaId = params.id;
+  if (!mediaId || !isUuidShape(mediaId)) {
+    return new Response(null, { status: 404 });
   }
-  // HEAD must not return a body.
+
+  const row = await env.DB.prepare(
+    "SELECT r2_key, content_type FROM media_object WHERE id = ?1",
+  )
+    .bind(mediaId)
+    .first<{ r2_key: string; content_type: string }>();
+
+  if (!row) {
+    return new Response(null, { status: 404 });
+  }
+
+  // HEAD should not fetch the object body — use head() instead of get().
+  const head = await env.MEDIA.head(row.r2_key);
+  if (!head) {
+    return new Response(null, { status: 404 });
+  }
+
   return new Response(null, {
-    status: response.status,
-    headers: response.headers,
+    status: 200,
+    headers: {
+      "content-type": row.content_type,
+      "x-content-type-options": "nosniff",
+      etag: head.httpEtag ?? `"${head.key}"`,
+      "cache-control": "public, max-age=31536000, immutable",
+    },
   });
 };
 

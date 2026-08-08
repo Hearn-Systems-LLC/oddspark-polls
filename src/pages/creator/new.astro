@@ -31,6 +31,7 @@ import {
 } from "../../shared/domain/index";
 import {
   validateImageUpload,
+  IMAGE_UPLOAD_CAPS,
   IMAGE_UPLOAD_COPY,
 } from "../../modules/polls/image-upload";
 import { imageStrategy, IMAGE_DEFINITION_COPY } from "../../modules/polls/types/image";
@@ -170,7 +171,7 @@ if (Astro.request.method === "POST") {
         if (colonIdx > 0) {
           const idx = parseInt(entry.slice(0, colonIdx), 10);
           const mediaId = entry.slice(colonIdx + 1);
-          if (!Number.isNaN(idx) && mediaId.length > 0) {
+          if (!Number.isNaN(idx) && isUuidShape(mediaId)) {
             preservedRefs.push({ index: idx, mediaId });
           }
         }
@@ -310,32 +311,40 @@ if (Astro.request.method === "POST") {
           caption: extractedCaptions[index]?.trim() ?? "",
         };
       } catch {
-        fieldErrors[`media[${index}]`] = IMAGE_UPLOAD_COPY.uploadFailed(file.name);
+        fieldErrors[`media[${index}]`] = IMAGE_UPLOAD_COPY.uploadFailed(file.name || "The image");
       }
     }
 
     // Restore preserved refs from hidden inputs (previous successful uploads).
-    for (const { index, mediaId } of extractedPreservedRefs) {
-      if (tempMedia[index]) continue; // New upload already filled this slot.
-      // Validate the ref exists in R2 and is scoped to this poll_id. The
-      // mediaId IS the UUID portion of the key; reconstruct to verify scope.
-      const candidateKey = `tmp/${formPollId}/${mediaId}`;
-      try {
-        const head = await env.MEDIA.head(candidateKey);
-        if (head) {
-          tempMedia[index] = {
-            mediaId,
-            r2Key: candidateKey,
-            contentType: head.httpMetadata?.contentType ?? "application/octet-stream",
-            sizeBytes: head.size,
-            altText: extractedAltTexts[index]?.trim() ?? "",
-            caption: extractedCaptions[index]?.trim() ?? "",
+    // Batch the R2 head calls so they run in parallel (not N sequential round-trips).
+    const refsToRestore = extractedPreservedRefs.filter(
+      ({ index }) => !tempMedia[index],
+    );
+    if (refsToRestore.length > 0) {
+      const headResults = await Promise.all(
+        refsToRestore.map(async ({ index, mediaId }) => {
+          const candidateKey = `tmp/${formPollId}/${mediaId}`;
+          try {
+            const head = await env.MEDIA.head(candidateKey);
+            return { index, mediaId, candidateKey, head, error: null };
+          } catch (err) {
+            return { index, mediaId, candidateKey, head: null, error: err };
+          }
+        }),
+      );
+      for (const result of headResults) {
+        if (result.head) {
+          tempMedia[result.index] = {
+            mediaId: result.mediaId,
+            r2Key: result.candidateKey,
+            contentType: result.head.httpMetadata?.contentType ?? "application/octet-stream",
+            sizeBytes: result.head.size,
+            altText: extractedAltTexts[result.index]?.trim() ?? "",
+            caption: extractedCaptions[result.index]?.trim() ?? "",
           };
         } else {
-          fieldErrors[`media[${index}]`] = IMAGE_UPLOAD_COPY.uploadFailed("A previously uploaded image");
+          fieldErrors[`media[${result.index}]`] = IMAGE_UPLOAD_COPY.preservedRefLost;
         }
-      } catch {
-        fieldErrors[`media[${index}]`] = IMAGE_UPLOAD_COPY.uploadFailed("A previously uploaded image");
       }
     }
 
@@ -349,8 +358,15 @@ if (Astro.request.method === "POST") {
           if (!fieldErrors[`media[${rawIndex}]`]) {
             fieldErrors[`media[${rawIndex}]`] = IMAGE_DEFINITION_COPY.mediaIdMissing;
           }
-        } else if (entry.altText.trim().length === 0) {
-          fieldErrors[`media[${rawIndex}].altText`] = IMAGE_DEFINITION_COPY.altTextMissing;
+        } else {
+          if (entry.altText.trim().length === 0) {
+            fieldErrors[`media[${rawIndex}].altText`] = IMAGE_DEFINITION_COPY.altTextMissing;
+          } else if (entry.altText.trim().length > IMAGE_UPLOAD_CAPS.maxAltTextLength) {
+            fieldErrors[`media[${rawIndex}].altText`] = IMAGE_UPLOAD_COPY.altTextTooLong;
+          }
+          if (entry.caption.trim().length > IMAGE_UPLOAD_CAPS.maxCaptionLength) {
+            fieldErrors[`media[${rawIndex}].caption`] = IMAGE_UPLOAD_COPY.captionTooLong;
+          }
         }
       }
     }

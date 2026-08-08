@@ -414,3 +414,54 @@ describe("createResultsPersistence live projection", () => {
     ).rejects.toThrow("Malformed representation version");
   });
 });
+
+describe("projectTally returns media for image polls (Story 6.2)", () => {
+  it("includes media on each option when present", async () => {
+    const IMAGE_POLL_ID = "results-img-poll" as PollId;
+    const IMG_OPT_A = "results-img-opt-a" as PollOptionId;
+    const IMG_OPT_B = "results-img-opt-b" as PollOptionId;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        "INSERT INTO poll (id, owner_user_id, poll_type, question, result_visibility, session_checks_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms, representation_version, created_at_ms, updated_at_ms) VALUES (?1, 'results-it-owner', 'image', 'Pick a photo', 'live', 1, 0, NULL, NULL, NULL, NULL, 1, 0, 0)",
+      ).bind(IMAGE_POLL_ID),
+      testEnv.DB.prepare(
+        "INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (?1, ?2, 'Photo A', 0, 0)",
+      ).bind(IMG_OPT_A, IMAGE_POLL_ID),
+      testEnv.DB.prepare(
+        "INSERT INTO poll_option (id, poll_id, label, position, created_at_ms) VALUES (?1, ?2, 'Photo B', 1, 0)",
+      ).bind(IMG_OPT_B, IMAGE_POLL_ID),
+      testEnv.DB.prepare(
+        "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES ('results-img-ref', ?1, 'generated', 1, 0)",
+      ).bind(IMAGE_POLL_ID),
+      testEnv.DB.prepare(
+        "INSERT INTO media_object (id, poll_id, option_id, r2_key, content_type, size_bytes, alt_text, caption, created_at_ms) VALUES ('media-a', ?1, ?2, 'tmp/media-a', 'image/jpeg', 1024, 'Alt A', 'Caption A', 0)",
+      ).bind(IMAGE_POLL_ID, IMG_OPT_A),
+      testEnv.DB.prepare(
+        "INSERT INTO media_object (id, poll_id, option_id, r2_key, content_type, size_bytes, alt_text, caption, created_at_ms) VALUES ('media-b', ?1, ?2, 'tmp/media-b', 'image/png', 2048, 'Alt B', NULL, 0)",
+      ).bind(IMAGE_POLL_ID, IMG_OPT_B),
+    ]);
+
+    const persistence = createResultsPersistence(testEnv.DB);
+    const projection = await persistence.projectTally(IMAGE_POLL_ID);
+    expect(projection.options).toHaveLength(2);
+    expect(projection.options[0].media).toEqual({
+      mediaId: "media-a",
+      altText: "Alt A",
+      caption: "Caption A",
+    });
+    expect(projection.options[1].media).toEqual({
+      mediaId: "media-b",
+      altText: "Alt B",
+      caption: null,
+    });
+  });
+
+  it("omits media field for non-image polls", async () => {
+    const persistence = createResultsPersistence(testEnv.DB);
+    await insertPoll();
+    const projection = await persistence.projectTally(POLL_ID);
+    for (const option of projection.options) {
+      expect(option.media).toBeUndefined();
+    }
+  });
+});

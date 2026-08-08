@@ -84,7 +84,11 @@ const handle: APIRoute = async ({ request, params, locals }) => {
           comments: view.comments,
         }
       : {
+          // Media plates are a server-rendered concern (Story 6.2): strip
+          // them so the payload keeps its exact-key contract and the
+          // reconciler only ever mutates numbers inside existing bars.
           ...view.tally,
+          options: view.tally.options.map(({ media: _media, ...option }) => option),
           status: view.status,
           comments: view.comments,
         };

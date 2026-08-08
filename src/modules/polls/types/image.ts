@@ -11,6 +11,7 @@ import {
   type Result,
 } from "../../../shared/application/index";
 import type { PollOptionId } from "../../../shared/domain/index";
+import { IMAGE_UPLOAD_CAPS, IMAGE_UPLOAD_COPY } from "../image-upload";
 import {
   multipleChoiceStrategy,
   type MultipleChoiceCreationFacts,
@@ -115,6 +116,21 @@ export const imageStrategy: ImageStrategy = {
           },
         };
       }
+      if (trimmedAlt.length > IMAGE_UPLOAD_CAPS.maxAltTextLength) {
+        return {
+          ok: false,
+          error: {
+            code: "poll_validation_failed",
+            message: "Fix the fields below.",
+            fieldErrors: {
+              [`media[${i}].altText`]: IMAGE_UPLOAD_COPY.altTextTooLong,
+            },
+            reasonCodes: {
+              [`media[${i}].altText`]: "alt_text_too_long",
+            },
+          },
+        };
+      }
       const trimmedId = entry.mediaId.trim();
       if (trimmedId.length === 0) {
         return {
@@ -132,6 +148,21 @@ export const imageStrategy: ImageStrategy = {
         };
       }
       const trimmedCaption = entry.caption.trim();
+      if (trimmedCaption.length > IMAGE_UPLOAD_CAPS.maxCaptionLength) {
+        return {
+          ok: false,
+          error: {
+            code: "poll_validation_failed",
+            message: "Fix the fields below.",
+            fieldErrors: {
+              [`media[${i}].caption`]: IMAGE_UPLOAD_COPY.captionTooLong,
+            },
+            reasonCodes: {
+              [`media[${i}].caption`]: "caption_too_long",
+            },
+          },
+        };
+      }
       mediaFacts.push({
         mediaId: trimmedId,
         altText: trimmedAlt,

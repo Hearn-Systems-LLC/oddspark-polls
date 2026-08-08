@@ -24,6 +24,7 @@ production on every merge, but no version has been cut or tagged.
   failed file.
 - Public media serving at `/media/{id}`. Adopted images are served with
   immutable caching headers; unadopted or unknown IDs return 404.
+- Per-round IRV table on Ranked-Choice Results. Every Round shows per-option
   counts, elimination statements (fewest votes, safe batch, backward tie-break),
   and exhausted-Ballot counts. Eliminated options are struck through from their
   elimination Round onward; the winner's final-Round cell is gold; unresolved

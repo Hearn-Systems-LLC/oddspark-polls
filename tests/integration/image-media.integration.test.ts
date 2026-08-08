@@ -186,10 +186,24 @@ describe("media_object schema constraints (0014)", () => {
       .first<{ cnt: number }>();
     expect(remaining?.cnt).toBe(0);
   });
+
+  it("cascades deletion when the parent poll_option is deleted", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(imagePollRows());
+
+    await testEnv.DB.prepare("DELETE FROM poll_option WHERE id = ?1").bind("opt-1").run();
+
+    const remaining = await testEnv.DB.prepare(
+      "SELECT COUNT(*) AS cnt FROM media_object WHERE option_id = ?1",
+    )
+      .bind("opt-1")
+      .first<{ cnt: number }>();
+    expect(remaining?.cnt).toBe(0);
+  });
 });
 
 describe("insertPoll batch atomicity with media", () => {
-  it("leaves no media rows when the batch fails on duplicate poll id", async () => {
+  it("does not add media rows when the batch fails on duplicate poll id", async () => {
     const persistence = createPollPersistence(testEnv.DB);
     await persistence.insertPoll(imagePollRows());
 
@@ -197,12 +211,78 @@ describe("insertPoll batch atomicity with media", () => {
     await expect(persistence.insertPoll(imagePollRows())).rejects.toThrow();
 
     // The original media rows should still exist (from the first successful insert),
-    // but no NEW media rows should have been added.
+    // but no NEW media rows should have been added by the failed replay.
     const count = await testEnv.DB.prepare(
       "SELECT COUNT(*) AS cnt FROM media_object WHERE poll_id = ?1",
     )
       .bind(POLL_1)
       .first<{ cnt: number }>();
     expect(count?.cnt).toBe(2);
+  });
+});
+
+describe("findPollByReference returns media for image polls (Story 6.2)", () => {
+  it("includes media on each option when present", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    await persistence.insertPoll(imagePollRows());
+
+    const page = await persistence.findPollByReference("img-ref-abc");
+    expect(page).not.toBeNull();
+    expect(page!.pollType).toBe("image");
+    expect(page!.options).toHaveLength(2);
+    expect(page!.options[0].media).toEqual({
+      mediaId: "media-1",
+      altText: "A sunset over the ocean",
+      caption: "Sunset",
+    });
+    expect(page!.options[1].media).toEqual({
+      mediaId: "media-2",
+      altText: "A mountain landscape",
+      caption: null,
+    });
+  });
+
+  it("omits media field for non-image polls", async () => {
+    const persistence = createPollPersistence(testEnv.DB);
+    const mcRows: PollPersistenceRows = {
+      poll: {
+        id: "poll-mc-1" as PollId,
+        ownerUserId: OWNER_1,
+        pollType: "multiple_choice",
+        question: "MC poll?",
+        description: null,
+        resultVisibility: "live",
+        discoveryState: "unlisted",
+        sessionChecksEnabled: true,
+        ipChecksEnabled: false,
+        voterCodesEnabled: false,
+        captchaEnabled: false,
+        vpnBlockingEnabled: false,
+        commentsEnabled: false,
+        multiSelectEnabled: false,
+        minSelections: null,
+        maxSelections: null,
+        deadlineMs: null,
+        representationVersion: 1,
+        createdAtMs: NOW,
+      },
+      options: [
+        { id: "opt-mc-1" as PollOptionId, pollId: "poll-mc-1" as PollId, label: "A", position: 0, createdAtMs: NOW },
+        { id: "opt-mc-2" as PollOptionId, pollId: "poll-mc-1" as PollId, label: "B", position: 1, createdAtMs: NOW },
+      ],
+      reference: {
+        reference: "mc-ref-1",
+        pollId: "poll-mc-1" as PollId,
+        kind: "generated",
+        createdAtMs: NOW,
+      },
+    };
+    await persistence.insertPoll(mcRows);
+
+    const page = await persistence.findPollByReference("mc-ref-1");
+    expect(page).not.toBeNull();
+    expect(page!.pollType).toBe("multiple_choice");
+    expect(page!.options[0].media).toBeUndefined();
+    expect(page!.options[1].media).toBeUndefined();
   });
 });

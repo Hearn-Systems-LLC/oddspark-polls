@@ -581,3 +581,10 @@ location: GitHub repo rules (refs/heads/main)
 severity: medium
 reason: gh pr merge succeeds while CI is still running — "merge when green" is convention, not enforcement. The main-push deploy gate re-runs the full suite before anything ships, so production is protected, but a red main blocks deploys and violates the repo's own "no commit lands on main with failing tests" rule. Fix is repo settings: add the Tests → build check as a required status check on main (and enable auto-merge while there).
 status: open
+
+### DW-118: comment-list-moderation "stale live tab" e2e test is timing-flaky
+origin: DW-115 sharded-e2e verification runs, 2026-08-08
+location: tests/e2e/comment-list-moderation.spec.mjs:198 (ownerPage.reload())
+severity: low
+reason: Locally, `pnpm test:e2e --shard=1/4` failed this test 3/3 runs with `page.reload: net::ERR_ABORTED; maybe frame was detached` — the test's explicit reload races the page's own live-poll whole-page reload after the Administrator deletion at line 190. The same test passed standalone, in the full unsharded suite (182/182), and shard 1 passed with `--retries=1` (CI parity, playwright.config.ts sets retries: 1 under CI), so the deploy gate absorbs it. Likely fix: wait for the owner page's live state to settle (or disarm its poller) before the explicit reload instead of relying on timing.
+status: open

@@ -109,33 +109,34 @@ export async function sweepTempKeys(deps: {
 
   const cutoffMs = deps.nowMs() - TEMP_KEY_MAX_AGE_MS;
   const eligible = listed.filter(({ uploadedAtMs }) => uploadedAtMs < cutoffMs);
-  const adopted = new Set<string>();
 
-  // Complete every D1 ownership check before deleting anything. A rejection
-  // therefore fails the run closed and cannot partially delete a page.
-  for (let offset = 0; offset < eligible.length; offset += ADOPTION_QUERY_CHUNK_SIZE) {
-    const keys = eligible
-      .slice(offset, offset + ADOPTION_QUERY_CHUNK_SIZE)
-      .map(({ key }) => key);
-    const chunk = await deps.ownership.findAdoptedKeys(keys);
-    for (const key of chunk) adopted.add(key);
-  }
-
+  // Re-check adoption per chunk immediately before that chunk's deletes, so
+  // a key adopted while an earlier chunk was being deleted is never
+  // destroyed. A check rejection still fails closed: the run aborts before
+  // touching that chunk and every later one.
+  let adopted = 0;
   let deleted = 0;
-  for (const object of eligible) {
-    if (adopted.has(object.key)) continue;
-    try {
-      await deps.objects.deleteObject(object.key);
-      deleted += 1;
-    } catch (cause) {
-      deps.onDeleteFailure?.(object, cause);
+  for (let offset = 0; offset < eligible.length; offset += ADOPTION_QUERY_CHUNK_SIZE) {
+    const chunkObjects = eligible.slice(offset, offset + ADOPTION_QUERY_CHUNK_SIZE);
+    const chunkAdopted = await deps.ownership.findAdoptedKeys(
+      chunkObjects.map(({ key }) => key),
+    );
+    adopted += chunkAdopted.size;
+    for (const object of chunkObjects) {
+      if (chunkAdopted.has(object.key)) continue;
+      try {
+        await deps.objects.deleteObject(object.key);
+        deleted += 1;
+      } catch (cause) {
+        deps.onDeleteFailure?.(object, cause);
+      }
     }
   }
 
   return {
     listed: listed.length,
     eligible: eligible.length,
-    adopted: adopted.size,
+    adopted,
     deleted,
   };
 }

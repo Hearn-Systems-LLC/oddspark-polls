@@ -98,6 +98,36 @@ describe("sweepTempKeys", () => {
     expect(result).toEqual({ listed: 3, eligible: 2, adopted: 1, deleted: 1 });
   });
 
+  it("re-checks adoption per chunk so a key adopted mid-sweep survives", async () => {
+    // 101 old keys force two chunks; the second chunk's key is adopted only
+    // after the first chunk's check ran (i.e. between chunks).
+    const objects = Array.from({ length: 101 }, (_, index) => ({
+      key: `tmp/poll/orphan-${index}`,
+      uploadedAtMs: 0,
+    }));
+    const deleteObject = vi.fn(async () => undefined);
+    let checks = 0;
+
+    const result = await sweepTempKeys({
+      objects: {
+        listTempKeys: async () => ({ objects, truncated: false }),
+        deleteObject,
+      },
+      ownership: {
+        findAdoptedKeys: async (keys) => {
+          checks += 1;
+          return checks === 1 ? new Set() : new Set(keys);
+        },
+      },
+      nowMs: () => NOW,
+    });
+
+    expect(checks).toBe(2);
+    expect(deleteObject).toHaveBeenCalledTimes(100);
+    expect(deleteObject).not.toHaveBeenCalledWith("tmp/poll/orphan-100");
+    expect(result).toEqual({ listed: 101, eligible: 101, adopted: 1, deleted: 100 });
+  });
+
   it("fails closed when the D1 adoption check fails", async () => {
     const deleteObject = vi.fn(async () => undefined);
 

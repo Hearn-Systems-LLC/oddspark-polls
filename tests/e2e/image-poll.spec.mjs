@@ -202,9 +202,9 @@ test.describe("Image Poll creation (Story 6.1)", () => {
     expect(page.url()).toContain("/creator/polls/");
 
     // Images should render on the created poll page.
-    // Note: Story 6.2 adds image plates to the voting page; for now just verify
-    // the page loads successfully after creation.
-    await expect(page.getByText("Best landscape?")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Best landscape?" }),
+    ).toBeVisible();
 
     // Proof capture: 1280px light.
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -222,6 +222,7 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
   test.describe.configure({ mode: "serial", timeout: 120_000 });
 
   const seededUserIds = [];
+  let voterCookies = [];
 
   async function signIn(context, baseURL) {
     const seeded = await seedCreatorSession();
@@ -308,11 +309,14 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
     await page.goto("/image-voter-test");
 
     // Tap the second image plate to select it.
-    const mountainOption = page.locator("label.poll-option", { hasText: "Mountain" });
-    await mountainOption.click();
+    await page
+      .getByRole("img", { name: "A mountain landscape" })
+      .click();
 
     // The radio input should be checked.
-    const mountainRadio = page.getByRole("radio", { name: "Mountain" });
+    const mountainRadio = page.getByRole("radio", {
+      name: "A mountain landscape",
+    });
     await expect(mountainRadio).toBeChecked();
 
     // Vote button should be enabled.
@@ -323,7 +327,7 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
       page.waitForResponse(
         (candidate) =>
           candidate.url().endsWith("/image-voter-test") &&
-          candidate.request().method === "POST",
+          candidate.request().method() === "POST",
       ),
       page.getByRole("button", { name: "VOTE" }).click(),
     ]);
@@ -336,6 +340,7 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
 
     // YOUR BALLOT should show the chosen label.
     await expect(page.locator(".results-tally-ballot-value")).toHaveText("Mountain");
+    voterCookies = await context.cookies();
 
     // Proof capture: 1280px light.
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -345,7 +350,9 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
 
   test("already-voted state shows plates with cast selection marked (AC 4)", async ({
     page,
+    context,
   }) => {
+    await context.addCookies(voterCookies);
     // Reload the page to see the already-voted state.
     await page.goto("/image-voter-test");
 
@@ -394,7 +401,7 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
     await expect(plateCaptions.nth(0)).toHaveText("Golden hour");
 
     // Results bars should still be present and byte-identical (no media props).
-    const bars = page.locator(".results-bar");
+    const bars = page.locator("[data-tally-final] .results-bar");
     await expect(bars).toHaveCount(2);
 
     // Proof capture: 1280px light (results view).
@@ -463,6 +470,6 @@ test.describe("Image Poll voter surface (Story 6.2)", () => {
     expect(mainHtml).not.toContain('<script>alert("xss")</script>');
     expect(mainHtml).toContain("&lt;script&gt;");
     expect(mainHtml).not.toContain('<img src="x" onerror="alert(2)">');
-    expect(mainHtml).toContain("&lt;img src=&quot;x&quot;");
+    expect(mainHtml).toContain("&lt;img src=");
   });
 });

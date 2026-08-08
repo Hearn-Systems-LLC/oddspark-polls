@@ -174,8 +174,17 @@ test.describe("Story 5.1 Ranked-Choice creation and Ballot", () => {
     );
     await captureBoth(page, "compacted-partial");
 
-    await page.getByRole("button", { name: "VOTE" }).click();
+    const [voteResponse] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().endsWith(`/${reference}`) &&
+          candidate.request().method() === "POST",
+      ),
+      page.getByRole("button", { name: "VOTE" }).click(),
+    ]);
+    expect(voteResponse.status()).toBe(303);
     await expect(page).toHaveURL(`/${reference}`);
+    await expect(page).toHaveTitle("Counted — Where should we eat in order?");
     await expect(page.locator("[data-vote-outcome]")).toContainText("Counted.");
     await expect(page.locator("[data-vote-outcome]")).toContainText(
       "Results are live, updating as they arrive.",

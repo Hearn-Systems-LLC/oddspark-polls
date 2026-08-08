@@ -139,6 +139,8 @@ export type PostVoteResultsView =
       kind: "ranked_visible";
       status: PollStatus;
       ranked: RankedTallyView;
+      comments: CommentView[];
+      ownerComments: OwnerCommentView[] | null;
       validator: string;
     }
   | ({
@@ -276,6 +278,8 @@ const postVoteResultsFrom = (view: ResultsView): PostVoteResultsView => {
         kind: "ranked_visible",
         status: view.status,
         ranked: view.ranked,
+        comments: view.comments,
+        ownerComments: view.ownerComments,
         validator: view.validator,
       };
     case "after_close_hidden":

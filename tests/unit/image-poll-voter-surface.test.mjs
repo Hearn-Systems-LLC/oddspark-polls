@@ -120,7 +120,7 @@ describe("Story 6.2 image-poll voter surface contract", () => {
 
     it("marks the cast selection in the read-only branch via yourBallotOptionIds", () => {
       expect(votingSurfaceSource).toContain(
-        "checked={yourBallotOptionIds.includes(option.id)}",
+        'checked={poll.pollType === "image" && yourBallotOptionIds.includes(option.id)}',
       );
     });
   });

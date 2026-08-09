@@ -305,6 +305,9 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
       Math.max(geometry.demo.bottom, geometry.intro.bottom) - 1,
     );
     expect(geometry.nav.left).toBeGreaterThan(geometry.byline.right);
+    // Guard against a vacuous every(): the nav must actually carry the
+    // three Landing links before any row-alignment claim means anything.
+    expect(geometry.navLinkTops).toHaveLength(3);
     expect(
       geometry.navLinkTops.every(
         (top) => Math.abs(top - geometry.navLinkTops[0]) <= 2,
@@ -344,6 +347,7 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
         linkTops: linkRects.map((rect) => rect.top),
       };
     });
+    expect(mobileFooter.linkTops).toHaveLength(3);
     expect(mobileFooter.bylineTop).toBeLessThan(mobileFooter.linkTops[0]);
     expect(
       mobileFooter.linkTops.every(

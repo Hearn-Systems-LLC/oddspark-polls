@@ -144,6 +144,9 @@ async function expectLandingGeometry(page, { twoColumn = false } = {}) {
       buildRect: rectOf(build),
       demoRect: rectOf(demo),
       primaryHeight: primary.getBoundingClientRect().height,
+      shellContentRight:
+        shell.getBoundingClientRect().right -
+        Number.parseFloat(shellStyle.paddingRight),
       shellContentWidth:
         shell.getBoundingClientRect().width -
         Number.parseFloat(shellStyle.paddingLeft) -
@@ -185,6 +188,11 @@ async function expectLandingGeometry(page, { twoColumn = false } = {}) {
       geometry.statementRect.left + 1,
     );
     expect(geometry.navRect.left).toBeGreaterThan(geometry.bylineRect.right);
+    // "Links at the right" (AC #1): the nav's right edge is the shell
+    // content box's right edge, not just somewhere right of the byline.
+    expect(
+      Math.abs(geometry.navRect.right - geometry.shellContentRight),
+    ).toBeLessThanOrEqual(1);
     const navTops = geometry.navLinkRects.map((rect) => rect.top);
     expect(navTops.every((top) => Math.abs(top - navTops[0]) <= 2)).toBe(true);
     const navLefts = geometry.navLinkRects.map((rect) => rect.left);
@@ -408,5 +416,168 @@ test.describe("Landing page", () => {
       fullPage: true,
     });
     assertClean();
+  });
+
+  test("keeps the footer overflow-free through the 640–1023px mid band", async ({
+    page,
+  }) => {
+    const assertClean = watchPage(page);
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.setViewportSize({ width: 800, height: 900 });
+    await page.goto("/");
+
+    const mid = await page.evaluate(() => {
+      const element = (selector) => {
+        const match = document.querySelector(selector);
+        if (!(match instanceof HTMLElement)) {
+          throw new Error(`Missing landing element: ${selector}`);
+        }
+        return match;
+      };
+      const byline = element('footer a[href="https://hearn.systems"]')
+        .getBoundingClientRect();
+      const nav = element('footer nav[aria-label="Landing"]')
+        .getBoundingClientRect();
+      const linkRects = [
+        ...document.querySelectorAll('footer nav[aria-label="Landing"] a'),
+      ].map((node) => node.getBoundingClientRect());
+      return {
+        byline: { top: byline.top, left: byline.left, right: byline.right },
+        horizontalOverflow:
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+        linkLefts: linkRects.map((rect) => rect.left),
+        linkTops: linkRects.map((rect) => rect.top),
+        nav: { top: nav.top, left: nav.left, right: nav.right },
+      };
+    });
+
+    // Mid-band defined behavior (verified by rendering): the nav wraps as
+    // one unit to a second line, left-aligned beneath the byline, its three
+    // links still on a single row — nothing overlaps, nothing overflows.
+    expect(mid.horizontalOverflow).toBeLessThanOrEqual(0);
+    expect(mid.linkTops).toHaveLength(3);
+    expect(mid.byline.top).toBeLessThan(mid.nav.top);
+    expect(Math.abs(mid.nav.left - mid.byline.left)).toBeLessThanOrEqual(1);
+    expect(
+      mid.linkTops.every((top) => Math.abs(top - mid.linkTops[0]) <= 2),
+    ).toBe(true);
+    expect(
+      mid.linkLefts.every(
+        (left, index) => index === 0 || left > mid.linkLefts[index - 1],
+      ),
+    ).toBe(true);
+    assertClean();
+  });
+
+  test("renders the footer below the 503 demo-unavailable state", async ({
+    page,
+  }) => {
+    const consoleErrors = [];
+    const failedRequests = [];
+    page.on("console", (message) => {
+      // The document itself answering 503 is the variant under test, not an
+      // error — only other console errors count.
+      if (
+        message.type() === "error" &&
+        !/status of 503/u.test(message.text())
+      ) {
+        consoleErrors.push(message.text());
+      }
+    });
+    page.on("pageerror", (error) => consoleErrors.push(error.message));
+    page.on("requestfailed", (request) => {
+      failedRequests.push(
+        `${request.failure()?.errorText ?? "request failed"} ${request.url()}`,
+      );
+    });
+
+    // Force the demo-unavailable variant: no poll behind the demo reference,
+    // so the landing answers 503 and renders the unavailable state.
+    const demoPollId = d1Query(
+      sql`SELECT poll_id FROM poll_reference WHERE reference = 'demo' LIMIT 1`,
+    )[0]?.poll_id;
+    assertUuid(demoPollId);
+    deletePoll(demoPollId);
+
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const response = await page.goto("/");
+    expect(response?.status()).toBe(503);
+    await expect(
+      page.getByRole("heading", { name: "DEMO UNAVAILABLE" }),
+    ).toBeVisible();
+
+    const byline = page.getByRole("link", { name: "built by Hearn." });
+    const nav = page.getByRole("navigation", { name: "Landing" });
+    const navLinks = nav.getByRole("link");
+    await expect(byline).toHaveAttribute("href", "https://hearn.systems");
+    await expect(byline).toHaveAttribute("rel", "noopener");
+    await expect(navLinks).toHaveCount(3);
+    await expect(navLinks.nth(0)).toHaveAttribute("href", "/creator/new");
+    await expect(navLinks.nth(1)).toHaveAttribute("href", "/discover");
+    await expect(navLinks.nth(2)).toHaveAttribute("href", REPOSITORY_URL);
+
+    const geometry = await page.evaluate(() => {
+      const element = (selector) => {
+        const match = document.querySelector(selector);
+        if (!(match instanceof HTMLElement)) {
+          throw new Error(`Missing landing element: ${selector}`);
+        }
+        return match;
+      };
+      const shell = element(".site-shell");
+      const shellStyle = getComputedStyle(shell);
+      const footer = element(".site-shell > footer");
+      const unavailable = element(".demo-unavailable");
+      const bylineNode = element('footer a[href="https://hearn.systems"]');
+      const navNode = element('footer nav[aria-label="Landing"]');
+      const linkTops = [...navNode.querySelectorAll("a")].map(
+        (node) => node.getBoundingClientRect().top,
+      );
+      return {
+        bylineRight: bylineNode.getBoundingClientRect().right,
+        footerBorderTop: getComputedStyle(footer).borderTopWidth,
+        footerTop: footer.getBoundingClientRect().top,
+        footerWidth: footer.getBoundingClientRect().width,
+        horizontalOverflow:
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+        linkTops,
+        navLeft: navNode.getBoundingClientRect().left,
+        shellContentRight:
+          shell.getBoundingClientRect().right -
+          Number.parseFloat(shellStyle.paddingRight),
+        shellContentWidth:
+          shell.getBoundingClientRect().width -
+          Number.parseFloat(shellStyle.paddingLeft) -
+          Number.parseFloat(shellStyle.paddingRight),
+        unavailableBottom: unavailable.getBoundingClientRect().bottom,
+      };
+    });
+    // The footer is page chrome below the 503 state: full shell content
+    // width, one top hairline, byline and links on one row (AC #1, D5).
+    expect(geometry.horizontalOverflow).toBeLessThanOrEqual(0);
+    expect(geometry.footerWidth).toBeGreaterThanOrEqual(
+      geometry.shellContentWidth - 1,
+    );
+    expect(geometry.footerBorderTop).toBe("1px");
+    expect(geometry.footerTop).toBeGreaterThanOrEqual(
+      geometry.unavailableBottom - 1,
+    );
+    expect(geometry.navLeft).toBeGreaterThan(geometry.bylineRight);
+    expect(geometry.linkTops).toHaveLength(3);
+    expect(
+      geometry.linkTops.every(
+        (top) => Math.abs(top - geometry.linkTops[0]) <= 2,
+      ),
+    ).toBe(true);
+
+    await page.screenshot({
+      path: "test-results/story-3-7-landing-footer-proof/demo-unavailable-1280-light.png",
+      fullPage: true,
+    });
+    expect(consoleErrors).toEqual([]);
+    expect(failedRequests).toEqual([]);
   });
 });

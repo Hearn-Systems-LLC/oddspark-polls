@@ -7,7 +7,7 @@ epic: "3 — Public Face: Discovery, Landing & Demo"
 
 # Story 3.7: Landing Footer
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -172,6 +172,7 @@ GPT-5.3-Codex
 - `_bmad-output/implementation-artifacts/deferred-work.md`
 - `_bmad-output/implementation-artifacts/3-7-landing-footer.md`
 - `test-results/story-3-7-landing-footer-proof/landing-1280-light.png` (NEW)
+- `test-results/story-3-7-landing-footer-proof/demo-unavailable-1280-light.png` (NEW)
 - `test-results/story-3-7-landing-footer-proof/landing-375-dark.png` (NEW)
 - `test-results/story-3-7-landing-footer-proof/demo-first-1280-light.png` (NEW)
 - `test-results/story-3-7-landing-footer-proof/demo-first-375-dark.png` (NEW)
@@ -180,3 +181,17 @@ GPT-5.3-Codex
 
 - 2026-08-09: Created via bmad-create-story from the merged UX landing-footer spines (PR #43), epics.md § Story 3.7, the reviewer-gate resolutions, the merged baseline `c7727c9`, and Story 3.6/PR #39-#41 intelligence; status set to `ready-for-dev`.
 - 2026-08-09: Implemented the landing footer (Tasks 1–4): new `landing-footer.astro` with the verbatim HEARN_MARK byline and Landing nav, retired the orphaned Create/Browse blocks and the trailing repository pointer, updated unit/e2e contracts, captured inspected browser proof for both variants, DW-119 resolved, full local gate green (`pnpm test` 1683/1683; `pnpm test:e2e` 182/182).
+
+- 2026-08-09: Merged via PR #45 and deployed (staging + production smoke green). Adversarial code review (bmad-code-review: Blind Hunter, Edge Case Hunter, Acceptance Auditor — auditor verdict: all five ACs pass, D1–D8 and scope fences hold, SVG byte-identical) triaged to 1 decision-needed, 5 patch, 2 defer, 10 dismissed.
+- 2026-08-09: Applied the 5 review [Patch] findings (test/coverage only, no `src/` changes): 503 demo-unavailable footer e2e + inspected proof PNG, 640–1023px mid-band wrap assertion (verified defined behavior: nav wraps as one unit, left-aligned beneath the byline), vacuous-`every()` length guards in `demo-poll.spec.mjs`, nav right-edge pinned to the shell content right edge at 1280px, and sprint-status `last_updated` normalized to the `-0400` convention.
+
+### Review Findings
+
+- [x] [Review][Decision] Double hairline below 1024px — resolved 2026-08-09 by Justin: **keep both**. The demo region's trailing `::after` rule (`src/pages/index.astro:127`) and the footer's `border-top` are two distinct section separators; the footer's own AC #1 contract (one top hairline) holds. No code change.
+- [x] [Review][Patch] 503 demo-unavailable variant has no footer assertion or browser proof [tests/e2e/landing.spec.mjs] — AC #1/D5 require the footer on the 503 variant; only intro-first and rejected-vote demo-first are covered. Add the e2e assertion and a proof PNG (also makes the CHANGELOG "every landing state" claim fully evidenced).
+- [x] [Review][Patch] The 640–1023px band is untested [tests/e2e/landing.spec.mjs] — geometry runs only at 1280 and 375; at mid widths the footer is a single `space-between` row that may wrap the nav to a flex-start line. Add a ~800px assertion (no horizontal overflow, defined wrap behavior).
+- [x] [Review][Patch] Vacuous `every()` guard in demo-poll footer geometry [tests/e2e/demo-poll.spec.mjs] — assert `navLinkTops` has length 3 before the `every()` checks so a missing-link regression cannot pass vacuously.
+- [x] [Review][Patch] "Links at the right" (AC #1) unasserted [tests/e2e/landing.spec.mjs] — nothing ties the nav to the shell's right content edge at 1280; `space-between` delivers it incidentally today.
+- [x] [Review][Patch] sprint-status timestamp format drift [_bmad-output/implementation-artifacts/sprint-status.yaml] — `last_updated` written as `...Z` while the file's convention is `-0400` offsets; normalize on next touch.
+- [x] [Review][Defer] `:global(.public-repository-link.is-landing)` override reaches into the child component's private class [src/components/landing-footer.astro:30] — deferred: the story's scope fence forbade modifying `public-repository-link.astro`, so the global override was the sanctioned seam; revisit if the repository link component changes (a rename of `is-landing` silently restores the 16px misalignment).
+- [x] [Review][Defer] Story 3.7 demo-first proofs are produced by Story 3.5's `demo-poll.spec.mjs` [tests/e2e/demo-poll.spec.mjs] — deferred: the rejected-vote variant is only reachable from that spec, so the coupling is structural; splitting the 3.5 spec would silently stop producing 3.7 proof artifacts.

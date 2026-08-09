@@ -2,7 +2,7 @@
 name: Oddspark Polls
 description: The oddspark.dev visual identity applied to a polling product — dark-native, monospaced, hairline-ruled, with one gold focal accent and results bars that are the whole point.
 status: final
-updated: 2026-07-29
+updated: 2026-08-09
 sources:
   - /Volumes/fast/Github/oddspark-polls/_bmad-output/planning-artifacts/prds/prd-oddspark-polls-2026-07-28/prd.md
   - /Volumes/fast/Github/oddspark-polls/_bmad-output/planning-artifacts/prds/prd-oddspark-polls-2026-07-28/addendum.md
@@ -507,7 +507,7 @@ An 8px base unit. Mobile margins are `{spacing.margin-mobile}` 20px; desktop ope
 
 - below `{breakpoints.sm}` — one column. Poll question, options, then results stacked below.
 - `{breakpoints.sm}` to below `{breakpoints.lg}` — one column, wider margins; results still below options.
-- `{breakpoints.lg}` and up — two columns wherever a live Tally or a second block earns the width: the post-vote surface (ballot left, live Tally right); any poll surface whose Tally is visible alongside the vote form (form and context left, live Tally right); the standalone Results route (question and context left, Tally right); the landing page (statement and build notes left, Demo Poll right — with the Demo Poll's own vote-form/Tally split inside its column); and the creator surface (Poll list left, selected Poll's detail right). Wide shells cap at `{spacing.measure-wide}` 1280px so ultra-wide windows still buy air, not density. Everything else stays single-column and centered.
+- `{breakpoints.lg}` and up — two columns wherever a live Tally or a second block earns the width: the post-vote surface (ballot left, live Tally right); any poll surface whose Tally is visible alongside the vote form (form and context left, live Tally right); the standalone Results route (question and context left, Tally right); the landing page (statement and build notes left, Demo Poll right — with the Demo Poll's own vote-form/Tally split inside its column — and the `landing-footer` spanning the full shell width below the grid, outside both columns); and the creator surface (Poll list left, selected Poll's detail right). Wide shells cap at `{spacing.measure-wide}` 1280px so ultra-wide windows still buy air, not density. Everything else stays single-column and centered.
 
 `{spacing.section-gap}` 56px separates major blocks and is where a hairline goes if one is needed. Related items sit 8–16px apart. **Whitespace is the grouping mechanism.** If something looks ungrouped, add space before you add a rule, and add a rule before you ever add a box.
 
@@ -634,15 +634,28 @@ A text-labelled `SHARE` button in `button-secondary` metrics — transparent fil
 ### `public-repository-link` — Public repository entry (landing and public Poll footer, Phase 1)
 
 One presentation component owns the repository destination. On the landing
-page it renders the existing `VIEW REPOSITORY` text entry in the build account.
+page it renders inside the `landing-footer` as `VIEW REPOSITORY`, and the
+build-account copy loses its trailing pointer — it ends at "The code is
+public." rather than "see the repository.", because the referent is no longer
+adjacent and the product never describes where anything is on the page
+(`EXPERIENCE.md § Responsive & Platform`).
 On canonical voting and every existing non-404 Results state it renders `VIEW
 THE PUBLIC REPOSITORY` after the Share block, separated by one top hairline and
 `{spacing.10}` / `{spacing.6}` whitespace. The link uses
-`{typography.label-caps}` and `{colors.entropy-dark}`, has a 44px minimum target,
+`{typography.label-caps}` and `{colors.entropy-dark}`, has a 44px minimum target
+on Poll surfaces (48px inside the `landing-footer`, matching its neighbours),
 and takes the standard mode-resolved 2px focus outline at 2px offset. It opens
 in the same tab, contains no icon or brand color, and has no JavaScript or
 hydration behavior. The embedded landing Demo and creator, auth,
 administration, moderation, and not-found surfaces never render the footer.
+
+### `landing-footer` — Landing footer (landing page only, Phase 1)
+
+A full-width band closing the landing page, separated from the content above by a single top hairline at `{spacing.section-gap}` distance, sitting inside the page shell (`{spacing.measure-wide}` at lg) rather than either grid column. The band is a `<footer>` landmark containing the byline and a `<nav aria-label="Landing">` — the byline is attribution, not navigation, and does not belong inside the nav landmark. One row: the Hearn byline at the left edge; `CREATE A POLL`, `DISCOVER POLLS`, and `VIEW REPOSITORY` at the right, in that order `[ASSUMPTION: link order and left/right grouping]`. The three links follow the product's text-link idiom — `{typography.label-caps}` `{colors.entropy-dark}` lifting to `{colors.text-dark}` on hover, 48px targets, the standard focus outline — the same idiom `{components.pagination}` uses for its `NEWER` / `OLDER` controls, so the footer adds no new link style to the system.
+
+The byline is the oddspark.dev footer line verbatim: lowercase `built by` in `{typography.body}` `{colors.dim-dark}` followed by one real space and the **Hearn. wordmark SVG** inline (the asset shipped in oddspark.dev's worker, `role="img"`, `aria-label="Hearn."`, `fill: currentColor`, height `.78em`, baseline-aligned, `{spacing.1}`-scale left margin) — the space keeps the link's computed accessible name "built by Hearn." rather than "built byHearn." `[ASSUMPTION: byline type size — the reference renders it at body copy size]`. The whole byline is one link to `https://hearn.systems` with `rel="noopener"`, opening in the same tab like every other footer entry, with a **44px minimum block target** (the product floor for non-voting controls); on hover the entire line — text and wordmark together — lifts to `{colors.text-dark}`. The wordmark is the only image in the product's chrome and the only external attribution anywhere; it never appears on any other surface.
+
+The footer renders on **every** landing variant — intro-first, outcome-bearing (demo-first), and the 503 `demo-unavailable` state: it is page chrome below `<main>`, not part of the Demo region, so a failed Demo never takes the navigation down with it. Below `{breakpoints.sm}` the row wraps: the byline holds the first line and the three links stack beneath it, left-aligned at 48px targets, in the same order `[ASSUMPTION: mobile stacking order]`. Nothing is hidden and nothing is rearranged beyond the wrap — the widen-don't-rearrange discipline holds.
 
 ### `listing-badge` — Listing state badge (creator surface, Phase 1)
 

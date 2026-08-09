@@ -49,7 +49,7 @@ const REPOSITORY_URL =
 const OPENING_COPY =
   "Oddspark Polls is where a casual question gets an honest answer — multiple-choice, ranked, image, and meeting polls, with vote security and no subscription wall.";
 const BUILD_ACCOUNT_COPY =
-  "Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public — see the repository.";
+  "Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public.";
 
 function watchPage(page) {
   const consoleErrors = [];
@@ -90,9 +90,11 @@ async function expectLandingGeometry(page, { twoColumn = false } = {}) {
     const shell = element(".site-shell");
     const statement = element("[data-landing-statement]");
     const build = element("[data-landing-build-account]");
-    const create = element('[aria-labelledby="landing-create-label"]');
-    const discover = element('[aria-labelledby="landing-discover-label"]');
     const demo = element("[data-demo-region]");
+    const footer = element(".site-shell > footer");
+    const byline = element('footer a[href="https://hearn.systems"]');
+    const nav = element('footer nav[aria-label="Landing"]');
+    const navLinks = [...nav.querySelectorAll("a")];
     const primary = element("button.btn-primary");
     const shellStyle = getComputedStyle(shell);
     const blocks = [...document.querySelectorAll(".landing-block")].map(
@@ -107,23 +109,45 @@ async function expectLandingGeometry(page, { twoColumn = false } = {}) {
     );
     const rectOf = (node) => {
       const rect = node.getBoundingClientRect();
-      return { top: rect.top, left: rect.left };
+      return {
+        top: rect.top,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        height: rect.height,
+      };
     };
 
     return {
       blocks,
+      bylineHeight: byline.getBoundingClientRect().height,
+      bylineRect: rectOf(byline),
+      footerBorderTop: getComputedStyle(footer).borderTopWidth,
+      footerRect: rectOf(footer),
       horizontalOverflow:
         document.documentElement.scrollWidth -
         document.documentElement.clientWidth,
-      order: [statement, build, demo, create, discover].map(
+      introBottom: Math.max(
+        statement.getBoundingClientRect().bottom,
+        build.getBoundingClientRect().bottom,
+        demo.getBoundingClientRect().bottom,
+      ),
+      navLinkHeights: navLinks.map(
+        (node) => node.getBoundingClientRect().height,
+      ),
+      navLinkRects: navLinks.map(rectOf),
+      navRect: rectOf(nav),
+      order: [statement, build, demo].map(
         (node) => node.getBoundingClientRect().top,
       ),
       statementRect: rectOf(statement),
       buildRect: rectOf(build),
-      createRect: rectOf(create),
-      discoverRect: rectOf(discover),
       demoRect: rectOf(demo),
       primaryHeight: primary.getBoundingClientRect().height,
+      shellContentWidth:
+        shell.getBoundingClientRect().width -
+        Number.parseFloat(shellStyle.paddingLeft) -
+        Number.parseFloat(shellStyle.paddingRight),
       shellMaxWidth: Number.parseFloat(shellStyle.maxWidth),
       shellWidth: shell.getBoundingClientRect().width,
     };
@@ -132,27 +156,63 @@ async function expectLandingGeometry(page, { twoColumn = false } = {}) {
   expect(geometry.horizontalOverflow).toBeLessThanOrEqual(0);
   expect(geometry.shellWidth).toBeLessThanOrEqual(geometry.shellMaxWidth + 1);
   expect(geometry.primaryHeight).toBeGreaterThanOrEqual(48);
+
+  // The landing-footer spans the full shell content width below everything
+  // in the grid, separated by a single 1px top hairline (DESIGN.md
+  // §landing-footer).
+  expect(geometry.footerRect.width).toBeGreaterThanOrEqual(
+    geometry.shellContentWidth - 1,
+  );
+  expect(geometry.footerBorderTop).toBe("1px");
+  expect(geometry.footerRect.top).toBeGreaterThanOrEqual(
+    geometry.introBottom - 1,
+  );
+  expect(geometry.bylineHeight).toBeGreaterThanOrEqual(44);
+  for (const height of geometry.navLinkHeights) {
+    expect(height).toBeGreaterThanOrEqual(48);
+  }
+
   if (twoColumn) {
-    // lg silhouette (DESIGN.md §Layout): intro column left, Demo Poll right.
-    // The intro-column blocks keep their vertical stacking; the demo region
-    // sits beside them, starting at the same top row as the statement.
-    const leftColumn = [
-      geometry.statementRect,
-      geometry.buildRect,
-      geometry.createRect,
-      geometry.discoverRect,
-    ];
-    expect(
-      leftColumn.every(
-        (rect, index) => index === 0 || rect.top > leftColumn[index - 1].top,
-      ),
-    ).toBe(true);
+    // lg silhouette (DESIGN.md §Layout): intro column left, Demo Poll right,
+    // footer as one row — byline at the left edge, nav links at the right.
     expect(geometry.demoRect.left).toBeGreaterThan(
       geometry.statementRect.left,
     );
-    expect(Math.abs(geometry.demoRect.top - geometry.statementRect.top)).toBeLessThanOrEqual(2);
+    expect(
+      Math.abs(geometry.demoRect.top - geometry.statementRect.top),
+    ).toBeLessThanOrEqual(2);
+    expect(geometry.bylineRect.left).toBeLessThanOrEqual(
+      geometry.statementRect.left + 1,
+    );
+    expect(geometry.navRect.left).toBeGreaterThan(geometry.bylineRect.right);
+    const navTops = geometry.navLinkRects.map((rect) => rect.top);
+    expect(navTops.every((top) => Math.abs(top - navTops[0]) <= 2)).toBe(true);
+    const navLefts = geometry.navLinkRects.map((rect) => rect.left);
+    expect(
+      navLefts.every(
+        (left, index) => index === 0 || left > navLefts[index - 1],
+      ),
+    ).toBe(true);
   } else {
-    expect(geometry.order.every((top, index, values) => index === 0 || top > values[index - 1])).toBe(true);
+    expect(
+      geometry.order.every(
+        (top, index, values) => index === 0 || top > values[index - 1],
+      ),
+    ).toBe(true);
+    // Below sm the footer row wraps: the byline holds the first line and the
+    // three links stack beneath it, left-aligned, in source order.
+    expect(geometry.bylineRect.top).toBeLessThan(geometry.navLinkRects[0].top);
+    expect(
+      geometry.navLinkRects.every(
+        (rect, index) =>
+          index === 0 || rect.top > geometry.navLinkRects[index - 1].top,
+      ),
+    ).toBe(true);
+    expect(
+      geometry.navLinkRects.every(
+        (rect) => Math.abs(rect.left - geometry.bylineRect.left) <= 1,
+      ),
+    ).toBe(true);
   }
   for (const block of geometry.blocks) {
     expect(block).toEqual({
@@ -251,6 +311,7 @@ test.describe("Landing page", () => {
     const repository = page.getByRole("link", { name: "View repository" });
     const create = page.getByRole("link", { name: "Create a Poll" });
     const discover = page.getByRole("link", { name: "Discover Polls" });
+    const byline = page.getByRole("link", { name: "built by Hearn." });
     await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
     await toggle.click();
     await expect(page.locator("html")).toHaveAttribute("data-mode", "light");
@@ -262,19 +323,22 @@ test.describe("Landing page", () => {
     await page.keyboard.press("Tab");
     await expect(toggle).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(repository).toBeFocused();
-    await page.keyboard.press("Tab");
     await expect(page.getByRole("radio", { name: "Friday" })).toBeFocused();
     // The embedded Tally's BARS/PIE and enhanced SHARE controls belong in
-    // the Demo reading order before the following landing entries.
-    for (let i = 0; i < 30 && !(await create.evaluate((node) => node === document.activeElement)); i += 1) {
+    // the Demo reading order; the footer entries — byline first, then the
+    // three Landing nav links — follow all main content.
+    for (let i = 0; i < 40 && !(await byline.evaluate((node) => node === document.activeElement)); i += 1) {
       await page.keyboard.press("Tab");
     }
+    await expect(byline).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(create).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(discover).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(repository).toBeFocused();
 
-    const outline = await discover.evaluate((node) => {
+    const outline = await repository.evaluate((node) => {
       const style = getComputedStyle(node);
       return {
         offset: style.outlineOffset,
@@ -319,7 +383,7 @@ test.describe("Landing page", () => {
     page,
   }) => {
     const assertClean = watchPage(page);
-    const proofDir = "test-results/story-3-4-landing-proof";
+    const proofDir = "test-results/story-3-7-landing-footer-proof";
     await page.addInitScript(() => localStorage.removeItem("oddspark-mode"));
 
     await page.emulateMedia({ colorScheme: "dark" });

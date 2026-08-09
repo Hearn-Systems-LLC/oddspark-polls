@@ -34,6 +34,8 @@ test-results/*
 !test-results/story-3-5-demo-poll-proof/*.png
 !test-results/story-3-6-presentable-repository-proof/
 !test-results/story-3-6-presentable-repository-proof/*.png
+!test-results/story-3-7-landing-footer-proof/
+!test-results/story-3-7-landing-footer-proof/*.png
 !test-results/story-4-2-comment-moderation-proof/
 !test-results/story-4-2-comment-moderation-proof/*.png
 !test-results/story-4-3-csv-export-proof/

@@ -1,6 +1,4 @@
 ---
-import PublicRepositoryLink from "./public-repository-link.astro";
-
 interface Props { solarHex: string }
 const { solarHex } = Astro.props;
 ---
@@ -13,8 +11,7 @@ const { solarHex } = Astro.props;
 
 <section class="landing-block" data-landing-build-account aria-labelledby="landing-build-label">
   <h2 class="label-caps landing-label" id="landing-build-label">How it's built</h2>
-  <p class="landing-build-copy" data-landing-build-copy>Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public — see the repository.</p>
-  <PublicRepositoryLink surface="landing" />
+  <p class="landing-build-copy" data-landing-build-copy>Runs on Cloudflare Workers, server-rendered by Astro. Polls and votes live in D1; images live in R2. Sign-in is Better Auth with Google or GitHub. Turnstile checks the vote; rate limiting checks the rush. The code is public.</p>
   <p
     class="label-caps"
     data-smoke-marker="oddspark-token-solar"

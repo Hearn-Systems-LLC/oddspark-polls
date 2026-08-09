@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const root = readFileSync("src/pages/index.astro", "utf8");
+const footer = readFileSync("src/components/landing-footer.astro", "utf8");
 const pollPage = readFileSync("src/pages/[reference].astro", "utf8");
 const delivery = readFileSync("src/lib/poll-delivery.ts", "utf8");
 const surface = readFileSync(
@@ -50,6 +51,7 @@ describe("shared Demo delivery contract", () => {
     expect(surface).toContain("JavaScript is required for the human check on this Poll.");
     expect(surface).toContain(">VOTE</ButtonPrimary>");
     expect(root).not.toContain("ButtonPrimary");
-    expect(root).toContain('class="label-caps landing-text-link" href="/creator/new"');
+    expect(root).toContain("<LandingFooter");
+    expect(footer).toContain('class="label-caps landing-footer-link" href="/creator/new"');
   });
 });

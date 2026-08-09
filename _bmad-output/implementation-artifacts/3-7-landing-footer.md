@@ -7,7 +7,7 @@ epic: "3 — Public Face: Discovery, Landing & Demo"
 
 # Story 3.7: Landing Footer
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -33,30 +33,30 @@ Verbatim from `_bmad-output/planning-artifacts/epics.md` § Story 3.7:
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create the Hearn byline presentation component from the verbatim oddspark.dev asset (AC: #2)
-  - [ ] NEW `src/components/hearn-byline.astro` (or fold into the footer component — one component total, dev's choice). Copy the `HEARN_MARK` SVG **verbatim** from the oddspark worker (`/Volumes/fast/Github/oddspark/src/worker.js:1394`, `const HEARN_MARK`): `viewBox="18.9 24.8 178.6 39.9"`, `role="img"`, `aria-label="Hearn."`, `fill="currentColor"`. Do not redraw, simplify, or re-export it.
-  - [ ] One `<a href="https://hearn.systems" rel="noopener">` containing lowercase text `built by ` **with the trailing space preserved** (the space keeps the computed accessible name "built by Hearn." — without it the name concatenates) immediately followed by the inline SVG. Opens in the same tab (no `target`).
-  - [ ] Style with existing tokens only: link color `--color-dim`, hover `--color-text` for text and wordmark together; SVG `height: .78em; width: auto; vertical-align: baseline; margin-left: var(--space-1)`; the whole link is a 44px-minimum block target (`display: inline-flex; align-items: center; min-height: 44px`); standard `--focus-outline` / `--focus-outline-offset`. Byline type is `--type-body-size` (14px) in the machine font.
+- [x] Task 1: Create the Hearn byline presentation component from the verbatim oddspark.dev asset (AC: #2)
+  - [x] NEW `src/components/hearn-byline.astro` (or fold into the footer component — one component total, dev's choice). Copy the `HEARN_MARK` SVG **verbatim** from the oddspark worker (`/Volumes/fast/Github/oddspark/src/worker.js:1394`, `const HEARN_MARK`): `viewBox="18.9 24.8 178.6 39.9"`, `role="img"`, `aria-label="Hearn."`, `fill="currentColor"`. Do not redraw, simplify, or re-export it.
+  - [x] One `<a href="https://hearn.systems" rel="noopener">` containing lowercase text `built by ` **with the trailing space preserved** (the space keeps the computed accessible name "built by Hearn." — without it the name concatenates) immediately followed by the inline SVG. Opens in the same tab (no `target`).
+  - [x] Style with existing tokens only: link color `--color-dim`, hover `--color-text` for text and wordmark together; SVG `height: .78em; width: auto; vertical-align: baseline; margin-left: var(--space-1)`; the whole link is a 44px-minimum block target (`display: inline-flex; align-items: center; min-height: 44px`); standard `--focus-outline` / `--focus-outline-offset`. Byline type is `--type-body-size` (14px) in the machine font.
 
-- [ ] Task 2: Build the `landing-footer` in `src/pages/index.astro` and retire the orphaned blocks (AC: #1, #3, #4, #5)
-  - [ ] NEW footer markup as a sibling of `<main>` inside `.site-shell`: `<footer>` containing the byline and `<nav aria-label="Landing">` with the three links in order `Create a Poll` (`/creator/new`), `Discover Polls` (`/discover`), and `<PublicRepositoryLink surface="landing" />` (which renders the label-caps `View repository` link — the existing `is-landing` 48px treatment already matches the footer idiom).
-  - [ ] Footer style: full shell width; `margin-top: var(--space-section-gap)` (or equivalent separation) and a single top hairline `var(--space-hairline) solid var(--color-rule)`; one row with the byline left and the nav links right (`justify-content: space-between`), nav links sharing one row with `--space-8`-scale gaps. Below `--breakpoint-sm` (640px) the row wraps: byline first line, links stacked left-aligned at 48px targets, same order, no overflow.
-  - [ ] Remove the Create block, the standalone `<hr class="rule">`, and the Browse block from `<main>`; remove the now-dead `.landing-block, .rule` grid-column pins from the `@media (min-width: 1024px)` block. Keep `[data-demo-region]` column/row pinning and both `regionOrder` variants intact — the footer sits outside the grid, so it renders below the grid in intro-first **and** demo-first order, and on the 503 `demo-unavailable` variant, with no variant-specific code.
-  - [ ] UPDATE `src/components/landing-intro.astro`: end the build-account copy at "The code is public." (delete " see the repository." — the referent moved to the footer, and the product never describes where anything is), and remove the `<PublicRepositoryLink surface="landing" />` usage and its import. Keep the hero statement, build account, and `data-smoke-marker="oddspark-token-solar"` marker byte-for-byte intact otherwise — `scripts/smoke.mjs` reads that marker in the deploy gate.
-  - [ ] The link idiom is the existing one: label-caps `--color-entropy` links lifting to `--color-text` on hover, 48px targets, standard focus outline — same as `{components.pagination}` and the existing `.landing-text-link` class being retired. No new link style, no new token, no inline hard-coded colors or px where a token exists (`src/styles/tokens.css` is the only place tokens change; this story adds none).
+- [x] Task 2: Build the `landing-footer` in `src/pages/index.astro` and retire the orphaned blocks (AC: #1, #3, #4, #5)
+  - [x] NEW footer markup as a sibling of `<main>` inside `.site-shell`: `<footer>` containing the byline and `<nav aria-label="Landing">` with the three links in order `Create a Poll` (`/creator/new`), `Discover Polls` (`/discover`), and `<PublicRepositoryLink surface="landing" />` (which renders the label-caps `View repository` link — the existing `is-landing` 48px treatment already matches the footer idiom).
+  - [x] Footer style: full shell width; `margin-top: var(--space-section-gap)` (or equivalent separation) and a single top hairline `var(--space-hairline) solid var(--color-rule)`; one row with the byline left and the nav links right (`justify-content: space-between`), nav links sharing one row with `--space-8`-scale gaps. Below `--breakpoint-sm` (640px) the row wraps: byline first line, links stacked left-aligned at 48px targets, same order, no overflow.
+  - [x] Remove the Create block, the standalone `<hr class="rule">`, and the Browse block from `<main>`; remove the now-dead `.landing-block, .rule` grid-column pins from the `@media (min-width: 1024px)` block. Keep `[data-demo-region]` column/row pinning and both `regionOrder` variants intact — the footer sits outside the grid, so it renders below the grid in intro-first **and** demo-first order, and on the 503 `demo-unavailable` variant, with no variant-specific code.
+  - [x] UPDATE `src/components/landing-intro.astro`: end the build-account copy at "The code is public." (delete " see the repository." — the referent moved to the footer, and the product never describes where anything is), and remove the `<PublicRepositoryLink surface="landing" />` usage and its import. Keep the hero statement, build account, and `data-smoke-marker="oddspark-token-solar"` marker byte-for-byte intact otherwise — `scripts/smoke.mjs` reads that marker in the deploy gate.
+  - [x] The link idiom is the existing one: label-caps `--color-entropy` links lifting to `--color-text` on hover, 48px targets, standard focus outline — same as `{components.pagination}` and the existing `.landing-text-link` class being retired. No new link style, no new token, no inline hard-coded colors or px where a token exists (`src/styles/tokens.css` is the only place tokens change; this story adds none).
 
-- [ ] Task 3: Update the test contracts for the new structure (AC: all)
-  - [ ] UPDATE `tests/unit/landing-page.test.mjs`: the footer exists outside `.landing-page`; contains the byline link (`href="https://hearn.systems"`, `rel="noopener"`, SVG `role="img"` `aria-label="Hearn."`, trailing space in the text node) and `<nav aria-label="Landing">` with the three links in order; the retired Create/Browse blocks and the " see the repository." trailing pointer are gone; smoke marker contract preserved.
-  - [ ] UPDATE `tests/unit/public-repository-contract.test.mjs` wherever it pins the repository link's landing location — the link still renders on the landing page, now inside the footer. Do not weaken any assertion.
-  - [ ] UPDATE `tests/e2e/landing.spec.mjs` geometry assertions: at 1280px the footer spans the full shell width below both grid columns, byline left / links right on one row, links at 48px, no horizontal overflow; at 375px the byline holds the first line and the links stack beneath at 48px targets. Tab-order assertion: footer links come after all main content.
-  - [ ] EXTEND `tests/e2e/demo-poll.spec.mjs` (or the landing spec) so the footer is asserted present and correctly laid out in the outcome-bearing demo-first variant too (the existing rejected-vote test already forces that variant by voting without a Turnstile token).
-  - [ ] Capture inspected browser proof under `test-results/story-3-7-landing-footer-proof/` at 1280px light and 375px dark, both landing variants (intro-first and rejected-vote demo-first). Inspect the screenshots yourself: full-width footer, single hairline, one row at desktop, clean stack on mobile, wordmark legible in both modes, no orphaned text in the intro column, no console/network errors. Never ask the user to eyeball it.
+- [x] Task 3: Update the test contracts for the new structure (AC: all)
+  - [x] UPDATE `tests/unit/landing-page.test.mjs`: the footer exists outside `.landing-page`; contains the byline link (`href="https://hearn.systems"`, `rel="noopener"`, SVG `role="img"` `aria-label="Hearn."`, trailing space in the text node) and `<nav aria-label="Landing">` with the three links in order; the retired Create/Browse blocks and the " see the repository." trailing pointer are gone; smoke marker contract preserved.
+  - [x] UPDATE `tests/unit/public-repository-contract.test.mjs` wherever it pins the repository link's landing location — the link still renders on the landing page, now inside the footer. Do not weaken any assertion.
+  - [x] UPDATE `tests/e2e/landing.spec.mjs` geometry assertions: at 1280px the footer spans the full shell width below both grid columns, byline left / links right on one row, links at 48px, no horizontal overflow; at 375px the byline holds the first line and the links stack beneath at 48px targets. Tab-order assertion: footer links come after all main content.
+  - [x] EXTEND `tests/e2e/demo-poll.spec.mjs` (or the landing spec) so the footer is asserted present and correctly laid out in the outcome-bearing demo-first variant too (the existing rejected-vote test already forces that variant by voting without a Turnstile token).
+  - [x] Capture inspected browser proof under `test-results/story-3-7-landing-footer-proof/` at 1280px light and 375px dark, both landing variants (intro-first and rejected-vote demo-first). Inspect the screenshots yourself: full-width footer, single hairline, one row at desktop, clean stack on mobile, wordmark legible in both modes, no orphaned text in the intro column, no console/network errors. Never ask the user to eyeball it.
 
-- [ ] Task 4: Ledger, changelog, and gate (AC: all)
-  - [ ] UPDATE `CHANGELOG.md` under `## [Unreleased]` (Changed): landing Create/Browse links and the repository entry consolidated into a full-width footer with the Hearn byline.
-  - [ ] UPDATE `_bmad-output/implementation-artifacts/deferred-work.md`: mark DW-119 `status: done` with a one-line resolution naming this story.
-  - [ ] Run the exact local gate in repository order under Node `24.18.0` / pnpm `11.17.0`: `pnpm migrations:guard` → `pnpm test` → `pnpm check` → `pnpm test:e2e` → `pnpm types` → binding drift check → `pnpm build:production` → `git diff --check`. Record fresh totals; prior totals are historical only. CI runs e2e in a 4-shard matrix — a green local unsharded run is the parity signal.
-  - [ ] Keep this story's Dev Agent Record, File List, and `sprint-status.yaml` current. No `TODO`, skipped/only test, placeholder, or undocumented deferral remains. Work lands via a `story/3-7-landing-footer` branch and PR; do not push to `main` directly.
+- [x] Task 4: Ledger, changelog, and gate (AC: all)
+  - [x] UPDATE `CHANGELOG.md` under `## [Unreleased]` (Changed): landing Create/Browse links and the repository entry consolidated into a full-width footer with the Hearn byline.
+  - [x] UPDATE `_bmad-output/implementation-artifacts/deferred-work.md`: mark DW-119 `status: done` with a one-line resolution naming this story.
+  - [x] Run the exact local gate in repository order under Node `24.18.0` / pnpm `11.17.0`: `pnpm migrations:guard` → `pnpm test` → `pnpm check` → `pnpm test:e2e` → `pnpm types` → binding drift check → `pnpm build:production` → `git diff --check`. Record fresh totals; prior totals are historical only. CI runs e2e in a 4-shard matrix — a green local unsharded run is the parity signal.
+  - [x] Keep this story's Dev Agent Record, File List, and `sprint-status.yaml` current. No `TODO`, skipped/only test, placeholder, or undocumented deferral remains. Work lands via a `story/3-7-landing-footer` branch and PR; do not push to `main` directly.
 
 ## Dev Notes
 
@@ -137,12 +137,46 @@ Verbatim from `_bmad-output/planning-artifacts/epics.md` § Story 3.7:
 
 ### Agent Model Used
 
+GPT-5.3-Codex
+
 ### Debug Log References
+
+- TDD red: unit tests failed on missing `src/components/landing-footer.astro` before implementation, then passed after.
+- e2e iteration 1: footer-width assertion compared against the shell border-box; corrected to the shell content width (shell padding).
+- e2e iteration 2: repository link sat 16px low in the desktop footer row — Astro scoped styles cannot reach the child `PublicRepositoryLink`, so its `is-landing` `margin-top` won; fixed with `.landing-footer :global(.public-repository-link.is-landing) { margin-top: 0; }`.
+- e2e iteration 3: `navRect` missing from the geometry helper's return object (test bug, not implementation); restored.
+- Full-suite run while `pnpm build:production` executed concurrently failed `xlsx-export.spec.mjs:143` once (500 + download timeout); clean rerun passed 182/182 — self-inflicted interference, unrelated to this diff.
 
 ### Completion Notes List
 
+- Chose the single-component option: `src/components/landing-footer.astro` contains both the Hearn byline and the `<nav aria-label="Landing">`; no separate `hearn-byline.astro`.
+- `HEARN_MARK` SVG copied byte-for-byte from `oddspark/src/worker.js` (`const HEARN_MARK`, 4653 chars); verified verbatim by string inclusion, keeping `role="img"`, `aria-label="Hearn."`, `fill="currentColor"`, and the trailing space in `built by ` (computed accessible name "built by Hearn.", asserted in e2e via `getByRole("link", { name: "built by Hearn." })`).
+- Byline stays outside the nav landmark (D4); byline 44px target, nav links 48px, `--color-dim` → `--color-text` hover on the whole byline, entropy → text on nav links, standard `--focus-outline` / `--focus-outline-offset`. Zero new tokens.
+- Footer is a `<footer>` sibling of `<main>` inside `.site-shell`, rendering on every landing variant with no variant-specific code; `margin-top: var(--space-section-gap)` + single top hairline replaced the removed `.landing-page` bottom padding so separation stays one section-gap.
+- Create/Browse blocks, the standalone `<hr class="rule">`, the dead `.landing-block, .rule` lg grid pins, and the now-unused `.landing-label` / `.landing-block` styles were removed from `index.astro`; the build account ends at "The code is public." with `PublicRepositoryLink` moved to the footer; the smoke marker is byte-for-byte intact.
+- Below 640px the footer row wraps via `flex-wrap` + a column nav: byline holds the first line, links stack left-aligned at 48px targets; no horizontal overflow asserted at 375px.
+- Gate (fresh, Node 24.18.0 / pnpm 11.17.0, in order): `pnpm migrations:guard` ok (15 files, 15 checksummed) → `pnpm test` 120 files / 1683 tests passed → `pnpm check` clean → `pnpm test:e2e` 182 passed → `pnpm types` regenerated with no drift → `git diff --exit-code worker-configuration.d.ts` clean → `pnpm build:production` built → `git diff --check` clean.
+- Browser proof (self-inspected): `test-results/story-3-7-landing-footer-proof/{landing,demo-first}-{1280-light,375-dark}.png` — full-width footer below both grid columns, single hairline, one row at desktop, clean left-aligned stack on mobile, wordmark legible in both modes, intro column ends at the build account with no orphaned Create/Browse text, and `watchPage`/`observeApp` reported zero console, page, response, and request failures. PNGs carry no personal identifiers (local dev origin only).
+
 ### File List
+
+- `src/components/landing-footer.astro` (NEW)
+- `src/pages/index.astro`
+- `src/components/landing-intro.astro`
+- `tests/unit/landing-page.test.mjs`
+- `tests/unit/public-repository-contract.test.mjs`
+- `tests/unit/demo-delivery-contract.test.mjs`
+- `tests/e2e/landing.spec.mjs`
+- `tests/e2e/demo-poll.spec.mjs`
+- `CHANGELOG.md`
+- `_bmad-output/implementation-artifacts/deferred-work.md`
+- `_bmad-output/implementation-artifacts/3-7-landing-footer.md`
+- `test-results/story-3-7-landing-footer-proof/landing-1280-light.png` (NEW)
+- `test-results/story-3-7-landing-footer-proof/landing-375-dark.png` (NEW)
+- `test-results/story-3-7-landing-footer-proof/demo-first-1280-light.png` (NEW)
+- `test-results/story-3-7-landing-footer-proof/demo-first-375-dark.png` (NEW)
 
 ## Change Log
 
 - 2026-08-09: Created via bmad-create-story from the merged UX landing-footer spines (PR #43), epics.md § Story 3.7, the reviewer-gate resolutions, the merged baseline `c7727c9`, and Story 3.6/PR #39-#41 intelligence; status set to `ready-for-dev`.
+- 2026-08-09: Implemented the landing footer (Tasks 1–4): new `landing-footer.astro` with the verbatim HEARN_MARK byline and Landing nav, retired the orphaned Create/Browse blocks and the trailing repository pointer, updated unit/e2e contracts, captured inspected browser proof for both variants, DW-119 resolved, full local gate green (`pnpm test` 1683/1683; `pnpm test:e2e` 182/182).

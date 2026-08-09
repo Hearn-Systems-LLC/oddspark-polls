@@ -1,6 +1,7 @@
 ---
 import { env } from "cloudflare:workers";
 import BaseLayout from "../layouts/base-layout.astro";
+import LandingFooter from "../components/landing-footer.astro";
 import LandingIntro from "../components/landing-intro.astro";
 import PollVotingSurface from "../components/poll-voting-surface.astro";
 import SiteHeader from "../components/site-header.astro";
@@ -116,49 +117,34 @@ const title = unavailable
           ) : null,
         )
       }
-
-      <section class="landing-block" aria-labelledby="landing-create-label">
-        <h2 class="label-caps landing-label" id="landing-create-label">Create</h2>
-        <a class="label-caps landing-text-link" href="/creator/new">Create a Poll</a>
-      </section>
-
-      <hr class="rule" />
-
-      <section class="landing-block" aria-labelledby="landing-discover-label">
-        <h2 class="label-caps landing-label" id="landing-discover-label">Browse</h2>
-        <a class="label-caps landing-text-link" href="/discover">Discover Polls</a>
-      </section>
     </main>
+    <LandingFooter />
   </div>
 </BaseLayout>
 
 <style>
-  .landing-page { padding-bottom: var(--space-section-gap); }
-  .landing-block { margin: 0; }
   .landing-demo, .demo-unavailable { margin: 0; }
   .landing-demo::after, .demo-unavailable::after { content: ""; display: block; margin-block: var(--space-10); border-bottom: var(--space-hairline) solid var(--color-rule); }
   .demo-unavailable h1 { margin: 0 0 var(--space-4); color: var(--color-alarm); font-family: var(--font-machine); font-size: var(--type-label-caps-lg-size); line-height: var(--type-label-caps-lh); letter-spacing: var(--type-label-caps-ls); }
   .demo-unavailable h1:focus { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
   .demo-unavailable p { margin: 0; font-size: var(--type-body-lg-size); line-height: var(--type-body-lg-lh); }
-  .landing-label { margin: 0 0 var(--space-4); }
   .landing-text-link { display: inline-flex; align-items: center; min-height: 48px; margin-top: var(--space-4); color: var(--color-entropy); text-decoration: none; }
   .landing-text-link:hover { color: var(--color-text); }
 
   /* lg two-column landing (DESIGN.md §Layout): intro column beside the Demo
      Poll. Column pinning follows the server-side regionOrder so visual order
-     always matches DOM/focus order. Shell widens for this page only. */
+     always matches DOM/focus order. Shell widens for this page only. The
+     landing-footer sits outside the grid, below it on every variant. */
   @media (min-width: 1024px) {
     .site-shell:has(.landing-page) { max-width: var(--space-measure-wide); }
     .landing-page { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr); column-gap: var(--space-8); align-items: start; }
-    .landing-intro-region, .landing-block, .rule { grid-column: 1; min-width: 0; }
+    .landing-intro-region { grid-column: 1; min-width: 0; }
     [data-demo-region] { grid-column: 2; grid-row: 1 / span 10; min-width: 0; }
     /* Outcome-bearing (demo-first) order: the Demo Poll takes the wide left
        track so its internal vote-form/Tally split keeps its room; the intro
        column moves right. Columns still follow DOM order. */
     .landing-page--demo-first { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
-    .landing-page--demo-first .landing-intro-region,
-    .landing-page--demo-first .landing-block,
-    .landing-page--demo-first .rule { grid-column: 2; }
+    .landing-page--demo-first .landing-intro-region { grid-column: 2; }
     .landing-page--demo-first [data-demo-region] { grid-column: 1; }
     .landing-demo::after, .demo-unavailable::after { display: none; }
   }

@@ -20,7 +20,9 @@ if (!hasBetterAuthSecret()) {
 }
 
 const PROOF_DIR = "test-results/story-3-5-demo-poll-proof";
+const STORY37_PROOF_DIR = "test-results/story-3-7-landing-footer-proof";
 mkdirSync(PROOF_DIR, { recursive: true });
+mkdirSync(STORY37_PROOF_DIR, { recursive: true });
 test.describe.configure({ mode: "serial", timeout: 240_000 });
 
 let owner;
@@ -257,9 +259,31 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
         }
         return node.getBoundingClientRect();
       };
+      const footer = rectOf(".site-shell > footer");
+      const byline = rectOf('footer a[href="https://hearn.systems"]');
+      const nav = rectOf('footer nav[aria-label="Landing"]');
+      const navLinkTops = [
+        ...document.querySelectorAll('footer nav[aria-label="Landing"] a'),
+      ].map((node) => node.getBoundingClientRect().top);
       return {
+        byline,
         demo: rectOf("[data-demo-region]"),
         intro: rectOf(".landing-intro-region"),
+        footer,
+        footerBorderTop: getComputedStyle(
+          document.querySelector(".site-shell > footer"),
+        ).borderTopWidth,
+        nav,
+        navLinkTops,
+        shellWidth: (() => {
+          const shell = document.querySelector(".site-shell");
+          const style = getComputedStyle(shell);
+          return (
+            shell.getBoundingClientRect().width -
+            Number.parseFloat(style.paddingLeft) -
+            Number.parseFloat(style.paddingRight)
+          );
+        })(),
         tally: rectOf("[data-demo-region] .tally-region"),
         horizontalOverflow:
           document.documentElement.scrollWidth -
@@ -270,8 +294,28 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
     expect(geometry.demo.left).toBeLessThan(geometry.intro.left);
     expect(geometry.demo.width).toBeGreaterThan(geometry.intro.width);
     expect(geometry.tally.width).toBeGreaterThanOrEqual(300);
+    // The footer renders on the outcome-bearing (demo-first) variant too:
+    // full shell width below the grid, one top hairline, byline left and the
+    // three Landing links on one row (DESIGN.md §landing-footer).
+    expect(geometry.footer.width).toBeGreaterThanOrEqual(
+      geometry.shellWidth - 1,
+    );
+    expect(geometry.footerBorderTop).toBe("1px");
+    expect(geometry.footer.top).toBeGreaterThanOrEqual(
+      Math.max(geometry.demo.bottom, geometry.intro.bottom) - 1,
+    );
+    expect(geometry.nav.left).toBeGreaterThan(geometry.byline.right);
+    expect(
+      geometry.navLinkTops.every(
+        (top) => Math.abs(top - geometry.navLinkTops[0]) <= 2,
+      ),
+    ).toBe(true);
     await page.screenshot({
       path: `${PROOF_DIR}/vote-rejected-1280-light.png`,
+      fullPage: true,
+    });
+    await page.screenshot({
+      path: `${STORY37_PROOF_DIR}/demo-first-1280-light.png`,
       fullPage: true,
     });
 
@@ -284,8 +328,42 @@ test.describe("Story 3.5 landing Demo and owner reset", () => {
           document.documentElement.clientWidth,
       ),
     ).toBeLessThanOrEqual(0);
+    // Mobile wrap on the demo-first variant: byline first line, links stacked.
+    const mobileFooter = await page.evaluate(() => {
+      const byline = document
+        .querySelector('footer a[href="https://hearn.systems"]')
+        .getBoundingClientRect();
+      const linkRects = [
+        ...document.querySelectorAll('footer nav[aria-label="Landing"] a'),
+      ].map((node) => node.getBoundingClientRect());
+      return {
+        bylineLeft: byline.left,
+        bylineTop: byline.top,
+        linkHeights: linkRects.map((rect) => rect.height),
+        linkLefts: linkRects.map((rect) => rect.left),
+        linkTops: linkRects.map((rect) => rect.top),
+      };
+    });
+    expect(mobileFooter.bylineTop).toBeLessThan(mobileFooter.linkTops[0]);
+    expect(
+      mobileFooter.linkTops.every(
+        (top, index) => index === 0 || top > mobileFooter.linkTops[index - 1],
+      ),
+    ).toBe(true);
+    expect(
+      mobileFooter.linkLefts.every(
+        (left) => Math.abs(left - mobileFooter.bylineLeft) <= 1,
+      ),
+    ).toBe(true);
+    for (const height of mobileFooter.linkHeights) {
+      expect(height).toBeGreaterThanOrEqual(48);
+    }
     await page.screenshot({
       path: `${PROOF_DIR}/vote-rejected-375-dark.png`,
+      fullPage: true,
+    });
+    await page.screenshot({
+      path: `${STORY37_PROOF_DIR}/demo-first-375-dark.png`,
       fullPage: true,
     });
   });

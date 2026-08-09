@@ -17,6 +17,10 @@ const landingIntro = readFileSync(
   "src/components/landing-intro.astro",
   "utf8",
 );
+const landingFooter = readFileSync(
+  "src/components/landing-footer.astro",
+  "utf8",
+);
 const votingSurface = readFileSync(
   "src/components/poll-voting-surface.astro",
   "utf8",
@@ -76,8 +80,10 @@ describe("public repository contract", () => {
     expect(packageJson.homepage).toBe(REPOSITORY_URL);
     expect(repositoryComponent).toContain(REPOSITORY_URL);
     expect(repositoryComponent.match(new RegExp(REPOSITORY_URL, "g"))).toHaveLength(1);
-    expect(landingIntro).toContain("<PublicRepositoryLink surface=\"landing\" />");
+    expect(landingIntro).not.toContain("PublicRepositoryLink");
     expect(landingIntro).not.toContain(REPOSITORY_URL);
+    expect(landingFooter).toContain('<PublicRepositoryLink surface="landing" />');
+    expect(landingFooter).not.toContain(REPOSITORY_URL);
     expect(votingSurface).toContain("!embedded && <PublicRepositoryLink />");
     expect(resultsPage).toContain("<PublicRepositoryLink />");
 
@@ -90,7 +96,7 @@ describe("public repository contract", () => {
       .split("\n")
       .sort();
     expect(componentConsumers).toEqual([
-      "src/components/landing-intro.astro",
+      "src/components/landing-footer.astro",
       "src/components/poll-voting-surface.astro",
       "src/pages/[reference]/manifest.astro",
       "src/pages/[reference]/results.astro",

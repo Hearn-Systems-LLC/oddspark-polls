@@ -826,6 +826,34 @@ So that the code itself completes the portfolio argument (FR-27, SM-6).
 **When** audited,
 **Then** no credentials, tokens, runtime or user data, or unrelated or accidental personal data exist in any commit, **And** intentional public GitHub commit attribution is permitted (FR-27).
 
+### Story 3.7: Landing Footer
+
+As a landing visitor,
+I want one quiet full-width footer carrying Create, Discover, the repository, and the Hearn byline,
+So that the intro column no longer trails off into orphaned text blocks and the page closes with a single deliberate band (DW-119, UX `landing-footer`).
+
+**Acceptance Criteria:**
+
+**Given** any landing variant — intro-first, outcome-bearing (demo-first), or 503 demo-unavailable —
+**When** the page renders at `{breakpoints.lg}` and up,
+**Then** a `<footer>` band spans the full shell width below the two-column grid, outside both columns, separated from the content above by one top hairline, carrying the Hearn byline at the left and `CREATE A POLL`, `DISCOVER POLLS`, `VIEW REPOSITORY` at the right in that order (DESIGN.md §Components `landing-footer`).
+
+**Given** the byline,
+**When** it is inspected or activated,
+**Then** it is one link to `https://hearn.systems` with `rel="noopener"` opening in the same tab, composed of lowercase `built by ` (trailing space) plus the Hearn. wordmark SVG verbatim from oddspark.dev (`role="img"`, `aria-label="Hearn."`, `fill: currentColor`, height `.78em`, baseline-aligned), with computed accessible name "built by Hearn.", a 44px minimum block target, and the whole line lifting dim → text on hover.
+
+**Given** the footer navigation,
+**When** a visitor tabs through the page,
+**Then** the byline and the three links follow all main content in source and focus order inside the `<footer>`, the three links sit in a `<nav aria-label="Landing">` at 48px targets with the standard 2px/2px focus outline, and everything is server-rendered and functional without JavaScript (AD-2).
+
+**Given** a viewport below `{breakpoints.sm}`,
+**When** the footer renders,
+**Then** the row wraps: the byline holds the first line and the three links stack beneath it, left-aligned at 48px targets in the same order, with nothing hidden, nothing rearranged beyond the wrap, and no horizontal overflow (widen-don't-rearrange).
+
+**Given** the intro column,
+**When** the page renders,
+**Then** the Create and Browse blocks and their standalone rules are gone, the build-account copy ends at "The code is public." with no trailing repository pointer, the repository link renders only in the footer as `VIEW REPOSITORY`, and the token smoke marker remains intact (deploy-gate load-bearing).
+
 ## Epic 4: Comments & Export
 
 Voters humanize known-group polls with vote-attached comments (creator-moderated, per-poll disableable), and creators own their data via CSV plus bounded synchronous XLSX export.

@@ -234,6 +234,16 @@ production on every merge, but no version has been cut or tagged.
   below it, with a monitor floor (status + vote total + link to live results).
 - `AGENTS.md` — project instructions for Claude Code and other coding agents.
 
+### Changed
+
+- The landing page now closes with a single full-width footer: a quiet band
+  below the content carrying Create a Poll, Discover Polls, and View
+  repository on one side and a "built by Hearn." byline on the other. The
+  separate Create and Browse blocks that trailed the intro column are gone,
+  and the build account now ends at "The code is public." The footer appears
+  on every landing state — with the live Demo Poll, after a vote, and when
+  the Demo is unavailable — and stacks neatly on small screens.
+
 ### Fixed
 
 - Vote recovery can no longer duplicate a Vote when every Security Toggle is

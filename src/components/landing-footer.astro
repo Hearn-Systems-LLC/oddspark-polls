@@ -18,7 +18,7 @@ import PublicRepositoryLink from "./public-repository-link.astro";
   .landing-footer-byline { display: inline-flex; align-items: center; min-height: 44px; color: var(--color-dim); font-family: var(--font-machine); font-size: var(--type-body-size); line-height: var(--type-body-lh); text-decoration: none; }
   .landing-footer-byline:hover { color: var(--color-text); }
   .landing-footer-byline:focus-visible { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
-  .landing-footer-byline svg { height: 0.78em; width: auto; vertical-align: baseline; margin-left: var(--space-1); }
+  .landing-footer-byline svg { height: 0.78em; width: auto; vertical-align: baseline; margin-left: var(--space-1); /* optical baseline alignment: the flex context inert-ifies vertical-align, so nudge the wordmark down onto the text baseline */ transform: translateY(0.05em); }
   .landing-footer-nav { display: flex; gap: var(--space-8); }
   .landing-footer-link { display: inline-flex; align-items: center; min-height: 48px; color: var(--color-entropy); text-decoration: none; }
   .landing-footer-link:hover { color: var(--color-text); }

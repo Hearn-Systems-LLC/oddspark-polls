@@ -5,10 +5,9 @@ one durable link, and watch an honest count without a subscription wall. It
 exists because quick group decisions should not require an enterprise survey
 tool or a ballot box that is easy to stuff.
 
-Try the live production Worker at
-[oddspark-polls.hearnsystems.workers.dev](https://oddspark-polls.hearnsystems.workers.dev).
-`polls.oddspark.dev` is the product identity and planned custom domain; it is
-not bound yet.
+Try the live product at [polls.oddspark.dev](https://polls.oddspark.dev).
+Production is bound as a Cloudflare Worker Custom Domain; the workers.dev
+hostname is disabled so public and OAuth links have one canonical origin.
 
 This is a **public demonstration build**: the product is real, the repo is presentable, and nothing secret belongs in history.
 
@@ -126,12 +125,17 @@ prevents a local or staging callback from sharing production credentials.
 | --- | --- | --- | --- |
 | local | `http://localhost:4321` | `http://localhost:4321/api/auth/callback/google` | `http://localhost:4321/api/auth/callback/github` |
 | staging | `https://oddspark-polls-staging.hearnsystems.workers.dev` | `https://oddspark-polls-staging.hearnsystems.workers.dev/api/auth/callback/google` | `https://oddspark-polls-staging.hearnsystems.workers.dev/api/auth/callback/github` |
-| production | `https://oddspark-polls.hearnsystems.workers.dev` | `https://oddspark-polls.hearnsystems.workers.dev/api/auth/callback/google` | `https://oddspark-polls.hearnsystems.workers.dev/api/auth/callback/github` |
+| production | `https://polls.oddspark.dev` | `https://polls.oddspark.dev/api/auth/callback/google` | `https://polls.oddspark.dev/api/auth/callback/github` |
 
 Create registrations named `Oddspark Polls — Local`, `Oddspark Polls — Staging`,
 and `Oddspark Polls — Production` in each provider. Set each application's
 homepage/origin to the matching base URL and its callback to the exact URI
-above. Do not add the future custom domain until it is actually bound.
+above.
+
+Production `BETTER_AUTH_URL` must be exactly `https://polls.oddspark.dev`.
+Update the Google and GitHub production registrations to the callbacks above
+before changing that secret; the production smoke gate rejects any stale
+callback origin.
 
 Every environment requires ten runtime values: eight secret-backed bindings
 plus two public vars.
@@ -153,8 +157,7 @@ Public var (per environment in `wrangler.jsonc` `vars`):
 - `TURNSTILE_SITE_KEY` — local/CI uses Cloudflare's official always-pass test
   site key; staging and production use distinct real widgets registered for
   `oddspark-polls-staging.hearnsystems.workers.dev` and
-  `oddspark-polls.hearnsystems.workers.dev` respectively (add `polls.oddspark.dev`
-  to the production widget before the custom-domain switch).
+  `polls.oddspark.dev` respectively.
 - `DEMO_POLL_REFERENCE` — the lower-case Custom Link for the exact live Demo
   Poll rendered on `/`. It is public designation, not a credential, and named
   environment vars do not inherit it from the root Wrangler config.
@@ -322,9 +325,7 @@ Turnstile-capable client and successful Siteverify proof.
 | Environment | URL |
 | --- | --- |
 | Staging | https://oddspark-polls-staging.hearnsystems.workers.dev |
-| Production | https://oddspark-polls.hearnsystems.workers.dev |
-
-Custom domain `polls.oddspark.dev` is wired later.
+| Production | https://polls.oddspark.dev |
 
 ## Migrations
 

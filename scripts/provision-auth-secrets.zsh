@@ -28,7 +28,7 @@ case "$target" in
     base_url="https://oddspark-polls-staging.hearnsystems.workers.dev"
     ;;
   production)
-    base_url="https://oddspark-polls.hearnsystems.workers.dev"
+    base_url="https://polls.oddspark.dev"
     ;;
   *)
     print -u2 "Unknown environment: $target"

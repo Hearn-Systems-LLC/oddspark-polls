@@ -250,6 +250,9 @@ production on every merge, but no version has been cut or tagged.
 
 ### Fixed
 
+- Production now has one canonical origin: `polls.oddspark.dev`. The deploy
+  configuration owns the Custom Domain and disables workers.dev, while the
+  smoke gate rejects stale Better Auth callback URLs before promotion.
 - Vote recovery can no longer duplicate a Vote when every Security Toggle is
   off. The voter's "Counted." proof is now signed before the Vote commits, so
   a signing failure surfaces as a truthful retry with nothing stored instead

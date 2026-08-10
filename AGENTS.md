@@ -35,9 +35,9 @@ Use grep or file search for string literals, error messages, configuration and n
 
 **Project:** oddspark-polls
 **Purpose:** Trustworthy casual polls — multiple-choice, ranked, image, and meeting polls with vote security and no subscription wall.
-**Live:** Cloudflare Workers, `oddspark-polls` — production ships from `main` via `.github/workflows/deploy.yml`. Custom domain `polls.oddspark.dev` is not bound yet.
+**Live:** Cloudflare Workers, `oddspark-polls` at `polls.oddspark.dev` — production ships from `main` via `.github/workflows/deploy.yml`; the workers.dev hostname is disabled.
 **Preview:** Cloudflare Workers, `oddspark-polls-staging` — every production deploy passes through staging first; there is no separate staging branch.
-**Last updated:** 2026-07-30
+**Last updated:** 2026-08-10
 
 This is a **public demonstration build**. The product is real, the repo is presentable, and
 nothing secret belongs in history — not in code, not in `wrangler.jsonc`, not in a commit

@@ -27,6 +27,9 @@ if (!url) {
   process.exit(1);
 }
 
+const origin = new URL(url).origin;
+const baseUrl = url.endsWith("/") ? url : `${url}/`;
+
 // The expected hex comes from the token system itself, not a hardcoded copy —
 // deleting or changing --color-solar-dark must change what this asserts.
 const tokensCss = await readFile(
@@ -96,7 +99,7 @@ if (!(optionPositions[0] < optionPositions[1] && optionPositions[1] < optionPosi
 if (!/<form\b[^>]*\baction="\/"[^>]*\bdata-vote-form\b|<form\b[^>]*\bdata-vote-form\b[^>]*\baction="\/"/u.test(html)) {
   fail("missing the real root Demo vote form");
 }
-const canonicalDemoUrl = new URL("demo", url.endsWith("/") ? url : `${url}/`).toString();
+const canonicalDemoUrl = new URL("demo", baseUrl).toString();
 if (!html.includes(canonicalDemoUrl)) fail("missing the canonical Demo Share URL");
 if (!html.includes("ONE VOTE PER BROWSER")) fail("missing the Session trust claim");
 if (!html.includes("HUMAN CHECK ON SUBMIT")) fail("missing the CAPTCHA trust claim");
@@ -115,7 +118,7 @@ console.log(
 // unauthenticated health route — it exercises auth config construction (but
 // not D1; a broken DB binding with valid secrets still passes). Join
 // relatively so a SMOKE_URL with a path prefix is preserved.
-const authUrl = new URL("api/auth/ok", url.endsWith("/") ? url : `${url}/`).toString();
+const authUrl = new URL("api/auth/ok", baseUrl).toString();
 let authRes;
 try {
   authRes = await fetch(authUrl, {
@@ -137,11 +140,60 @@ if (authRes.status !== 200) {
 
 console.log(`smoke: ok ${authUrl} (auth liveness 200)`);
 
+// Auth origin correctness: config construction can succeed while Better
+// Auth still carries a stale base URL. Initiating Google OAuth does not
+// authenticate or write product data; it gives us the provider redirect so
+// the callback URI can be compared with the exact public origin being smoked.
+const signInUrl = new URL("api/sign-in", baseUrl).toString();
+let signInRes;
+try {
+  signInRes = await fetch(signInUrl, {
+    method: "POST",
+    headers: {
+      origin,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: "provider=google&return=%2Fcreator",
+    redirect: "manual",
+    signal: AbortSignal.timeout(15000),
+  });
+} catch (err) {
+  const reason = err instanceof Error ? err.message : String(err);
+  console.error(`smoke: auth origin request failed for ${signInUrl}: ${reason}`);
+  process.exit(1);
+}
+
+if (signInRes.status !== 303) {
+  console.error(
+    `smoke: auth origin expected 303, got ${signInRes.status} for ${signInUrl}`,
+  );
+  process.exit(1);
+}
+
+const providerLocation = signInRes.headers.get("location");
+let redirectUri = null;
+try {
+  redirectUri = providerLocation
+    ? new URL(providerLocation).searchParams.get("redirect_uri")
+    : null;
+} catch {
+  // The stable mismatch below reports a missing/malformed provider Location.
+}
+const expectedRedirectUri = new URL("api/auth/callback/google", origin).toString();
+if (redirectUri !== expectedRedirectUri) {
+  console.error(
+    `smoke: auth callback origin mismatch; expected ${expectedRedirectUri}, got ${redirectUri ?? "missing"}`,
+  );
+  process.exit(1);
+}
+
+console.log(`smoke: ok ${signInUrl} (OAuth callback uses ${origin})`);
+
 // Binding liveness: neither probe above touches VOTE_DIGEST_SECRET, DB, or
 // SESSION — a deploy with a forgotten digest secret (the same forgotten-
 // secret failure class the auth probe names) would pass both while every
 // vote 500s. /api/health returns 200 or lists the missing binding names.
-const healthUrl = new URL("api/health", url.endsWith("/") ? url : `${url}/`).toString();
+const healthUrl = new URL("api/health", baseUrl).toString();
 let healthRes;
 try {
   healthRes = await fetch(healthUrl, {

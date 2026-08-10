@@ -99,11 +99,126 @@ async function postCreate(
   );
 }
 
+async function postMeeting(
+  cookie: string,
+  csrfToken: string,
+  pollId: string,
+  intent: "publish" | "add-slot",
+  slots: { date: string; start: string; end: string }[],
+): Promise<Response> {
+  const body = new URLSearchParams({
+    csrf_token: csrfToken,
+    intent,
+    poll_id: pollId,
+    pollType: "meeting",
+    question: "When should we meet?",
+    visibility: "live",
+    listing: "unlisted",
+    timezone: "America/Detroit",
+    multiSelect: "false",
+    sessionChecks: "true",
+  });
+  slots.forEach((slot, index) => {
+    body.set(`slot_date_${index}`, slot.date);
+    body.set(`slot_start_${index}`, slot.start);
+    body.set(`slot_end_${index}`, slot.end);
+  });
+  return runRealRoute(
+    makeContext(
+      new Request("https://polls.example.test/creator/new", {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://polls.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body,
+      }),
+    ),
+  );
+}
+
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
 });
 
 describe("POST /creator/new delivery boundary", () => {
+  it("adds exactly one blank Meeting slot on a server round-trip", async () => {
+    const cookie = await createAuthenticatedCookie();
+    const response = await postMeeting(
+      cookie,
+      await csrfFor(cookie),
+      crypto.randomUUID(),
+      "add-slot",
+      [
+        { date: "2027-01-15", start: "09:00", end: "09:30" },
+        { date: "2027-01-16", start: "14:00", end: "15:30" },
+      ],
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("One blank slot added");
+    expect(html.match(/data-slot-row/g)).toHaveLength(3);
+    expect(html).toContain('value="2027-01-15"');
+    expect(html).toContain("TIMES IN America/Detroit");
+  });
+
+  it("re-renders an end-before-start Meeting slot inline with all values", async () => {
+    const cookie = await createAuthenticatedCookie();
+    const response = await postMeeting(
+      cookie,
+      await csrfFor(cookie),
+      crypto.randomUUID(),
+      "publish",
+      [
+        { date: "2027-01-15", start: "10:00", end: "09:00" },
+        { date: "2027-01-16", start: "14:00", end: "15:30" },
+      ],
+    );
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(html).toContain("This slot ends before it starts. Check the times.");
+    expect(html).toContain('value="10:00"');
+    expect(html).toContain('value="09:00"');
+    expect(html).toContain('value="2027-01-16"');
+  });
+
+  it("publishes heterogeneous Meeting slots as absolute instants", async () => {
+    const cookie = await createAuthenticatedCookie();
+    const pollId = crypto.randomUUID();
+    const response = await postMeeting(
+      cookie,
+      await csrfFor(cookie),
+      pollId,
+      "publish",
+      [
+        { date: "2027-01-15", start: "09:00", end: "09:30" },
+        { date: "2027-01-16", start: "14:00", end: "15:30" },
+      ],
+    );
+    const rows = await testEnv.DB.prepare(
+      "SELECT position, starts_at_ms, ends_at_ms, time_zone FROM meeting_slot WHERE poll_id = ?1 ORDER BY position",
+    )
+      .bind(pollId)
+      .all();
+    expect(response.status).toBe(303);
+    expect(rows.results).toEqual([
+      {
+        position: 0,
+        starts_at_ms: Date.parse("2027-01-15T14:00:00.000Z"),
+        ends_at_ms: Date.parse("2027-01-15T14:30:00.000Z"),
+        time_zone: "America/Detroit",
+      },
+      {
+        position: 1,
+        starts_at_ms: Date.parse("2027-01-16T19:00:00.000Z"),
+        ends_at_ms: Date.parse("2027-01-16T20:30:00.000Z"),
+        time_zone: "America/Detroit",
+      },
+    ]);
+  });
+
   it("redirects an unauthenticated POST to sign-in with a return address", async () => {
     const context = makeContext(
       new Request("https://polls.example.test/creator/new", {

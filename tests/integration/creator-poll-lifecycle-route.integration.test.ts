@@ -112,6 +112,45 @@ async function seedDemoPoll(ownerUserId: string): Promise<string> {
   return pollId;
 }
 
+async function seedMeetingPoll(ownerUserId: string): Promise<string> {
+  const pollId = crypto.randomUUID();
+  const nowMs = Date.now();
+  await testEnv.DB.batch([
+    testEnv.DB.prepare(
+      `INSERT INTO poll (
+        id, owner_user_id, poll_type, question, description,
+        result_visibility, discovery_state, session_checks_enabled,
+        multi_select_enabled, min_selections, max_selections,
+        representation_version, created_at_ms, updated_at_ms
+      ) VALUES (?1, ?2, 'meeting', 'Pick a meeting time', NULL,
+        'live', 'unlisted', 1, 0, NULL, NULL, 1, ?3, ?3)`,
+    ).bind(pollId, ownerUserId, nowMs),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_slot (id, poll_id, position, starts_at_ms, ends_at_ms, time_zone, created_at_ms) VALUES (?1, ?2, 0, ?3, ?4, 'America/Detroit', ?5)",
+    ).bind(
+      crypto.randomUUID(),
+      pollId,
+      Date.parse("2027-01-15T14:00:00.000Z"),
+      Date.parse("2027-01-15T14:30:00.000Z"),
+      nowMs,
+    ),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_slot (id, poll_id, position, starts_at_ms, ends_at_ms, time_zone, created_at_ms) VALUES (?1, ?2, 1, ?3, ?4, 'America/Detroit', ?5)",
+    ).bind(
+      crypto.randomUUID(),
+      pollId,
+      Date.parse("2027-01-16T19:00:00.000Z"),
+      Date.parse("2027-01-16T20:30:00.000Z"),
+      nowMs,
+    ),
+    testEnv.DB.prepare(
+      "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (?1, ?2, 'generated', 1, ?3)",
+    ).bind(`meeting-${crypto.randomUUID()}`, pollId, nowMs),
+  ]);
+  await insertVote(pollId);
+  return pollId;
+}
+
 async function runRealRoute(
   context: MiddlewareContext,
   pollId: string,
@@ -445,6 +484,27 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
     expect(html).toContain("Original description");
     expect(html).toContain('value="Alpha"');
     expect(html).toContain('value="Beta"');
+  });
+
+  it("renders voted Meeting slots read-only in the Creator timezone", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedMeetingPoll(userId);
+    const response = await runRealRoute(
+      makeContext(
+        new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+          headers: { cookie },
+        }),
+      ),
+      pollId,
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("Locked — the first Vote has been cast.");
+    expect(html).toContain("TIMES IN America/Detroit");
+    expect(html).toContain("Fri, Jan 15, 2027, 9:00 AM–9:30 AM");
+    expect(html).toContain("Sat, Jan 16, 2027, 2:00 PM–3:30 PM");
+    expect(html).toContain("data-locked-options");
+    expect(html).not.toContain('name="slot_date_0"');
   });
 
   it("persists the Comment opt-in through create and renders that stored definition", async () => {

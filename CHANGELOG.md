@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Meeting Poll creation on `/creator/new`. Creators can propose two or more
+  heterogeneous date/start/end slots in an explicitly stated timezone; slots
+  persist as absolute instants with their IANA timezone and render read-only in
+  that timezone after the first Vote.
+
 - Share-block URL text is itself a copy target. On clipboard-capable desktop
   browsers, clicking a Poll's canonical URL text now copies the link and
   confirms `LINK COPIED`, in addition to selecting it; the SHARE control and

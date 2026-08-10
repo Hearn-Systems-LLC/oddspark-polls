@@ -268,6 +268,13 @@ export type PollPage = {
      * options; the LEFT JOIN keeps it absent for every other type. */
     media?: PollOptionMedia;
   }[];
+  slots?: {
+    id: string;
+    startsAtMs: number;
+    endsAtMs: number;
+    timeZone: string;
+    position: number;
+  }[];
 };
 
 export type OwnedPoll = PollPage & {
@@ -351,7 +358,36 @@ async function loadOptions(
   );
 }
 
-function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
+async function loadMeetingSlots(
+  db: D1Database,
+  pollId: PollId,
+): Promise<NonNullable<PollPage["slots"]>> {
+  const rows = await db
+    .prepare(
+      "SELECT id, starts_at_ms, ends_at_ms, time_zone, position FROM meeting_slot WHERE poll_id = ?1 ORDER BY position",
+    )
+    .bind(pollId)
+    .all<{
+      id: string;
+      starts_at_ms: number;
+      ends_at_ms: number;
+      time_zone: string;
+      position: number;
+    }>();
+  return rows.results.map((row) => ({
+    id: row.id,
+    startsAtMs: row.starts_at_ms,
+    endsAtMs: row.ends_at_ms,
+    timeZone: row.time_zone,
+    position: row.position,
+  }));
+}
+
+function toPollPage(
+  row: PollRow,
+  options: PollPage["options"],
+  slots: NonNullable<PollPage["slots"]>,
+): PollPage {
   return {
     pollId: row.id,
     canonicalReference: row.canonical_reference,
@@ -372,6 +408,7 @@ function toPollPage(row: PollRow, options: PollPage["options"]): PollPage {
     deadlineMs: row.deadline_ms,
     closedAtMs: row.closed_at_ms,
     options,
+    ...(slots.length > 0 ? { slots } : {}),
   };
 }
 
@@ -390,7 +427,7 @@ export function createPollPersistence(db: D1Database) {
     // The one AD-3 creation batch: poll + options + reference commit
     // together or not at all — a failed batch leaves no reachable Poll.
     async insertPoll(rows: PollPersistenceRows): Promise<void> {
-      const { poll, options, reference, media } = rows;
+      const { poll, options, reference, media, slots } = rows;
       try {
         await db.batch([
           db
@@ -458,6 +495,21 @@ export function createPollPersistence(db: D1Database) {
                 m.createdAtMs,
               ),
           ),
+          ...(slots ?? []).map((slot) =>
+            db
+              .prepare(
+                "INSERT INTO meeting_slot (id, poll_id, position, starts_at_ms, ends_at_ms, time_zone, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+              )
+              .bind(
+                slot.id,
+                slot.pollId,
+                slot.position,
+                slot.startsAtMs,
+                slot.endsAtMs,
+                slot.timeZone,
+                slot.createdAtMs,
+              ),
+          ),
         ]);
       } catch (error) {
         // Poll-ID precedence preserves D4 dedupe when a replay collides on
@@ -493,7 +545,11 @@ export function createPollPersistence(db: D1Database) {
       if (!row) {
         return null;
       }
-      return toPollPage(row, await loadOptions(db, row.id));
+      const [options, slots] = await Promise.all([
+        loadOptions(db, row.id),
+        loadMeetingSlots(db, row.id),
+      ]);
+      return toPollPage(row, options, slots);
     },
 
     // Case-variant resolution for custom links only (Story 1.4 review):
@@ -537,8 +593,12 @@ export function createPollPersistence(db: D1Database) {
       if (!row) {
         return null;
       }
+      const [options, slots] = await Promise.all([
+        loadOptions(db, row.id),
+        loadMeetingSlots(db, row.id),
+      ]);
       return {
-        ...toPollPage(row, await loadOptions(db, row.id)),
+        ...toPollPage(row, options, slots),
         canonicalReference: row.canonical_reference as string,
         canonicalReferenceKind: row.canonical_reference_kind,
         createdAtMs: row.created_at_ms,

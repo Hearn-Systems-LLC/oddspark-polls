@@ -14,6 +14,8 @@ interface Props {
     question: string;
     description: string;
     options: string[];
+    slots?: { date: string; start: string; end: string }[];
+    timeZone?: string;
     multiSelect: string;
     minSelections: string;
     maxSelections: string;
@@ -21,6 +23,7 @@ interface Props {
   };
   fieldErrors?: Record<string, string>;
   optionNote?: string | null;
+  slotNote?: string | null;
   pollTypeLabel?: string;
   showPollType?: boolean;
   pollTypeEditable?: boolean;
@@ -28,6 +31,8 @@ interface Props {
   /** When true, question/options/multi-select render read-only. */
   locked?: boolean;
   lockMessage?: string | null;
+  lockedSlots?: string[];
+  lockedTimeZone?: string | null;
   /** Label for the primary save submit (edit only; create uses external publish). */
   saveLabel?: string | null;
   showSave?: boolean;
@@ -48,12 +53,15 @@ const {
   values,
   fieldErrors = {},
   optionNote = null,
+  slotNote = null,
   pollTypeLabel = "MULTIPLE CHOICE",
   showPollType = true,
   pollTypeEditable = false,
   showDescription = true,
   locked = false,
   lockMessage = null,
+  lockedSlots = [],
+  lockedTimeZone = null,
   saveLabel = "SAVE CHANGES",
   showSave = false,
   tempMedia = [],
@@ -80,10 +88,16 @@ const POLL_TYPE_CHOICES = [
     label: "IMAGE",
     description: "Each option is a picture. Voters pick their favorite.",
   },
+  {
+    value: "meeting",
+    label: "MEETING",
+    description: "Propose concrete times for the group to consider.",
+  },
 ] as const;
 const pollType = values.pollType ?? "multiple_choice";
 const rankedChoice = pollType === "ranked_choice";
 const imagePoll = pollType === "image";
+const meetingPoll = pollType === "meeting";
 ---
 
 {
@@ -154,16 +168,20 @@ const imagePoll = pollType === "image";
         </p>
       </div>
       <div class="field-block">
-        <p class="group-label">OPTIONS</p>
+        <p class="group-label">{meetingPoll ? "TIME SLOTS" : "OPTIONS"}</p>
+        {meetingPoll && (
+          <p class="label-caps-lg" data-timezone-line>
+            TIMES IN {lockedTimeZone || "UTC"}
+          </p>
+        )}
         <ol class="locked-options" data-locked-options>
-          {values.options
-            .filter((option) => option.trim().length > 0)
-            .map((option) => (
-              <li>{option}</li>
-            ))}
+          {(meetingPoll
+            ? lockedSlots
+            : values.options.filter((option) => option.trim().length > 0)
+          ).map((value) => <li>{value}</li>)}
         </ol>
       </div>
-      {!rankedChoice && (
+      {!rankedChoice && !meetingPoll && (
         <div class="field-block">
           <p class="group-label">HOW MANY OPTIONS CAN A VOTER PICK</p>
           <p class="read-only-value">
@@ -205,6 +223,8 @@ const imagePoll = pollType === "image";
 
       <fieldset
         class="field-block options-block"
+        data-options-fields
+        hidden={meetingPoll}
         aria-invalid={fieldErrors.options ? "true" : undefined}
         aria-describedby={fieldErrors.options ? "options-error" : undefined}
       >
@@ -216,9 +236,10 @@ const imagePoll = pollType === "image";
               <div class="option-row" data-option-row>
                 <Input
                   id={`option-${index + 1}`}
-                  name="option"
+                  name={meetingPoll ? undefined : "option"}
                   label={`OPTION ${index + 1}`}
                   value={option}
+                  disabled={meetingPoll}
                 />
                 <div class="image-upload-fields" data-image-upload-fields hidden={!imagePoll}>
                   <div class="image-file-row">
@@ -308,9 +329,67 @@ const imagePoll = pollType === "image";
       </fieldset>
 
       <fieldset
+        class="field-block options-block"
+        data-meeting-slot-fields
+        hidden={!meetingPoll}
+        aria-invalid={fieldErrors.slots ? "true" : undefined}
+        aria-describedby={fieldErrors.slots ? "slots-error" : undefined}
+      >
+        <legend class="group-label">TIME SLOTS</legend>
+        <p class="label-caps-lg" data-timezone-line>
+          TIMES IN {values.timeZone?.trim() || "UTC"}
+        </p>
+        <div data-slot-list>
+          {(values.slots ?? []).map((slot, index) => (
+            <div class="option-row slot-row" data-slot-row>
+              <Input
+                id={`slot-date-${index}`}
+                name={meetingPoll ? `slot_date_${index}` : undefined}
+                label={`SLOT ${index + 1} DATE`}
+                type="date"
+                value={slot.date}
+                disabled={!meetingPoll}
+              />
+              <Input
+                id={`slot-start-${index}`}
+                name={meetingPoll ? `slot_start_${index}` : undefined}
+                label="START"
+                type="time"
+                value={slot.start}
+                disabled={!meetingPoll}
+              />
+              <Input
+                id={`slot-end-${index}`}
+                name={meetingPoll ? `slot_end_${index}` : undefined}
+                label="END"
+                type="time"
+                value={slot.end}
+                disabled={!meetingPoll}
+              />
+              {fieldErrors[`slots[${index}]`] && (
+                <p class="field-error" id={`slot-${index}-error`}>
+                  {fieldErrors[`slots[${index}]`]}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+        {fieldErrors.slots && (
+          <p class="field-error" id="slots-error">{fieldErrors.slots}</p>
+        )}
+        <div class="add-option">
+          <ButtonSecondary type="submit" name="intent" value="add-slot">
+            ADD SLOT
+          </ButtonSecondary>
+          {slotNote && <p class="helper-note">{slotNote}</p>}
+          <p class="helper-note">Blank slots are dropped when you save.</p>
+        </div>
+      </fieldset>
+
+      <fieldset
         class="field-block"
         data-multiple-choice-fields
-        hidden={rankedChoice || imagePoll}
+        hidden={rankedChoice || imagePoll || meetingPoll}
         aria-invalid={fieldErrors.multiSelect ? "true" : undefined}
         aria-describedby={
           fieldErrors.multiSelect ? "multi-select-error" : undefined
@@ -325,7 +404,7 @@ const imagePoll = pollType === "image";
               value={choice.value}
               label={choice.label}
               checked={values.multiSelect === choice.value}
-              disabled={rankedChoice || imagePoll}
+              disabled={rankedChoice || imagePoll || meetingPoll}
             />
           ))}
         </div>
@@ -348,7 +427,7 @@ const imagePoll = pollType === "image";
               label="MIN (OPTIONAL)"
               type="number"
               value={values.minSelections}
-              disabled={rankedChoice || imagePoll}
+              disabled={rankedChoice || imagePoll || meetingPoll}
               error={Boolean(fieldErrors.minSelections)}
               describedby={
                 fieldErrors.minSelections
@@ -369,7 +448,7 @@ const imagePoll = pollType === "image";
               label="MAX (OPTIONAL)"
               type="number"
               value={values.maxSelections}
-              disabled={rankedChoice || imagePoll}
+              disabled={rankedChoice || imagePoll || meetingPoll}
               error={Boolean(fieldErrors.maxSelections)}
               describedby={
                 fieldErrors.maxSelections

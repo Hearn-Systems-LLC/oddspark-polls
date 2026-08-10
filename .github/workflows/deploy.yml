@@ -230,11 +230,8 @@ jobs:
 
       - name: Production smoke
         env:
-          SMOKE_URL: ${{ vars.PRODUCTION_URL }}
+          SMOKE_URL: "https://polls.oddspark.dev"
         run: |
-          if [ -z "$SMOKE_URL" ]; then
-            SMOKE_URL="https://oddspark-polls.hearnsystems.workers.dev"
-          fi
           for i in 1 2 3 4 5; do
             if SMOKE_URL="$SMOKE_URL" pnpm smoke:staging; then
               exit 0

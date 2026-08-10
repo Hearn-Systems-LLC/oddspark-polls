@@ -32,6 +32,9 @@ describe("Demo release contract", () => {
     expect(production.indexOf("Production deploy")).toBeLessThan(
       production.indexOf("Production smoke"),
     );
+    expect(production).toContain(
+      'SMOKE_URL: "https://polls.oddspark.dev"',
+    );
   });
 
   it("smokes the exact public Demo without mutating a Vote", () => {
@@ -47,6 +50,9 @@ describe("Demo release contract", () => {
     ]) {
       expect(smoke).toContain(copy);
     }
-    expect(smoke).not.toContain('method: "POST"');
+    expect(smoke).toContain('method: "POST"');
+    expect(smoke).toContain('provider=google&return=%2Fcreator');
+    expect(smoke).toContain('searchParams.get("redirect_uri")');
+    expect(smoke).toContain('new URL("api/auth/callback/google", origin)');
   });
 });

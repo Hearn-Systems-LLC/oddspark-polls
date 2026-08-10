@@ -124,6 +124,13 @@
     },
     "production": {
       "name": "oddspark-polls",
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "polls.oddspark.dev",
+          "custom_domain": true
+        }
+      ],
       "triggers": {
         "crons": ["*/15 * * * *"]
       },

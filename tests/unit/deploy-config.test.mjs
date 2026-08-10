@@ -23,6 +23,8 @@ describe("buildRemoteDeployConfig", () => {
   it("copies staging vars, secrets, and ratelimits without local test bindings", () => {
     const config = buildRemoteDeployConfig(wranglerJson, "staging");
     expect(config.name).toBe("oddspark-polls-staging");
+    expect(config.workers_dev).toBe(true);
+    expect(config.routes).toBeUndefined();
     expect(config.vars.TURNSTILE_SITE_KEY).toBe(
       wranglerJson.env.staging.vars.TURNSTILE_SITE_KEY,
     );
@@ -39,6 +41,10 @@ describe("buildRemoteDeployConfig", () => {
   it("copies production vars, secrets, and ratelimits without local test bindings", () => {
     const config = buildRemoteDeployConfig(wranglerJson, "production");
     expect(config.name).toBe("oddspark-polls");
+    expect(config.workers_dev).toBe(false);
+    expect(config.routes).toEqual([
+      { pattern: "polls.oddspark.dev", custom_domain: true },
+    ]);
     expect(config.vars.TURNSTILE_SITE_KEY).toBe(
       wranglerJson.env.production.vars.TURNSTILE_SITE_KEY,
     );

@@ -249,7 +249,7 @@ describe("creator CSV export route", () => {
   it("returns a safe no-partial 500 for an unsupported projection", async () => {
     const owner = await authenticated();
     const pollId = await poll(owner.userId);
-    await testEnv.DB.prepare("UPDATE poll SET poll_type = 'meeting' WHERE id = ?1")
+    await testEnv.DB.prepare("UPDATE poll SET poll_type = 'unsupported' WHERE id = ?1")
       .bind(pollId)
       .run();
     const response = await requestRoute(GET, pollId, {

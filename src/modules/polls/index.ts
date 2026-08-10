@@ -33,6 +33,7 @@ import {
   type PollDefinitionDraft,
   type ValidatedPollDefinition,
 } from "./definition";
+import type { MeetingSlotFact, MeetingSlotInput } from "./types/meeting";
 
 export {
   DEFINITION_COPY,
@@ -57,6 +58,7 @@ export type CreatePollDraft = {
   question: string;
   description: string;
   options: string[];
+  slots?: MeetingSlotInput[];
   resultVisibility: string;
   discoveryState: string;
   deadlineLocal: string;
@@ -93,6 +95,7 @@ export type ValidatedCreatePoll = {
   question: string;
   description: string | null;
   options: { label: string; position: number }[];
+  slots?: MeetingSlotFact[];
   resultVisibility: ResultVisibility;
   discoveryState: DiscoveryState;
   deadlineMs: number | null;
@@ -396,6 +399,7 @@ export function validateCreatePoll(
       question: definition.value.question,
       description: definition.value.description,
       options: definition.value.options,
+      slots: definition.value.slots,
       resultVisibility: draft.resultVisibility as ResultVisibility,
       discoveryState: discoveryState as DiscoveryState,
       deadlineMs,
@@ -461,6 +465,15 @@ export type PollPersistenceRows = {
     caption: string | null;
     createdAtMs: number;
   }[];
+  slots?: {
+    id: string;
+    pollId: PollId;
+    startsAtMs: number;
+    endsAtMs: number;
+    timeZone: string;
+    position: number;
+    createdAtMs: number;
+  }[];
 };
 
 // Thrown by the persistence adapter when the batch fails on the poll PRIMARY
@@ -505,6 +518,7 @@ export type ExistingPollSnapshot = {
   vpnBlockingEnabled: boolean;
   commentsEnabled: boolean;
   options: { label: string; position: number }[];
+  slots?: MeetingSlotFact[];
   canonicalReference: string;
   canonicalReferenceKind: PollPersistenceRows["reference"]["kind"];
   createdAtMs: number;
@@ -576,6 +590,14 @@ function matchesExistingPoll(
     validated.captchaEnabled === existing.captchaEnabled &&
     validated.vpnBlockingEnabled === existing.vpnBlockingEnabled &&
     validated.commentsEnabled === existing.commentsEnabled &&
+    (validated.slots ?? []).length === (existing.slots ?? []).length &&
+    (validated.slots ?? []).every(
+      (slot, index) =>
+        slot.startsAtMs === existing.slots?.[index]?.startsAtMs &&
+        slot.endsAtMs === existing.slots?.[index]?.endsAtMs &&
+        slot.timeZone === existing.slots?.[index]?.timeZone &&
+        slot.position === existing.slots?.[index]?.position,
+    ) &&
     optionCount === existing.options.length &&
     validated.options.every(
       (option, index) =>
@@ -630,6 +652,13 @@ function draftContentForCompare(
       .map((label) => label.trim())
       .filter((label) => label.length > 0)
       .map((label, position) => ({ label, position })),
+    slots:
+      draft.pollType === "meeting"
+        ? (() => {
+            const facts = validatePollDefinition(draft, "meeting");
+            return facts.ok ? facts.value.slots : undefined;
+          })()
+        : undefined,
     resultVisibility: draft.resultVisibility as ResultVisibility,
     discoveryState: parseListingDraft(draft.discoveryState) as DiscoveryState,
     deadlineMs,
@@ -790,6 +819,15 @@ export async function createPoll(
       pollId,
       label: option.label,
       position: option.position,
+      createdAtMs: nowMs,
+    })),
+    slots: validated.value.slots?.map((slot) => ({
+      id: deps.generateId(),
+      pollId,
+      startsAtMs: slot.startsAtMs,
+      endsAtMs: slot.endsAtMs,
+      timeZone: slot.timeZone,
+      position: slot.position,
       createdAtMs: nowMs,
     })),
     reference: {

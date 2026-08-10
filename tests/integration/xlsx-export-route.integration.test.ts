@@ -227,7 +227,7 @@ describe("creator XLSX export route", () => {
 
     const failedPoll = await poll(owner.userId, "head-failed");
     await testEnv.DB.prepare(
-      "UPDATE poll SET poll_type = 'meeting' WHERE id = ?1",
+      "UPDATE poll SET poll_type = 'unsupported' WHERE id = ?1",
     )
       .bind(failedPoll)
       .run();
@@ -303,7 +303,7 @@ describe("creator XLSX export route", () => {
     const owner = await authenticated();
     const projectionPoll = await poll(owner.userId, "projection-failure");
     await testEnv.DB.prepare(
-      "UPDATE poll SET poll_type = 'meeting' WHERE id = ?1",
+      "UPDATE poll SET poll_type = 'unsupported' WHERE id = ?1",
     )
       .bind(projectionPoll)
       .run();

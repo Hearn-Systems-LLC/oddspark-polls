@@ -107,7 +107,7 @@ describe("Ranked Choice creation", () => {
   });
 
   it("rejects unsupported types and Ranked Choice multi-select bounds", () => {
-    expect(validateCreatePoll(createDraft({ pollType: "meeting" }), NOW)).toEqual({
+    expect(validateCreatePoll(createDraft({ pollType: "unsupported" }), NOW)).toEqual({
       ok: false,
       error: expect.objectContaining({
         fieldErrors: expect.objectContaining({

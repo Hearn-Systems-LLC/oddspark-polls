@@ -658,6 +658,26 @@ const definitionLocked =
   forceLockedView ||
   voterCount > 0;
 
+const meetingTimeZone = poll?.slots?.[0]?.timeZone ?? null;
+const meetingSlotRows = (poll?.slots ?? []).map((slot) => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: slot.timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const start = formatter.format(new Date(slot.startsAtMs));
+  const end = new Intl.DateTimeFormat("en-US", {
+    timeZone: slot.timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(slot.endsAtMs));
+  return `${start}–${end}`;
+});
+
 const listCards = ownedPolls.map((row) =>
   buildPollCardViewModel({
     title: row.question,
@@ -679,6 +699,8 @@ const formValues: PollDefinitionDraft = draftValues ?? {
   options:
     poll?.options.map((option) => option.label) ??
     Array.from({ length: 2 }, () => ""),
+  slots: [],
+  timeZone: meetingTimeZone ?? "",
   multiSelect: poll?.multiSelectEnabled ? "true" : "false",
   minSelections:
     poll?.minSelections != null ? String(poll.minSelections) : "",
@@ -861,6 +883,8 @@ const detailPath = `/creator/polls/${pollId}`;
                       ? LIFECYCLE_COPY.definitionLocked
                       : null
                 }
+                lockedSlots={meetingSlotRows}
+                lockedTimeZone={meetingTimeZone}
                 showSave={true}
                 saveLabel="SAVE CHANGES"
               />

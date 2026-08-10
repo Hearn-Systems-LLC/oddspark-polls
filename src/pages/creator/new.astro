@@ -81,6 +81,11 @@ const formSchema = z.object({
   question: z.string().default(""),
   description: z.string().default(""),
   options: z.array(z.string()).default([]),
+  slots: z.array(z.object({
+    date: z.string().default(""),
+    start: z.string().default(""),
+    end: z.string().default(""),
+  })).default([]),
   visibility: z.string().default(""),
   listing: z.string().default(""),
   deadline: z.string().default(""),
@@ -111,6 +116,7 @@ let values: CreatePollDraft = {
   question: "",
   description: "",
   options: Array.from({ length: INITIAL_OPTION_ROWS }, () => ""),
+  slots: Array.from({ length: 2 }, () => ({ date: "", start: "", end: "" })),
   resultVisibility: "live",
   discoveryState: "unlisted",
   deadlineLocal: "",
@@ -132,6 +138,7 @@ let formError: string | null = null;
 // Informational guidance for a declined no-JS ADD OPTION — not a validation
 // failure, so it renders as a note on a 200, not as an error on a 422.
 let optionNote: string | null = null;
+let slotNote: string | null = null;
 
 // Image Poll media state (Story 6.1). Tracks successfully uploaded temp keys
 // for re-render preservation and alt text / caption per option.
@@ -180,6 +187,7 @@ if (Astro.request.method === "POST") {
     // Extract alt text and caption per option index.
     const altTexts: Record<number, string> = {};
     const captions: Record<number, string> = {};
+    const slotParts: Record<number, { date: string; start: string; end: string }> = {};
     for (const [key, value] of formData.entries()) {
       if (typeof value !== "string") continue;
       const altMatch = key.match(/^media_alt_(\d+)$/);
@@ -189,6 +197,13 @@ if (Astro.request.method === "POST") {
       const capMatch = key.match(/^media_caption_(\d+)$/);
       if (capMatch) {
         captions[parseInt(capMatch[1]!, 10)] = value;
+      }
+      const slotMatch = key.match(/^slot_(date|start|end)_(\d+)$/);
+      if (slotMatch) {
+        const index = parseInt(slotMatch[2]!, 10);
+        const row = slotParts[index] ?? { date: "", start: "", end: "" };
+        row[slotMatch[1] as "date" | "start" | "end"] = value;
+        slotParts[index] = row;
       }
     }
 
@@ -203,6 +218,10 @@ if (Astro.request.method === "POST") {
       options: formData
         .getAll("option")
         .filter((entry): entry is string => typeof entry === "string"),
+      slots: Object.keys(slotParts)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((index) => slotParts[index]!),
       visibility: text(formData.get("visibility")),
       listing: text(formData.get("listing")),
       deadline: text(formData.get("deadline")),
@@ -246,6 +265,7 @@ if (Astro.request.method === "POST") {
     question: parsed.question,
     description: parsed.description,
     options: parsed.options,
+    slots: parsed.slots,
     resultVisibility: parsed.visibility,
     discoveryState: parsed.listing,
     deadlineLocal: parsed.deadline,
@@ -372,7 +392,10 @@ if (Astro.request.method === "POST") {
     }
   }
 
-  if (parsed.intent === "add-option") {
+  if (parsed.intent === "add-slot") {
+    values.slots = [...(values.slots ?? []), { date: "", start: "", end: "" }];
+    slotNote = "One blank slot added. Complete it when you're ready.";
+  } else if (parsed.intent === "add-option") {
     // No-JS ADD OPTION round-trip: one more row, everything preserved,
     // nothing validated yet. The cap counts non-blank rows (blank = removed);
     // a decline is guidance on a 200, not a validation error on a 422.
@@ -480,6 +503,9 @@ if (Astro.request.method === "POST") {
 while (values.options.length < 2) {
   values.options = [...values.options, ""];
 }
+while ((values.slots?.length ?? 0) < 2) {
+  values.slots = [...(values.slots ?? []), { date: "", start: "", end: "" }];
+}
 ---
 
 <BaseLayout title="Create a Poll — Oddspark Polls">
@@ -509,6 +535,7 @@ while (values.options.length < 2) {
         values={values}
         fieldErrors={fieldErrors}
         optionNote={optionNote}
+        slotNote={slotNote}
         showPollType={true}
         pollTypeEditable={true}
         showDescription={false}

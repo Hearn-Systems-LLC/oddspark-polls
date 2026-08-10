@@ -6,6 +6,11 @@ import type { Result } from "../../shared/application/index";
 import { POLL_CAPS } from "./caps";
 import { multipleChoiceStrategy } from "./types/multiple-choice";
 import { rankedChoiceStrategy } from "./types/ranked-choice";
+import {
+  meetingStrategy,
+  type MeetingSlotFact,
+  type MeetingSlotInput,
+} from "./types/meeting";
 import type { RegisteredPollType } from "./types/registry";
 
 // Voice-and-Tone catalog for definition failures — shared with create so
@@ -36,6 +41,8 @@ export type PollDefinitionDraft = {
   question: string;
   description: string;
   options: string[];
+  slots?: MeetingSlotInput[];
+  timeZone?: string;
   multiSelect: string;
   minSelections: string;
   maxSelections: string;
@@ -47,6 +54,7 @@ export type ValidatedPollDefinition = {
   question: string;
   description: string | null;
   options: { label: string; position: number }[];
+  slots?: MeetingSlotFact[];
   multiSelect: boolean;
   minSelections: number | null;
   maxSelections: number | null;
@@ -104,21 +112,22 @@ export function validatePollDefinition(
   const labels = draft.options
     .map((label) => label.trim())
     .filter((label) => label.length > 0);
-  if (labels.length === 0) {
+  if (pollType !== "meeting" && labels.length === 0) {
     fail("options", "options_missing", DEFINITION_COPY.optionsMissing);
-  } else if (labels.length === 1) {
+  } else if (pollType !== "meeting" && labels.length === 1) {
     fail(
       "options",
       "options_insufficient",
       DEFINITION_COPY.optionsInsufficient,
     );
-  } else if (labels.length > POLL_CAPS.maxOptions) {
+  } else if (pollType !== "meeting" && labels.length > POLL_CAPS.maxOptions) {
     fail("options", "options_too_many", DEFINITION_COPY.optionsTooMany);
   } else if (
+    pollType !== "meeting" &&
     labels.some((label) => codePointLength(label) > POLL_CAPS.maxOptionLength)
   ) {
     fail("options", "option_too_long", DEFINITION_COPY.optionTooLong);
-  } else if (new Set(labels).size !== labels.length) {
+  } else if (pollType !== "meeting" && new Set(labels).size !== labels.length) {
     fail("options", "options_duplicate", DEFINITION_COPY.optionsDuplicate);
   }
 
@@ -162,6 +171,18 @@ export function validatePollDefinition(
         "multiSelect",
         "image_bounds_invalid",
         "Image Polls use single-select voting, not multi-select bounds.",
+      );
+    }
+  } else if (pollType === "meeting") {
+    if (
+      requestedMultiSelect ||
+      rawMinSelections.length > 0 ||
+      rawMaxSelections.length > 0
+    ) {
+      fail(
+        "multiSelect",
+        "meeting_bounds_invalid",
+        "Meeting Polls use availability, not multi-select bounds.",
       );
     }
   } else if (!multiSelect) {
@@ -251,6 +272,18 @@ export function validatePollDefinition(
     );
   }
 
+  const meetingFacts =
+    pollType === "meeting"
+      ? meetingStrategy.create(
+          { slots: draft.slots ?? [], timeZone: draft.timeZone ?? "" },
+          { nowMs: 0 },
+        )
+      : null;
+  if (meetingFacts && !meetingFacts.ok) {
+    Object.assign(fieldErrors, meetingFacts.error.fieldErrors ?? {});
+    Object.assign(reasonCodes, meetingFacts.error.reasonCodes ?? {});
+  }
+
   if (Object.keys(fieldErrors).length > 0) {
     return {
       ok: false,
@@ -259,6 +292,22 @@ export function validatePollDefinition(
         message: "Fix the fields below.",
         fieldErrors,
         reasonCodes,
+      },
+    };
+  }
+
+  if (meetingFacts?.ok) {
+    return {
+      ok: true,
+      value: {
+        question,
+        description: descriptionResult.ok ? descriptionResult.value : null,
+        options: [],
+        slots: meetingFacts.value.slots,
+        multiSelect: false,
+        minSelections: null,
+        maxSelections: null,
+        commentsEnabled: draft.commentsEnabled === "true",
       },
     };
   }

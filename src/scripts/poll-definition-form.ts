@@ -36,6 +36,10 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
       } catch {
         // Leave empty — the server treats an absent zone as UTC.
       }
+      const timeZoneLine = form.querySelector<HTMLElement>("[data-timezone-line]");
+      if (timeZoneLine) {
+        timeZoneLine.textContent = `TIMES IN ${timeZoneInput.value || "UTC"}`;
+      }
     }
   }
 
@@ -59,6 +63,8 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
   const multipleChoiceFields = form.querySelector<HTMLElement>(
     "[data-multiple-choice-fields]",
   );
+  const optionsFields = form.querySelector<HTMLElement>("[data-options-fields]");
+  const meetingFields = form.querySelector<HTMLElement>("[data-meeting-slot-fields]");
 
   function syncPollTypeFields(): void {
     if (!multipleChoiceFields) return;
@@ -68,11 +74,35 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
     const image = pollTypeChoices.some(
       (choice) => choice.value === "image" && choice.checked,
     );
-    multipleChoiceFields.hidden = ranked || image;
+    const meeting = pollTypeChoices.some(
+      (choice) => choice.value === "meeting" && choice.checked,
+    );
+    multipleChoiceFields.hidden = ranked || image || meeting;
     for (const input of multipleChoiceFields.querySelectorAll<HTMLInputElement>(
       'input[name="multiSelect"], input[name="minSelections"], input[name="maxSelections"]',
     )) {
-      input.disabled = ranked || image;
+      input.disabled = ranked || image || meeting;
+    }
+    if (optionsFields) {
+      optionsFields.hidden = meeting;
+      for (const input of optionsFields.querySelectorAll<HTMLInputElement>(
+        'input[id^="option-"]',
+      )) {
+        input.disabled = meeting;
+        if (meeting) input.removeAttribute("name");
+        else input.setAttribute("name", "option");
+      }
+    }
+    if (meetingFields) {
+      meetingFields.hidden = !meeting;
+      for (const input of meetingFields.querySelectorAll<HTMLInputElement>(
+        'input[id^="slot-date-"], input[id^="slot-start-"], input[id^="slot-end-"]',
+      )) {
+        input.disabled = !meeting;
+        const match = input.id.match(/^slot-(date|start|end)-(\d+)$/);
+        if (meeting && match) input.setAttribute("name", `slot_${match[1]}_${match[2]}`);
+        else input.removeAttribute("name");
+      }
     }
     // Toggle image upload fields.
     const imageFields = form!.querySelectorAll<HTMLElement>("[data-image-upload-fields]");

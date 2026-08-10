@@ -7,6 +7,7 @@ import type {
   VotingPollTypeStrategy,
 } from "../../voting/index";
 import { imageStrategy } from "./image";
+import { meetingStrategy } from "./meeting";
 import { multipleChoiceStrategy } from "./multiple-choice";
 import {
   rankedChoiceStrategy,
@@ -17,6 +18,7 @@ export const pollTypeStrategies = {
   multiple_choice: multipleChoiceStrategy,
   ranked_choice: rankedChoiceStrategy,
   image: imageStrategy,
+  meeting: meetingStrategy,
 } as const;
 
 export type RegisteredPollType = keyof typeof pollTypeStrategies;

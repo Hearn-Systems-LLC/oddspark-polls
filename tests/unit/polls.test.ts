@@ -1172,6 +1172,48 @@ describe("createPoll command", () => {
     };
   }
 
+  it("commits Meeting slots instead of option rows in the one creation batch", async () => {
+    const persisted: PollPersistenceRows[] = [];
+    const result = await createPoll(
+      deps(persisted),
+      USER_1,
+      draft({
+        pollType: "meeting",
+        options: [],
+        timeZone: "America/Detroit",
+        slots: [
+          { date: "2027-01-15", start: "09:00", end: "09:30" },
+          { date: "2027-01-16", start: "14:00", end: "15:30" },
+        ],
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]?.poll.pollType).toBe("meeting");
+    expect(persisted[0]?.options).toEqual([]);
+    expect(persisted[0]?.slots).toEqual([
+      {
+        id: "id-2",
+        pollId: "id-1",
+        startsAtMs: Date.parse("2027-01-15T14:00:00.000Z"),
+        endsAtMs: Date.parse("2027-01-15T14:30:00.000Z"),
+        timeZone: "America/Detroit",
+        position: 0,
+        createdAtMs: NOW,
+      },
+      {
+        id: "id-3",
+        pollId: "id-1",
+        startsAtMs: Date.parse("2027-01-16T19:00:00.000Z"),
+        endsAtMs: Date.parse("2027-01-16T20:30:00.000Z"),
+        timeZone: "America/Detroit",
+        position: 1,
+        createdAtMs: NOW,
+      },
+    ]);
+  });
+
   it("commits poll + options + reference rows with the story defaults", async () => {
     const persisted: PollPersistenceRows[] = [];
     const result = await createPoll(deps(persisted), USER_1, draft());

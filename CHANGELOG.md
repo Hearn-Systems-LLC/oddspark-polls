@@ -15,6 +15,10 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Share-block URL text is itself a copy target. On clipboard-capable desktop
+  browsers, clicking a Poll's canonical URL text now copies the link and
+  confirms `LINK COPIED`, in addition to selecting it; the SHARE control and
+  the no-JavaScript baseline are unchanged.
 - Automatic Image Poll media cleanup. Deleting an Image Poll now removes its
   D1-owned surface immediately while a same-Worker 15-minute cron drains
   self-contained R2 cleanup work. The scheduler also removes unadopted

@@ -125,7 +125,7 @@ export function createShareActionController(
   };
 }
 
-function enhanceRoot(root: HTMLElement): void {
+export function enhanceRoot(root: HTMLElement): void {
   const url = root.dataset.shareUrl?.trim() ?? "";
   const trigger = root.querySelector<HTMLButtonElement>(".share-trigger");
   const confirmation = root.querySelector<HTMLElement>(
@@ -142,7 +142,7 @@ function enhanceRoot(root: HTMLElement): void {
   }
 
   trigger.hidden = false;
-  const activate = createShareActionController(operations, {
+  const presentation: SharePresentation = {
     setConfirmation(visible) {
       if (!visible) {
         confirmation.textContent = "";
@@ -156,11 +156,54 @@ function enhanceRoot(root: HTMLElement): void {
     setPending(pending) {
       trigger.disabled = pending;
     },
-  });
+  };
+  const activate = createShareActionController(operations, presentation);
 
   trigger.addEventListener("click", () => {
     void activate(url);
   });
+
+  // Whenever the clipboard exists, the URL text itself is also a copy target
+  // (the SHARE trigger keeps its share-first behavior; the text NEVER opens a
+  // share sheet, so it gets a copy-only controller over the same presentation
+  // idiom). `user-select: all` still selects on the same click.
+  if (operations.copy) {
+    const urlText = root.querySelector<HTMLElement>("[data-share-url-text]");
+    if (urlText) {
+      // JS-only affordance hint; the no-JS markup never advertises it.
+      urlText.style.cursor = "copy";
+      const copyOnly = createShareActionController(
+        { copy: operations.copy },
+        presentation,
+      );
+      // Pointer-only: keyboard/AT clicks (detail 0), non-mouse pointers, and
+      // drag-to-select gestures must never fire a copy. Console-silent.
+      let downPointerType = "";
+      let downClientX = 0;
+      let downClientY = 0;
+      urlText.addEventListener("pointerdown", (event) => {
+        downPointerType = event.pointerType;
+        downClientX = event.clientX;
+        downClientY = event.clientY;
+      });
+      urlText.addEventListener("click", (event) => {
+        if (event.detail === 0) {
+          return;
+        }
+        if (downPointerType !== "mouse") {
+          return;
+        }
+        const dragDistance = Math.hypot(
+          event.clientX - downClientX,
+          event.clientY - downClientY,
+        );
+        if (dragDistance > 4) {
+          return;
+        }
+        void copyOnly(url);
+      });
+    }
+  }
 }
 
 function enhance(): void {

@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createShareActionController,
   detectShareCapability,
+  enhanceRoot,
   isAbortError,
 } from "../../src/scripts/share-action.ts";
 
@@ -101,6 +102,12 @@ describe("share-action component contract (Story 1.13)", () => {
   it("exposes a single data-share-action root contract", () => {
     expect(componentSource).toContain("data-share-action");
     expect(componentSource).toContain("data-share-url={canonicalUrl}");
+  });
+
+  it("keeps data-share-url-text on the .canonical-url element the enhancer binds", () => {
+    expect(componentSource).toMatch(
+      /<p class="canonical-url" data-share-url-text>/,
+    );
   });
 });
 
@@ -254,6 +261,257 @@ describe("share-action enhancer decisions (Story 1.13)", () => {
     expect(state.confirmationText).toBe("LINK COPIED");
     expect(state.announcements).toBe(1);
     expect(state.pendingTransitions).toEqual([true, false]);
+  });
+});
+
+function enhanceHarness() {
+  const listeners = { trigger: [], urlText: [], urlTextPointerDown: [] };
+  const trigger = {
+    hidden: true,
+    disabled: false,
+    addEventListener: vi.fn((type, handler) => {
+      if (type === "click") {
+        listeners.trigger.push(handler);
+      }
+    }),
+  };
+  const reveals = { count: 0 };
+  const confirmation = {
+    textContent: "",
+    get hidden() {
+      return this._hidden;
+    },
+    set hidden(value) {
+      if (value === false) {
+        reveals.count += 1;
+      }
+      this._hidden = value;
+    },
+    _hidden: true,
+  };
+  const urlText = {
+    style: {},
+    addEventListener: vi.fn((type, handler) => {
+      if (type === "click") {
+        listeners.urlText.push(handler);
+      }
+      if (type === "pointerdown") {
+        listeners.urlTextPointerDown.push(handler);
+      }
+    }),
+  };
+  const root = {
+    dataset: { shareUrl: canonicalUrl },
+    querySelector(selector) {
+      if (selector === ".share-trigger") return trigger;
+      if (selector === "[data-share-confirmation]") return confirmation;
+      if (selector === "[data-share-url-text]") return urlText;
+      return null;
+    },
+  };
+  // Simulates a pointer activation: pointerdown records the pointer, click
+  // carries detail/coordinates. Defaults to a stationary mouse click.
+  function clickUrlText({
+    detail = 1,
+    pointerType = "mouse",
+    downClientX = 0,
+    downClientY = 0,
+    clickClientX = 0,
+    clickClientY = 0,
+  } = {}) {
+    for (const handler of listeners.urlTextPointerDown) {
+      handler({ pointerType, clientX: downClientX, clientY: downClientY });
+    }
+    for (const handler of listeners.urlText) {
+      handler({ detail, clientX: clickClientX, clientY: clickClientY });
+    }
+  }
+  return { root, trigger, confirmation, urlText, listeners, reveals, clickUrlText };
+}
+
+describe("share-action URL text copy binding", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("binds copy-on-click to the URL text when clipboard is the only capability", async () => {
+    const copy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      share: undefined,
+      clipboard: { writeText: copy },
+    });
+    const { root, trigger, confirmation, urlText, clickUrlText } =
+      enhanceHarness();
+
+    enhanceRoot(root);
+
+    expect(trigger.hidden).toBe(false);
+    expect(urlText.addEventListener).toHaveBeenCalledWith(
+      "click",
+      expect.any(Function),
+    );
+    expect(urlText.style.cursor).toBe("copy");
+
+    clickUrlText();
+    await vi.waitFor(() => {
+      expect(copy).toHaveBeenCalledWith(canonicalUrl);
+    });
+    await vi.waitFor(() => {
+      expect(confirmation.hidden).toBe(false);
+    });
+    expect(confirmation.textContent).toBe("LINK COPIED");
+  });
+
+  it("binds the URL text to copy when both clipboard and Web Share exist, and never opens the share sheet from the text", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    const copy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      share,
+      clipboard: { writeText: copy },
+    });
+    const { root, confirmation, clickUrlText } = enhanceHarness();
+
+    enhanceRoot(root);
+    clickUrlText();
+
+    await vi.waitFor(() => {
+      expect(copy).toHaveBeenCalledWith(canonicalUrl);
+    });
+    expect(share).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(confirmation.textContent).toBe("LINK COPIED");
+    });
+  });
+
+  it("never binds the URL text when only the Web Share API exists", () => {
+    vi.stubGlobal("navigator", {
+      share: async () => undefined,
+      clipboard: undefined,
+    });
+    const { root, trigger, urlText, listeners } = enhanceHarness();
+
+    enhanceRoot(root);
+
+    expect(trigger.hidden).toBe(false);
+    expect(urlText.addEventListener).not.toHaveBeenCalled();
+    expect(listeners.urlText).toHaveLength(0);
+    expect(urlText.style.cursor).toBeUndefined();
+  });
+
+  it("never binds the URL text when no share capability exists", () => {
+    vi.stubGlobal("navigator", {
+      share: undefined,
+      clipboard: undefined,
+    });
+    const { root, trigger, urlText } = enhanceHarness();
+
+    enhanceRoot(root);
+
+    expect(trigger.hidden).toBe(true);
+    expect(urlText.addEventListener).not.toHaveBeenCalled();
+    expect(urlText.style.cursor).toBeUndefined();
+  });
+
+  it("ignores keyboard-synthesized clicks (detail 0) on the URL text", async () => {
+    const copy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      share: undefined,
+      clipboard: { writeText: copy },
+    });
+    const { root, confirmation, clickUrlText } = enhanceHarness();
+
+    enhanceRoot(root);
+    clickUrlText({ detail: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(copy).not.toHaveBeenCalled();
+    expect(confirmation.hidden).toBe(true);
+  });
+
+  it("ignores non-mouse pointer activations (touch) on the URL text", async () => {
+    const copy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      share: undefined,
+      clipboard: { writeText: copy },
+    });
+    const { root, confirmation, clickUrlText } = enhanceHarness();
+
+    enhanceRoot(root);
+    clickUrlText({ pointerType: "touch" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(copy).not.toHaveBeenCalled();
+    expect(confirmation.hidden).toBe(true);
+  });
+
+  it("ignores a drag-to-select gesture that moves between pointerdown and click", async () => {
+    const copy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", {
+      share: undefined,
+      clipboard: { writeText: copy },
+    });
+    const { root, confirmation, clickUrlText } = enhanceHarness();
+
+    enhanceRoot(root);
+    clickUrlText({ clickClientX: 24, clickClientY: 3 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(copy).not.toHaveBeenCalled();
+    expect(confirmation.hidden).toBe(true);
+  });
+
+  it("keeps a rejected copy from the URL text silent with no confirmation", async () => {
+    const copy = vi.fn().mockRejectedValue(new Error("permission denied"));
+    vi.stubGlobal("navigator", {
+      share: undefined,
+      clipboard: { writeText: copy },
+    });
+    const { root, trigger, confirmation, clickUrlText } = enhanceHarness();
+
+    enhanceRoot(root);
+    clickUrlText();
+
+    await vi.waitFor(() => {
+      expect(trigger.disabled).toBe(true);
+    });
+    await vi.waitFor(() => {
+      expect(trigger.disabled).toBe(false);
+    });
+    expect(copy).toHaveBeenCalledWith(canonicalUrl);
+    expect(confirmation.hidden).toBe(true);
+    expect(confirmation.textContent).toBe("");
+  });
+
+  it("ignores a repeat URL text click while the first copy is pending", async () => {
+    let finishCopy;
+    const copy = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishCopy = resolve;
+        }),
+    );
+    vi.stubGlobal("navigator", {
+      share: undefined,
+      clipboard: { writeText: copy },
+    });
+    const { root, confirmation, reveals, clickUrlText } = enhanceHarness();
+
+    enhanceRoot(root);
+    clickUrlText();
+    await vi.waitFor(() => {
+      expect(copy).toHaveBeenCalledTimes(1);
+    });
+    clickUrlText();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(copy).toHaveBeenCalledTimes(1);
+
+    finishCopy();
+    await vi.waitFor(() => {
+      expect(confirmation.textContent).toBe("LINK COPIED");
+    });
+    // One reveal per completed activation — a repeat activation after
+    // completion re-reveals by design (fresh live-region announcement).
+    expect(reveals.count).toBe(1);
   });
 });
 

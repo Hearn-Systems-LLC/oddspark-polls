@@ -405,6 +405,125 @@ test.describe("share action", () => {
     ]);
   });
 
+  test("clicking the URL text copies once, announces LINK COPIED, and keeps the selection", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: undefined,
+      });
+    });
+
+    await signIn(context, baseURL);
+    const pollId = await publishPoll(page, "URL text copy poll");
+    const reference = pollReference(pollId);
+    const votingUrl = `${requireBaseUrl(baseURL)}/${reference}`;
+
+    await page.goto(`/${reference}/results`);
+    const urlText = page.locator("[data-share-url-text]");
+    await expect(urlText).toHaveText(votingUrl);
+
+    await urlText.click();
+    await expect(page.locator("[data-share-confirmation]")).toBeVisible();
+    await expect(page.locator("[data-share-confirmation]")).toHaveText(
+      "LINK COPIED",
+    );
+    await expect.poll(() =>
+      page.evaluate(() => navigator.clipboard.readText()),
+    ).toBe(votingUrl);
+    // The click still selects the URL text; copy is additive.
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection().toString()))
+      .toContain(votingUrl);
+
+    // A second click after completion re-copies and re-reveals the one
+    // confirmation line (fresh live-region announcement by design).
+    await urlText.click();
+    await expect(page.locator("[data-share-confirmation]")).toHaveText(
+      "LINK COPIED",
+    );
+    await expect.poll(() =>
+      page.evaluate(() => navigator.clipboard.readText()),
+    ).toBe(votingUrl);
+  });
+
+  test("with both clipboard and Web Share present, the URL text copies and never opens the share sheet", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.addInitScript(() => {
+      window.__shareCalls = [];
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: async (payload) => {
+          window.__shareCalls.push(payload);
+        },
+      });
+    });
+
+    await signIn(context, baseURL);
+    const pollId = await publishPoll(page, "Both APIs URL text poll");
+    const reference = pollReference(pollId);
+    const votingUrl = `${requireBaseUrl(baseURL)}/${reference}`;
+
+    await page.goto(`/${reference}/results`);
+    const urlText = page.locator("[data-share-url-text]");
+    await expect(urlText).toHaveText(votingUrl);
+
+    await urlText.click();
+    await expect(page.locator("[data-share-confirmation]")).toBeVisible();
+    await expect(page.locator("[data-share-confirmation]")).toHaveText(
+      "LINK COPIED",
+    );
+    await expect.poll(() =>
+      page.evaluate(() => navigator.clipboard.readText()),
+    ).toBe(votingUrl);
+    expect(await page.evaluate(() => window.__shareCalls)).toEqual([]);
+  });
+
+  test("share-only capability leaves the URL text unbound (selection only, no sheet)", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await page.addInitScript(() => {
+      window.__shareCalls = [];
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: async (payload) => {
+          window.__shareCalls.push(payload);
+        },
+      });
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: undefined,
+      });
+    });
+
+    await signIn(context, baseURL);
+    const pollId = await publishPoll(page, "Share-only URL text poll");
+    const reference = pollReference(pollId);
+    const votingUrl = `${requireBaseUrl(baseURL)}/${reference}`;
+
+    await page.goto(`/${reference}/results`);
+    const urlText = page.locator("[data-share-url-text]");
+    await expect(urlText).toHaveText(votingUrl);
+
+    await urlText.click();
+    // Selection happens, but no share sheet and no copy confirmation.
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection().toString()))
+      .toContain(votingUrl);
+    expect(await page.evaluate(() => window.__shareCalls)).toEqual([]);
+    await expect(page.locator("[data-share-confirmation]")).toBeHidden();
+  });
+
   test("clipboard fallback shows LINK COPIED with the canonical URL", async ({
     browser,
     baseURL,

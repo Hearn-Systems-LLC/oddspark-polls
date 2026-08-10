@@ -50,6 +50,7 @@ import {
 import {
   AlreadyVotedError,
   asVoterClaimDigest,
+  asRevisionCapabilityDigest,
   CommentsDisabledError,
   isVoterClaimCheckKind,
   PollClosedError,
@@ -58,6 +59,8 @@ import {
   SubmissionReplayError,
   type StoredVoteOutcome,
   type RankedPreferenceContribution,
+  type MeetingAvailabilityContribution,
+  type MeetingResponseContribution,
   type VotePersistenceBatch,
   type VoteSelectionContribution,
   type VoterClaimCheckKind,
@@ -1280,7 +1283,7 @@ export function createVotePersistence(db: D1Database) {
         rawBatch.vote.payloadHash.length === 0 ||
         !isVotePersistenceTimestamp(rawBatch.vote.createdAtMs) ||
         !Array.isArray(rawBatch.contributions) ||
-        rawBatch.contributions.length > POLL_CAPS.maxOptions + 3 ||
+        rawBatch.contributions.length > POLL_CAPS.maxOptions + 4 ||
         !isExactRecord(rawBatch.representationVersion, [
           "kind",
           "pollId",
@@ -1308,11 +1311,15 @@ export function createVotePersistence(db: D1Database) {
       const rankedRanks = new Set<number>();
       const claimKinds = new Set<VoterClaimCheckKind>();
       let commentCount = 0;
+      let meetingResponseCount = 0;
+      const meetingSlotIds = new Set<string>();
       const contributions: Array<
         | VoteSelectionContribution
         | RankedPreferenceContribution
         | VoterClaimContribution
         | VoteCommentContribution
+        | MeetingAvailabilityContribution
+        | MeetingResponseContribution
       > = [];
 
       for (let index = 0; index < rawBatch.contributions.length; index += 1) {
@@ -1320,6 +1327,24 @@ export function createVotePersistence(db: D1Database) {
           throw new Error("invalid vote contribution array");
         }
         const contribution: unknown = rawBatch.contributions[index];
+        if (
+          isExactRecord(contribution, ["kind", "voteId", "meetingSlotId", "availability"]) &&
+          contribution.kind === "meeting_availability"
+        ) {
+          if (contribution.voteId !== voteId || typeof contribution.meetingSlotId !== "string" || contribution.meetingSlotId.length === 0 || meetingSlotIds.has(contribution.meetingSlotId) || !["yes", "if_need_be", "no"].includes(String(contribution.availability))) throw new Error("invalid meeting availability contribution");
+          meetingSlotIds.add(contribution.meetingSlotId);
+          contributions.push(contribution as unknown as MeetingAvailabilityContribution);
+          continue;
+        }
+        if (
+          isExactRecord(contribution, ["kind", "voteId", "displayName", "revisionCapabilityDigest"]) &&
+          contribution.kind === "meeting_response"
+        ) {
+          if (contribution.voteId !== voteId || typeof contribution.displayName !== "string" || contribution.displayName.length < 1 || contribution.displayName.length > 80 || contribution.displayName !== contribution.displayName.trim() || asRevisionCapabilityDigest(contribution.revisionCapabilityDigest) === null || meetingResponseCount !== 0) throw new Error("invalid meeting response contribution");
+          meetingResponseCount += 1;
+          contributions.push(contribution as unknown as MeetingResponseContribution);
+          continue;
+        }
         if (
           isExactRecord(contribution, ["kind", "voteId", "pollOptionId"]) &&
           contribution.kind === "vote_selection"
@@ -1456,7 +1481,9 @@ export function createVotePersistence(db: D1Database) {
       const hasSelections = selectionOptionIds.size > 0;
       const hasPreferences = rankedOptionIds.size > 0;
       if (
-        hasSelections === hasPreferences ||
+        ((meetingResponseCount === 1 || meetingSlotIds.size > 0)
+          ? (hasSelections || hasPreferences || meetingResponseCount !== 1 || meetingSlotIds.size < 1)
+          : hasSelections === hasPreferences) ||
         selectionOptionIds.size > POLL_CAPS.maxOptions ||
         rankedOptionIds.size > POLL_CAPS.maxOptions ||
         (hasPreferences &&
@@ -1528,6 +1555,14 @@ export function createVotePersistence(db: D1Database) {
                 contribution.createdAtMs,
               ),
           );
+          continue;
+        }
+        if (contribution.kind === "meeting_response") {
+          statements.push(db.prepare("INSERT INTO meeting_response (vote_id, display_name, revision_capability_digest) VALUES (?1, ?2, ?3)").bind(contribution.voteId, contribution.displayName, contribution.revisionCapabilityDigest));
+          continue;
+        }
+        if (contribution.kind === "meeting_availability") {
+          statements.push(db.prepare("INSERT INTO meeting_availability (vote_id, meeting_slot_id, availability) VALUES (?1, ?2, ?3)").bind(contribution.voteId, contribution.meetingSlotId, contribution.availability));
           continue;
         }
         statements.push(
@@ -1615,6 +1650,7 @@ export function createVotePersistence(db: D1Database) {
         ) {
           throw new PollDefinitionChangedError();
         }
+        if (error instanceof Error && /meeting_(availability_slot|response_vote)_invalid/.test(error.message)) throw new PollDefinitionChangedError();
         if (
           error instanceof Error &&
           /FOREIGN KEY constraint failed/i.test(error.message)
@@ -1696,7 +1732,7 @@ export function createVotePersistence(db: D1Database) {
       if (!row) {
         return null;
       }
-      return {
+      const snapshot = {
         id: row.id,
         pollType: row.poll_type,
         options: await loadOptions(db, row.id),
@@ -1710,6 +1746,9 @@ export function createVotePersistence(db: D1Database) {
         deadlineMs: row.deadline_ms,
         closedAtMs: row.closed_at_ms,
       };
+      return row.poll_type === "meeting"
+        ? { ...snapshot, slots: (await loadMeetingSlots(db, row.id)).map(({ id, position }) => ({ id, position })) }
+        : snapshot;
     },
 
     async findVoteBySubmission(

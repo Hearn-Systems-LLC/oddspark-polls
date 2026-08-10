@@ -5,11 +5,13 @@ import type { PollId } from "../../shared/domain/index";
 import {
   asVoteRateLimitDigest,
   asVoterClaimDigest,
+  asRevisionCapabilityDigest,
   isVoteDigestPurpose,
   type VoteDigestPurpose,
   type VoteRateLimitDigest,
   type VoterClaimCheckKind,
   type VoterClaimDigest,
+  type RevisionCapabilityDigest,
 } from "../../modules/voting/ip-address";
 
 export const VOTER_COOKIE_NAME = "oddspark.voter";
@@ -51,12 +53,8 @@ export async function createVoteDigest(
 ): Promise<VoteRateLimitDigest>;
 export async function createVoteDigest(
   secret: string,
-  input: {
-    pollId: PollId;
-    checkKind: VoteDigestPurpose;
-    token: string;
-  },
-): Promise<VoterClaimDigest | VoteRateLimitDigest>;
+  input: { pollId: PollId; checkKind: "revision"; token: string },
+): Promise<RevisionCapabilityDigest>;
 export async function createVoteDigest(
   secret: string,
   input: {
@@ -64,7 +62,15 @@ export async function createVoteDigest(
     checkKind: VoteDigestPurpose;
     token: string;
   },
-): Promise<VoterClaimDigest | VoteRateLimitDigest> {
+): Promise<VoterClaimDigest | VoteRateLimitDigest | RevisionCapabilityDigest>;
+export async function createVoteDigest(
+  secret: string,
+  input: {
+    pollId: PollId;
+    checkKind: VoteDigestPurpose;
+    token: string;
+  },
+): Promise<VoterClaimDigest | VoteRateLimitDigest | RevisionCapabilityDigest> {
   if (!isVoteDigestPurpose(input.checkKind)) {
     throw new Error("Unsupported vote digest purpose");
   }
@@ -101,6 +107,11 @@ export async function createVoteDigest(
     }
     return branded;
   }
+  if (input.checkKind === "revision") {
+    const branded = asRevisionCapabilityDigest(hex);
+    if (branded === null) throw new Error("digest construction produced an invalid revision digest");
+    return branded;
+  }
 
   const branded = asVoterClaimDigest(hex);
   if (branded === null) {
@@ -120,6 +131,15 @@ export function createVoterToken(
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
     "",
   );
+}
+
+export function createRevisionCapability(
+  randomBytes: RandomBytes = (length) => crypto.getRandomValues(new Uint8Array(length)),
+): string {
+  const bytes = randomBytes(16);
+  if (bytes.byteLength !== 16) throw new Error("Revision capability source must return exactly 128 bits");
+  const binary = String.fromCharCode(...bytes);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
 export function createVoterCookie(token: string, requestUrl: string): string {

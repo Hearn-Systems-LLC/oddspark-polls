@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-10T19:26:48.922Z",
+  "generatedAt": "2026-08-10T21:23:50.208Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -65,6 +65,10 @@
     {
       "file": "0016_meeting_slots.sql",
       "sha256": "04bf8e2d01be57da7f54716c293497206cd9c658f93ea63cd92c48b65c65a2a6"
+    },
+    {
+      "file": "0017_meeting_availability.sql",
+      "sha256": "7caaa89b6468900bcda1dc6cccc8b70ba66fdd3ff26cf6068c9422ab9bd9c9e1"
     }
   ]
 }

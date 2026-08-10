@@ -86,6 +86,7 @@ if (form) {
   syncCommentCounter();
   const locked = form.dataset.voteLocked === "true";
   const rankedChoice = form.dataset.rankedChoice === "true";
+  const meeting = form.dataset.meeting === "true";
   const rankActions = Array.from(
     form.querySelectorAll<HTMLButtonElement>("[data-rank-action]"),
   );
@@ -119,7 +120,7 @@ if (form) {
     if (form.dataset.voteInflight === "true") {
       return;
     }
-    if (rankedChoice) {
+    if (rankedChoice || meeting) {
       return;
     }
     const count = selectedCount();
@@ -218,14 +219,14 @@ if (form) {
     if (voteButton) {
       voteButton.textContent = idleVoteLabel;
       voteButton.removeAttribute("aria-busy");
-      if (rankedChoice) {
+      if (rankedChoice || meeting) {
         // syncSelectionState defers the ranked VOTE button to the rank
         // builder; recompute here so an aborted POST never strands the
         // button disabled behind an unchanged, still-valid draft.
         const rankedCount = form.querySelectorAll(
           "[data-rank-position-input]:not(:disabled)",
         ).length;
-        voteButton.disabled = locked || rankedCount === 0;
+        voteButton.disabled = locked || (rankedChoice && rankedCount === 0);
       }
     }
     if (commentBody) commentBody.readOnly = false;

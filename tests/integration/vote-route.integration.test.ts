@@ -265,6 +265,50 @@ const invalidIdentityCases: Array<{
   },
 ];
 
+describe("Meeting response delivery boundary", () => {
+  const ORIGIN = "https://polls.example.test";
+
+  async function seedMeeting() {
+    const pollId = crypto.randomUUID() as PollId;
+    const reference = `meeting-route-${crypto.randomUUID()}`;
+    const now = Date.now();
+    const slots = [0, 1, 2].map(() => crypto.randomUUID());
+    await testEnv.DB.batch([
+      testEnv.DB.prepare("INSERT INTO user (id,name,email,email_verified,created_at,updated_at) VALUES (?1,'Creator',?2,1,'1970-01-01T00:00:00.000Z','1970-01-01T00:00:00.000Z') ON CONFLICT(id) DO NOTHING").bind(OWNER, `meeting-${pollId}@example.test`),
+      testEnv.DB.prepare("INSERT INTO poll (id,owner_user_id,poll_type,question,result_visibility,session_checks_enabled,ip_checks_enabled,captcha_enabled,comments_enabled,multi_select_enabled,representation_version,created_at_ms,updated_at_ms) VALUES (?1,?2,'meeting','When?','live',0,0,0,0,0,1,?3,?3)").bind(pollId, OWNER, now),
+      ...slots.map((slotId, position) => testEnv.DB.prepare("INSERT INTO meeting_slot (id,poll_id,position,starts_at_ms,ends_at_ms,time_zone,created_at_ms) VALUES (?1,?2,?3,?4,?5,'America/Detroit',?4)").bind(slotId, pollId, position, now + position * 86_400_000, now + position * 86_400_000 + 3_600_000)),
+      testEnv.DB.prepare("INSERT INTO poll_reference (reference,poll_id,kind,is_canonical,created_at_ms) VALUES (?1,?2,'custom',1,?3)").bind(reference, pollId, now),
+    ]);
+    return { pollId, reference, slots };
+  }
+
+  const meetingBody = (submissionId: string, slots: string[], name = "Alex") => {
+    const value = new URLSearchParams({ submission_id: submissionId, display_name: name });
+    slots.forEach((slot, index) => value.set(`availability_${slot}`, ["yes", "if_need_be", "no"][index]!));
+    return value;
+  };
+
+  it("commits, replays, conflicts, and closes Meeting responses through the canonical route", async () => {
+    const poll = await seedMeeting();
+    const submissionId = crypto.randomUUID();
+    const post = (body: URLSearchParams) => runVoteRoute(makeContext(new Request(`${ORIGIN}/${poll.reference}`, { method: "POST", headers: voteHeaders(), body })), poll.reference);
+    const first = await post(meetingBody(submissionId, poll.slots));
+    expect(first.status).toBe(303);
+    expect(first.headers.get("set-cookie")).toContain("oddspark.meeting_revision=");
+    const stored = await testEnv.DB.prepare("SELECT mr.display_name, mr.revision_capability_digest FROM meeting_response mr JOIN vote v ON v.id=mr.vote_id WHERE v.poll_id=?1").bind(poll.pollId).first<{ display_name: string; revision_capability_digest: string }>();
+    expect(stored?.display_name).toBe("Alex");
+    expect(stored?.revision_capability_digest).toMatch(/^[a-f0-9]{64}$/u);
+    expect((await post(meetingBody(submissionId, poll.slots))).status).toBe(303);
+    const conflict = await post(meetingBody(submissionId, poll.slots, "Sam"));
+    expect(conflict.status).toBe(422);
+    expect(await conflict.text()).toContain("Your earlier Vote stands");
+    await testEnv.DB.prepare("UPDATE poll SET closed_at_ms=?2 WHERE id=?1").bind(poll.pollId, Date.now()).run();
+    const closed = await post(meetingBody(crypto.randomUUID(), poll.slots));
+    expect(closed.status).toBe(422);
+    expect(await closed.text()).toContain("This Poll closed while you were deciding");
+  });
+});
+
 describe("Ranked Choice delivery boundary", () => {
   const ORIGIN = "https://polls.example.test";
   const rankedBody = (

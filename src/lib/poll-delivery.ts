@@ -9,6 +9,7 @@ import {
   VOTER_COOKIE_MAX_AGE_SECONDS,
   VOTER_COOKIE_NAME,
   createVoteDigest,
+  createRevisionCapability,
   createVoterToken,
   sha256Hex,
 } from "../adapters/digest/index";
@@ -62,6 +63,7 @@ import {
 import type { RequestContext } from "./request-context";
 
 export const VOTE_FLASH_COOKIE_NAME = "oddspark.vote_flash";
+export const MEETING_REVISION_COOKIE_NAME = "oddspark.meeting_revision";
 
 class UnreadableVoteFormError extends Error {}
 
@@ -90,7 +92,7 @@ export type DeliveryCookieEffect =
       options: {
         httpOnly: true;
         maxAge: number;
-        path: "/";
+        path: string;
         sameSite: "lax";
         secure: boolean;
       };
@@ -177,6 +179,9 @@ export type PollDeliveryState = {
   commentDisplayName: string;
   commentFieldErrors: Record<string, string>;
   commentModerationCsrfToken: string;
+  meetingAvailability: Record<string, string>;
+  meetingDisplayName: string;
+  meetingFieldErrors: Record<string, string>;
 };
 
 export type PollDeliveryResult = {
@@ -211,6 +216,8 @@ const formSchema = z.object({
   rankedPreferences: z
     .array(z.object({ optionId: z.string(), rank: z.number() }))
     .max(POLL_CAPS.maxOptions),
+  meetingAvailability: z.array(z.object({ slotId: z.string(), state: z.string(), position: z.number().int().nonnegative() })).max(POLL_CAPS.maxOptions),
+  meetingDisplayName: z.string().max(162),
 });
 
 export const splitVoteCopy = (copy: string): { heading: string; body: string } => {
@@ -238,6 +245,11 @@ export const outcomeFromVoteError = (
       return { code: error.code, ...splitVoteCopy(VOTE_COPY.idempotencyConflict), time: null, titlePrefix: "Vote already counted", tone: "rejection" };
     case "invalid_selection":
     case "invalid_ranking":
+    case "display_name_missing":
+    case "display_name_invalid":
+    case "availability_missing":
+    case "availability_invalid":
+    case "availability_slot_unknown":
     case "too_few_selections":
     case "too_many_selections":
       return { code: error.code, ...splitVoteCopy(error.message), time: null, titlePrefix: "Vote not counted", tone: "rejection" };
@@ -361,6 +373,9 @@ export async function deliverPollVotingSurface(
   let commentBody = "";
   let commentDisplayName = "";
   let commentFieldErrors: Record<string, string> = {};
+  let meetingAvailability: Record<string, string> = {};
+  let meetingDisplayName = "";
+  let meetingFieldErrors: Record<string, string> = {};
 
   const issueVoterCookie = (): void => {
     voterToken = createVoterToken();
@@ -396,6 +411,10 @@ export async function deliverPollVotingSurface(
         optionId: entry as string,
         rank: Number(rankPositions[index]),
       }));
+      meetingAvailability = Object.fromEntries(
+        (poll.slots ?? []).map((slot) => [slot.id, singletonText(formData, `availability_${slot.id}`)]).filter(([, state]) => state !== ""),
+      );
+      meetingDisplayName = boundedInvalidEcho(singletonText(formData, "display_name"), 80);
       commentBody = boundedInvalidEcho(
         singletonText(formData, "comment"),
         COMMENT_CAPS.body,
@@ -408,6 +427,11 @@ export async function deliverPollVotingSurface(
         submissionId: text(formData.get("submission_id")),
         selectedOptionIds,
         rankedPreferences,
+        meetingAvailability: (poll.slots ?? []).flatMap((slot) => {
+          const state = meetingAvailability[slot.id];
+          return state ? [{ slotId: slot.id, state, position: slot.position }] : [];
+        }),
+        meetingDisplayName,
       });
       if (!parsed.success) {
         outcome = outcomeFromVoteError({ code: "vote_failed", message: VOTE_COPY.retry });
@@ -533,6 +557,8 @@ export async function deliverPollVotingSurface(
           // surface as vote_failed instead — accepted trade-off, since a
           // signing failure still commits nothing.
           const flashDigest = await flashDigestFor(poll.pollId);
+          const revisionCapability = poll.pollType === "meeting" ? createRevisionCapability() : null;
+          const revisionCapabilityDigest = revisionCapability === null ? null : await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: poll.pollId, checkKind: "revision", token: revisionCapability });
           const sharedVoteInput = {
             pollId: poll.pollId,
             submissionId: submittedId,
@@ -542,7 +568,16 @@ export async function deliverPollVotingSurface(
             humanChallenge,
           };
           const voteInput: CastVoteInput =
-            poll.pollType === "ranked_choice"
+            poll.pollType === "meeting"
+              ? {
+                  ...sharedVoteInput,
+                  pollType: "meeting",
+                  selectedOptionIds: [],
+                  displayName: parsed.data.meetingDisplayName,
+                  availability: parsed.data.meetingAvailability,
+                  revisionCapabilityDigest: revisionCapabilityDigest!,
+                }
+            : poll.pollType === "ranked_choice"
               ? {
                   ...sharedVoteInput,
                   pollType: "ranked_choice",
@@ -575,6 +610,12 @@ export async function deliverPollVotingSurface(
               value: flashDigest,
               options: { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure },
             });
+            if (revisionCapability !== null) cookies.push({
+              kind: "set",
+              name: MEETING_REVISION_COOKIE_NAME,
+              value: revisionCapability,
+              options: { httpOnly: true, maxAge: VOTER_COOKIE_MAX_AGE_SECONDS, path: `/${encodeURIComponent(poll.canonicalReference)}`, sameSite: "lax", secure },
+            });
             response = immediate(null, 303, { location: input.successRedirect });
             return { state: null, status: 303, headers, cookies, response, unavailable };
           }
@@ -595,6 +636,7 @@ export async function deliverPollVotingSurface(
           } else {
             outcome = outcomeFromVoteError(result.error);
             commentFieldErrors = result.error.fieldErrors ?? {};
+            meetingFieldErrors = result.error.fieldErrors ?? {};
             if (result.error.code === "comments_disabled") {
               // The D1 trigger is authoritative. Hide stale/forged Comment
               // values before the refresh so a failed re-read cannot echo
@@ -670,7 +712,9 @@ export async function deliverPollVotingSurface(
       try {
         if (input.flashCookie === await flashDigestFor(poll.pollId)) {
           cookies.push({ kind: "delete", name: VOTE_FLASH_COOKIE_NAME, options: { path: "/" } });
-          outcome = { code: "counted", heading: VOTE_COPY.counted, body: "", time: null, titlePrefix: "Counted", tone: "confirmation" };
+          outcome = poll.pollType === "meeting"
+            ? { code: "counted", heading: "Saved.", body: "Change it any time while the Poll is open.", time: null, titlePrefix: "Saved", tone: "confirmation" }
+            : { code: "counted", heading: VOTE_COPY.counted, body: "", time: null, titlePrefix: "Counted", tone: "confirmation" };
           readOnly = true;
         }
       } catch { /* stale or unavailable flash is ignored */ }
@@ -750,7 +794,7 @@ export async function deliverPollVotingSurface(
         },
       );
     }
-    if (outcome?.code === "counted") {
+    if (outcome?.code === "counted" && poll.pollType !== "meeting") {
       if (
         postVoteResults.kind === "visible" ||
         postVoteResults.kind === "ranked_visible"
@@ -843,6 +887,9 @@ export async function deliverPollVotingSurface(
       commentFieldErrors,
       commentModerationCsrfToken:
         input.requestContext?.csrfToken?.value ?? "",
+      meetingAvailability,
+      meetingDisplayName,
+      meetingFieldErrors,
     },
     status,
     headers,

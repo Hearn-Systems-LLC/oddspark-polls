@@ -240,6 +240,7 @@
   --color-solar-hover: var(--color-solar-hover-dark);
   --color-solar-ink: var(--color-solar-ink-dark);
   --color-solar-wash: var(--color-solar-wash-dark);
+  --availability-solar-ink: var(--color-solar-ink-dark);
   --color-on-solar: var(--color-on-solar-dark);
   --color-focus-ring: var(--color-focus-ring-dark);
   --color-alarm: var(--color-alarm-dark);
@@ -266,6 +267,7 @@
   --color-solar-hover: var(--color-solar-hover-light);
   --color-solar-ink: var(--color-solar-ink-light);
   --color-solar-wash: var(--color-solar-wash-light);
+  --availability-solar-ink: var(--color-solar-ink-on-wash-light);
   --color-on-solar: var(--color-on-solar-light);
   --color-focus-ring: var(--color-focus-ring-light);
   --color-alarm: var(--color-alarm-light);
@@ -295,6 +297,7 @@
     --color-solar-hover: var(--color-solar-hover-light);
     --color-solar-ink: var(--color-solar-ink-light);
     --color-solar-wash: var(--color-solar-wash-light);
+    --availability-solar-ink: var(--color-solar-ink-on-wash-light);
     --color-on-solar: var(--color-on-solar-light);
     --color-focus-ring: var(--color-focus-ring-light);
     --color-alarm: var(--color-alarm-light);
@@ -322,6 +325,7 @@
     --color-solar-hover: var(--color-solar-hover-dark);
     --color-solar-ink: var(--color-solar-ink-dark);
     --color-solar-wash: var(--color-solar-wash-dark);
+    --availability-solar-ink: var(--color-solar-ink-dark);
     --color-on-solar: var(--color-on-solar-dark);
     --color-focus-ring: var(--color-focus-ring-dark);
     --color-alarm: var(--color-alarm-dark);

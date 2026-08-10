@@ -40,6 +40,8 @@ test-results/*
 !test-results/story-4-2-comment-moderation-proof/*.png
 !test-results/story-4-3-csv-export-proof/
 !test-results/story-4-3-csv-export-proof/*.png
+!test-results/spec-share-url-click-copy-proof/
+!test-results/spec-share-url-click-copy-proof/*.png
 playwright-report/
 blob-report/
 playwright/.cache/

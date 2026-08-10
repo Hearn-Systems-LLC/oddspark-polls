@@ -654,9 +654,13 @@ const detailStatus =
 // guards) over the list row so lock state never drifts from D1 truth.
 const voterCount =
   lifecycleSnapshot?.voterCount ?? selectedListRow?.voterCount ?? 0;
+const isEditablePollType =
+  poll?.pollType === "multiple_choice" ||
+  poll?.pollType === "ranked_choice";
 const definitionLocked =
   forceLockedView ||
-  voterCount > 0;
+  voterCount > 0 ||
+  !isEditablePollType;
 
 const meetingTimeZone = poll?.slots?.[0]?.timeZone ?? null;
 const meetingSlotRows = (poll?.slots ?? []).map((slot) => {

@@ -95,6 +95,16 @@ export function enhanceDefinitionForm(options: DefinitionFormOptions): void {
     }
     if (meetingFields) {
       meetingFields.hidden = !meeting;
+      if (meeting) {
+        const timeZoneInput = form!.querySelector<HTMLInputElement>(
+          'input[name="timezone"]',
+        );
+        const timeZoneLine =
+          form!.querySelector<HTMLElement>("[data-timezone-line]");
+        if (timeZoneLine && timeZoneInput) {
+          timeZoneLine.textContent = `TIMES IN ${timeZoneInput.value || "UTC"}`;
+        }
+      }
       for (const input of meetingFields.querySelectorAll<HTMLInputElement>(
         'input[id^="slot-date-"], input[id^="slot-start-"], input[id^="slot-end-"]',
       )) {

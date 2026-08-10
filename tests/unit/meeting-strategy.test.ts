@@ -187,4 +187,39 @@ describe("meeting strategy", () => {
       MEETING_DEFINITION_COPY.slotIncomplete,
     );
   });
+
+  it("falls back to UTC when given an invalid IANA timezone string", () => {
+    const result = meetingStrategy.create(
+      input({
+        timeZone: "Invalid/Zone_Name",
+        slots: [
+          { date: "2027-01-15", start: "09:00", end: "09:30" },
+          { date: "2027-01-16", start: "14:00", end: "15:30" },
+        ],
+      }),
+      { nowMs: NOW },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.slots[0]?.timeZone).toBe("UTC");
+    expect(result.value.slots[0]?.startsAtMs).toBe(
+      Date.parse("2027-01-15T09:00:00.000Z"),
+    );
+  });
+
+  it("rejects more than 50 meeting slots with options_too_many", () => {
+    const fiftyOneSlots = Array.from({ length: 51 }, (_, i) => ({
+      date: "2027-01-15",
+      start: "09:00",
+      end: "09:30",
+    }));
+    const result = meetingStrategy.create(
+      input({ slots: fiftyOneSlots }),
+      { nowMs: NOW },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.reasonCodes?.slots).toBe("options_too_many");
+  });
 });
+

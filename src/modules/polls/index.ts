@@ -140,7 +140,7 @@ export const CREATE_POLL_COPY = {
 const CIVIL_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/;
 
-function isUsableTimeZone(timeZone: string): boolean {
+export function isUsableTimeZone(timeZone: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone });
     return true;

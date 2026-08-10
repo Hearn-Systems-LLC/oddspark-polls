@@ -4,7 +4,7 @@ baseline_commit: 66b08fb3f8c1adbadff4a94cf69a7f0088fd2add
 
 # Story 7.1: Propose Time Slots
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Ultimate context engine analysis completed 2026-08-10 — comprehensive developer guide created from epics (Story 7.1 L1105–1127, Epic 7 header L184–187, UX-DR23/24 L115–116), ARCHITECTURE-SPINE (AD-3/6/9/17/20/23/24, Consistency Conventions L519–534, ER L622–637), PRD FR-12/FR-5, EXPERIENCE.md/DESIGN.md, Story 6.x artifacts + epic-6 retro Prep-2, and a full codebase audit of the create-poll path, poll-type strategies, D1 migrations/triggers, and test harness. No new libraries. -->
@@ -165,3 +165,12 @@ GPT-5 Codex
 ### Change Log
 
 - 2026-08-10: Implemented Story 7.1 Meeting Poll slot proposal, absolute-instant persistence, explicit timezone UI, locked owner rendering, and complete automated/browser coverage; moved to review.
+
+### Review Findings
+
+- [x] [Review][Patch] Unlocked Meeting Poll detail view renders editable slot inputs when voterCount === 0, causing 422 error and blocking description updates [`src/pages/creator/polls/[pollId].astro:657`]
+- [x] [Review][Patch] Invalid IANA timezone string in timeZone input stored in DB causes RangeError 500 crash on SSR [`src/modules/polls/types/meeting.ts:74`]
+- [x] [Review][Patch] Uncapped slot count allows bypassing option caps (POLL_CAPS.maxOptions), causing resource exhaustion [`src/modules/polls/types/meeting.ts:72`]
+- [x] [Review][Patch] syncPollTypeFields in client script does not update [data-timezone-line] text on poll type radio change [`src/scripts/poll-definition-form.ts:69`]
+
+

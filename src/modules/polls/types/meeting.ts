@@ -6,7 +6,9 @@ import {
   POLL_TYPE_CONTRACT_VERSION,
   type PollTypeStrategy,
 } from "../../../shared/application/index";
-import { CIVIL_TIME_NONEXISTENT, civilToUtcMs } from "../index";
+import { POLL_CAPS } from "../caps";
+import { DEFINITION_COPY } from "../definition";
+import { CIVIL_TIME_NONEXISTENT, civilToUtcMs, isUsableTimeZone } from "../index";
 
 export type MeetingSlotInput = {
   date: string;
@@ -71,7 +73,8 @@ export const meetingStrategy: PollTypeStrategy<
   type: "meeting",
   contractVersion: POLL_TYPE_CONTRACT_VERSION,
   create: (input) => {
-    const timeZone = input.timeZone.trim() || "UTC";
+    const rawZone = input.timeZone.trim();
+    const timeZone = rawZone && isUsableTimeZone(rawZone) ? rawZone : "UTC";
     const slots: MeetingSlotFact[] = [];
 
     for (let index = 0; index < input.slots.length; index += 1) {
@@ -127,6 +130,12 @@ export const meetingStrategy: PollTypeStrategy<
       return validationFailure(
         { slots: MEETING_DEFINITION_COPY.slotsInsufficient },
         { slots: "slots_insufficient" },
+      );
+    }
+    if (slots.length > POLL_CAPS.maxOptions) {
+      return validationFailure(
+        { slots: DEFINITION_COPY.optionsTooMany },
+        { slots: "options_too_many" },
       );
     }
     return { ok: true, value: { slots } };

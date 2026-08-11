@@ -263,12 +263,9 @@ const afterCloseParts =
     )
   }
   {
-    view.kind === "visible" && (view.ownerComments?.length ?? 0) > 0 && (
-      <script src="../../scripts/overlay.ts"></script>
-    )
-  }
-  {
-    view.kind === "meeting_visible" &&
+    (view.kind === "visible" ||
+      view.kind === "ranked_visible" ||
+      view.kind === "meeting_visible") &&
       (view.ownerComments?.length ?? 0) > 0 && (
         <script src="../../scripts/overlay.ts"></script>
       )

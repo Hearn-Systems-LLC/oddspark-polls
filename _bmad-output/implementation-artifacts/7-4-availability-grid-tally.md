@@ -4,7 +4,7 @@ baseline_commit: 009dae2ee24a6ca612ca43f23e19a189d669f379
 
 # Story 7.4: Availability Grid Tally
 
-Status: review
+Status: done
 
 ## Story
 
@@ -47,6 +47,16 @@ so that the best slot appears from the answers — and I make the final call, no
   - [x] Integration: new projection queries in `tests/integration/` beside `results-adapter.integration.test.ts` / `ranked-results-adapter.integration.test.ts` (vitest-pool-workers, `applyD1Migrations`, FK-ordered cleanup); extend `live-results-route.integration.test.ts` for the meeting live payload; reuse `seedMeeting()` / `meetingBody()` helpers from `tests/integration/vote-route.integration.test.ts`.
   - [x] E2E: extend `tests/e2e/meeting-poll.spec.mjs` (serial mode, 120s timeout, creator-session auth, skip without better-auth secret): vote as two voters → results grid shows both rows, totals, gold rule on best; revise availability → tally re-projects (no denormalized state, per 7.3 note).
   - [x] Gate: `pnpm migrations:guard && pnpm test && pnpm check`; `pnpm test:e2e`; `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check`; CHANGELOG entry.
+
+### Review Findings
+
+- [x] [Review][Patch] Pad voter availability array elements to match slot count with null fallback [`src/modules/results/meeting-projection.ts:87`]
+- [x] [Review][Patch] Fix CSS grid placement for availability-tally on desktop post-vote poll surface [`src/components/poll-voting-surface.astro:382`]
+- [x] [Review][Patch] Fix day-shift hidden attribute reset during live slot header creation [`src/scripts/meeting-results-live.ts:512`]
+- [x] [Review][Patch] Add cancellation guard after response.json() in live polling script [`src/scripts/meeting-results-live.ts:743`]
+- [x] [Review][Patch] Remove aria-live=polite from container div to prevent full-table re-announcements [`src/components/availability-tally.astro:144`]
+- [x] [Review][Patch] Include overlay.ts script for ranked_visible polls with owner comments [`src/pages/[reference]/results.astro:266`]
+- [x] [Review][Patch] Safely URL-encode canonicalReference and scope liveEndpoint to open status in creator poll view [`src/pages/creator/polls/[pollId].astro:927`]
 
 ## Dev Notes
 

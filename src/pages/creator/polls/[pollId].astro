@@ -924,7 +924,11 @@ const detailPath = `/creator/polls/${pollId}`;
                   meeting={creatorMeetingResults.meeting}
                   status={creatorMeetingResults.status}
                   creatorTimeZone={creatorMeetingTimeZone}
-                  liveEndpoint={`/${creatorMeetingResults.canonicalReference}/results/live`}
+                  liveEndpoint={
+                    creatorMeetingResults.status === "open"
+                      ? `/${encodeURIComponent(creatorMeetingResults.canonicalReference)}/results/live`
+                      : undefined
+                  }
                   initialValidator={creatorMeetingResults.validator}
                   initialRenderAtMs={nowMs}
                 />

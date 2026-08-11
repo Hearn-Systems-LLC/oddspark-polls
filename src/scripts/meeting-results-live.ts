@@ -509,14 +509,13 @@ const enhanceMeetingResults = (root: HTMLElement): void => {
       safeZone(slot.timeZone),
     );
     const renderedDay = meetingSlotDayKey(slot.startsAtMs, renderZone);
-    if (sourceDay === renderedDay) {
-      shift.hidden = true;
-      shift.textContent = "+1 day";
-    } else {
-      shift.textContent = renderedDay.localeCompare(sourceDay) > 0
+    shift.hidden = sourceDay === renderedDay;
+    shift.textContent =
+      sourceDay === renderedDay
         ? "+1 day"
-        : "-1 day";
-    }
+        : renderedDay.localeCompare(sourceDay) > 0
+          ? "+1 day"
+          : "-1 day";
     parent.appendChild(label);
     parent.appendChild(caption);
     parent.appendChild(shift);
@@ -739,6 +738,9 @@ const enhanceMeetingResults = (root: HTMLElement): void => {
         payload = await response.json();
       } catch {
         reloadOnce("structural:json");
+        return;
+      }
+      if (generation !== requestGeneration || nextController.signal.aborted) {
         return;
       }
       if (!isMeetingLivePayload(payload)) {

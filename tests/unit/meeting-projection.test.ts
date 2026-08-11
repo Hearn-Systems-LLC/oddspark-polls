@@ -118,6 +118,22 @@ describe("Meeting Tally projection", () => {
     expect(JSON.stringify(view)).not.toMatch(/voteId|slotId/);
   });
 
+  it("pads under-length voter availability arrays with null for missing slots", () => {
+    const view = projectMeetingTally(
+      projection({
+        slots: [slot(0), slot(1), slot(2)],
+        voters: [
+          {
+            displayName: "Short Voter",
+            availability: ["yes"], // length 1 for 3 slots
+          },
+        ],
+      }),
+    );
+
+    expect(view.voters[0]?.availability).toEqual(["yes", null, null]);
+  });
+
   it("projects zero responses as an explicit empty view", () => {
     expect(projectMeetingTally(projection())).toMatchObject({
       empty: true,

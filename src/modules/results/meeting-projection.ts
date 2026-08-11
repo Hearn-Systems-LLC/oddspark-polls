@@ -87,7 +87,7 @@ export function projectMeetingTally(
   }));
   const voters: MeetingVoterTallyView[] = input.voters.map((voter) => ({
     displayName: voter.displayName,
-    availability: [...voter.availability],
+    availability: displaySlots.map((_, index) => voter.availability[index] ?? null),
   }));
 
   return {

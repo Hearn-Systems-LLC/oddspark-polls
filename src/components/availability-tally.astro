@@ -144,7 +144,7 @@ const stateLabel = (state: CellState): string => {
     {status === "closed" ? "CLOSED" : "LIVE"}
   </p>
 
-  <div data-meeting-tally-content aria-live="polite">
+  <div data-meeting-tally-content>
     {meeting.empty ? (
       <p class="meeting-empty">{RESULTS_COPY.empty}</p>
     ) : (

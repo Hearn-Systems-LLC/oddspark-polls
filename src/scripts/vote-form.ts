@@ -87,6 +87,12 @@ if (form) {
   const locked = form.dataset.voteLocked === "true";
   const rankedChoice = form.dataset.rankedChoice === "true";
   const meeting = form.dataset.meeting === "true";
+  const availabilityInputs = Array.from(
+    form.querySelectorAll<HTMLInputElement>("input[name^='availability_']"),
+  );
+  const meetingDisplayNameInput = form.querySelector<HTMLInputElement>(
+    "#meeting-display-name",
+  );
   const rankActions = Array.from(
     form.querySelectorAll<HTMLButtonElement>("[data-rank-action]"),
   );
@@ -231,6 +237,10 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = false;
     if (commentDisplayName) commentDisplayName.readOnly = false;
+    if (meetingDisplayNameInput) meetingDisplayNameInput.readOnly = locked;
+    availabilityInputs.forEach((input) => {
+      input.disabled = locked;
+    });
     rankActions.forEach((action) => {
       action.disabled = locked;
     });
@@ -249,6 +259,10 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = true;
     if (commentDisplayName) commentDisplayName.readOnly = true;
+    if (meetingDisplayNameInput) meetingDisplayNameInput.readOnly = true;
+    availabilityInputs.forEach((input) => {
+      input.disabled = true;
+    });
     rankActions.forEach((action) => {
       action.disabled = true;
     });

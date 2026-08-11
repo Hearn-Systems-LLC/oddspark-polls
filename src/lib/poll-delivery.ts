@@ -614,7 +614,7 @@ export async function deliverPollVotingSurface(
               kind: "set",
               name: MEETING_REVISION_COOKIE_NAME,
               value: revisionCapability,
-              options: { httpOnly: true, maxAge: VOTER_COOKIE_MAX_AGE_SECONDS, path: `/${encodeURIComponent(poll.canonicalReference)}`, sameSite: "lax", secure },
+              options: { httpOnly: true, maxAge: VOTER_COOKIE_MAX_AGE_SECONDS, path: "/", sameSite: "lax", secure },
             });
             response = immediate(null, 303, { location: input.successRedirect });
             return { state: null, status: 303, headers, cookies, response, unavailable };

@@ -436,15 +436,19 @@ export function normalizeMeetingVotePayload(
   pollId: PollId,
   displayName: string,
   availability: readonly { slotId: string; state: string; position: number }[],
+  comment: CanonicalComment | null = null,
 ): string {
-  return JSON.stringify({
+  const base = {
     pollId,
-    pollType: "meeting",
+    pollType: "meeting" as const,
     displayName: displayName.trim(),
     availability: [...availability]
       .sort((a, b) => a.position - b.position)
       .map(({ slotId, state }) => ({ slotId, state })),
-  });
+  };
+  return JSON.stringify(
+    comment === null ? base : { ...base, comment },
+  );
 }
 
 function acceptedReplay(
@@ -552,7 +556,12 @@ export async function castVote(
   try {
     normalizedPayload =
       input.pollType === "meeting"
-        ? normalizeMeetingVotePayload(input.pollId, input.displayName, input.availability)
+        ? normalizeMeetingVotePayload(
+            input.pollId,
+            input.displayName,
+            input.availability,
+            comment,
+          )
       : input.pollType === "ranked_choice"
         ? normalizeRankedVotePayload(
             input.pollId,

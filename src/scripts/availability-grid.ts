@@ -18,7 +18,13 @@ for (const grid of document.querySelectorAll<HTMLElement>("[data-availability-gr
       const output = row.querySelector<HTMLElement>("[data-local-time]");
       const shift = row.querySelector<HTMLElement>("[data-day-shift]");
       if (output) output.textContent = formatMeetingSlotLocal(starts, ends, zone);
-      if (shift) shift.hidden = meetingSlotDayKey(starts, zone) === meetingSlotDayKey(starts, sourceZone);
+      if (shift) {
+        const voterDay = meetingSlotDayKey(starts, zone);
+        const sourceDay = meetingSlotDayKey(starts, sourceZone);
+        const diff = voterDay.localeCompare(sourceDay);
+        shift.hidden = diff === 0;
+        if (diff !== 0) shift.textContent = diff > 0 ? "+1 day" : "-1 day";
+      }
     }
   };
   render(deviceZone);

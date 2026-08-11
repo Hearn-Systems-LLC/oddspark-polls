@@ -10,7 +10,7 @@ import { POLL_CAPS } from "../caps";
 import { DEFINITION_COPY } from "../definition";
 import { CIVIL_TIME_NONEXISTENT, civilToUtcMs, isUsableTimeZone } from "../index";
 import type { Result } from "../../../shared/application/index";
-import { AVAILABILITY_STATES, type AvailabilityState } from "../../../shared/domain/index";
+import { AVAILABILITY_STATES, isAvailabilityState, type AvailabilityState } from "../../../shared/domain/index";
 
 export type MeetingSlotInput = {
   date: string;
@@ -68,9 +68,9 @@ export function validateMeetingSubmission(
   const availability: MeetingValidatedSubmission["availability"] = [];
   for (const row of submission.availability) {
     if (!known.has(row.slotId) || seen.has(row.slotId)) return validationFailure({ availability: MEETING_VOTE_COPY.availabilitySlotUnknown }, { availability: "availability_slot_unknown" });
-    if (!(AVAILABILITY_STATES as readonly string[]).includes(row.state)) return validationFailure({ availability: MEETING_VOTE_COPY.availabilityInvalid }, { availability: "availability_invalid" });
+    if (!isAvailabilityState(row.state)) return validationFailure({ availability: MEETING_VOTE_COPY.availabilityInvalid }, { availability: "availability_invalid" });
     seen.add(row.slotId);
-    availability.push({ meetingSlotId: row.slotId, state: row.state as AvailabilityState, position: known.get(row.slotId)! });
+    availability.push({ meetingSlotId: row.slotId, state: row.state, position: known.get(row.slotId)! });
   }
   if (availability.length !== facts.slots.length) return validationFailure({ availability: MEETING_VOTE_COPY.availabilityMissing }, { availability: "availability_missing" });
   availability.sort((a, b) => a.position - b.position);

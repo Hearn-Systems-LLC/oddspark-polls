@@ -18,19 +18,19 @@ const states = [{ value: "yes", label: "Yes" }, { value: "if_need_be", label: "I
 
 <section class="availability" data-availability-grid data-source-zone={sourceZone}>
   <div class="timezone-control">
-    <label for="availability-time-zone" data-timezone-label>TIMES SHOWN IN {sourceZone} · FROM YOUR DEVICE</label>
+    <label for="availability-time-zone" data-timezone-label>TIMES SHOWN IN {sourceZone}</label>
     <select id="availability-time-zone" data-timezone-select aria-label="Time zone override">
       {[sourceZone, "UTC", "America/Detroit", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Asia/Tokyo"].filter((zone, index, all) => all.indexOf(zone) === index && isUsableTimeZone(zone)).map((zone) => <option value={zone}>{zone}</option>)}
     </select>
   </div>
   <div class="availability-rows">
     {slots.map((slot) => (
-      <fieldset class="availability-row" data-slot data-starts-at={slot.startsAtMs} data-ends-at={slot.endsAtMs} data-source-zone={isUsableTimeZone(slot.timeZone) ? slot.timeZone : "UTC"}>
-        <legend class="slot-label">
-          <span data-local-time>{formatDate(slot.startsAtMs, sourceZone)} · {formatTime(slot.startsAtMs, sourceZone)}–{formatTime(slot.endsAtMs, sourceZone)}</span>
+      <fieldset class="availability-row" role="radiogroup" data-slot data-starts-at={slot.startsAtMs} data-ends-at={slot.endsAtMs} data-source-zone={isUsableTimeZone(slot.timeZone) ? slot.timeZone : "UTC"}>
+        <div class="slot-header">
+          <legend class="slot-label" data-local-time>{formatDate(slot.startsAtMs, sourceZone)} · {formatTime(slot.startsAtMs, sourceZone)}–{formatTime(slot.endsAtMs, sourceZone)}</legend>
           <span class="source-caption">{sourceCaption(slot)}</span>
           <span class="day-shift" data-day-shift hidden>+1 day</span>
-        </legend>
+        </div>
         <div class="availability-cells">
           {states.map((state) => (
             <label class={`availability-cell is-${state.value}`} data-state={state.value}>
@@ -56,7 +56,8 @@ const states = [{ value: "yes", label: "Yes" }, { value: "if_need_be", label: "I
   .timezone-control select { min-height: 48px; color: var(--color-text); background: transparent; border: 0; border-bottom: 1px solid var(--color-rule); }
   .availability-rows { display: grid; }
   .availability-row { display: grid; grid-template-columns: minmax(10rem, 1fr) auto; align-items: center; gap: var(--space-3); margin: 0; padding: var(--space-2) 0; border: 0; }
-  .slot-label { display: grid; padding: 0; font-size: var(--type-body-size); }
+  .slot-header { display: grid; }
+  .slot-label { padding: 0; font-size: var(--type-body-size); font-weight: normal; }
   .source-caption, .field-error { color: var(--color-dim); font-size: var(--type-caption-size); line-height: var(--type-caption-lh); }
   .day-shift, .field-error { color: var(--color-entropy); }
   .availability-cells { display: grid; grid-template-columns: repeat(3, 48px); }

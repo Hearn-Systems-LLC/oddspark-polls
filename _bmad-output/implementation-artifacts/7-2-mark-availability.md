@@ -4,7 +4,7 @@ baseline_commit: 5660da65b5008942329c437b56e5decb0d82baa7
 
 # Story 7.2: Mark Availability
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -55,6 +55,18 @@ So that I answer in seconds without doing timezone math (SM-C1).
   - [x] Integration `tests/integration/meeting-availability.integration.test.ts` (workerd, `applyD1Migrations`, FK-ordered cleanup): schema/trigger contracts (ownership guard, effective-open, cascade), and route coverage modeled on `tests/integration/vote-route.integration.test.ts` (`seedPoll` with toggles): full AD-7 matrix — replay returns stored outcome, different payload → `IDEMPOTENCY_CONFLICT`, session/IP duplicate claims, captcha fail-closed, closed-poll abort, capability digest stored (and digest ≠ plaintext)
   - [x] E2E extend `tests/e2e/meeting-poll.spec.mjs`: vote flow — grid renders local times, answer 3 slots, name required, submit, "Saved." confirmation (serial mode, `hasBetterAuthSecret()` skip)
   - [x] Full gate: `pnpm migrations:guard && pnpm test && pnpm check`; `pnpm test:e2e`; `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check`; CHANGELOG entry
+
+### Review Findings
+
+- [x] [Review][Patch] Scope meeting revision cookie path to root `/` [src/lib/poll-delivery.ts:617]
+- [x] [Review][Patch] Include comment in `normalizeMeetingVotePayload` hash calculation [src/modules/voting/index.ts:435-448]
+- [x] [Review][Patch] Fix date-shift indicator (`+1 day` vs `-1 day`) for backward timezone shifts [src/components/availability-grid.astro:32, src/scripts/availability-grid.ts:19-22]
+- [x] [Review][Patch] Add missing `BEFORE UPDATE` and effective-open database triggers [db/migrations/0017_meeting_availability.sql:30-81]
+- [x] [Review][Patch] Lock availability radios and display name during in-flight form submission [src/scripts/vote-form.ts:120-255]
+- [x] [Review][Patch] Restrict radio group accessible name to local slot time alone [src/components/availability-grid.astro:29-33]
+- [x] [Review][Patch] Fix SSR timezone label claiming "FROM YOUR DEVICE" before client JS runs [src/components/availability-grid.astro:21, src/scripts/availability-grid.ts:14]
+- [x] [Review][Patch] Add explicit `role="radiogroup"` to slot fieldsets [src/components/availability-grid.astro:28]
+- [x] [Review][Patch] Add `isAvailabilityState` domain guard in `shared/domain/index.ts` [src/shared/domain/index.ts:21-22]
 
 ## Dev Notes
 

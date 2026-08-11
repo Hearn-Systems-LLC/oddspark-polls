@@ -29,6 +29,7 @@ import {
 } from "../comments/index";
 import {
   asVoterClaimDigest,
+  type RevisionCapabilityDigest,
   type VoterClaimCheckKind,
   type VoterClaimDigest,
 } from "./ip-address";
@@ -245,6 +246,20 @@ export type RankedPreferenceContribution = {
 export type MeetingAvailabilityContribution = { kind: "meeting_availability"; voteId: string; meetingSlotId: string; availability: AvailabilityState };
 export type MeetingResponseContribution = { kind: "meeting_response"; voteId: string; displayName: string; revisionCapabilityDigest: string };
 
+export type StoredMeetingResponse = {
+  voteId: string;
+  displayName: string;
+  availability: { meetingSlotId: string; availability: AvailabilityState }[];
+};
+
+export type ReviseMeetingResponseBatch = {
+  pollId: PollId;
+  voteId: string;
+  displayName: string;
+  availability: { meetingSlotId: string; availability: AvailabilityState }[];
+  updatedAtMs: number;
+};
+
 export type VoterClaimContribution = {
   kind: "voter_claim";
   pollId: PollId;
@@ -376,6 +391,64 @@ export type CastVoteOutcome = {
   pollId: PollId;
   voteId: string;
 };
+
+export type ReviseVoteInput = {
+  pollId: PollId;
+  revisionCapability: string;
+  displayName: string;
+  availability: readonly { slotId: string; state: string; position: number }[];
+  submissionId: string;
+};
+
+export type ReviseVoteDeps = {
+  findPoll: (pollId: PollId) => Promise<VotingPollSnapshot | null>;
+  findMeetingResponseByRevisionDigest: (pollId: PollId, digest: RevisionCapabilityDigest) => Promise<StoredMeetingResponse | null>;
+  createDigest: (input: { pollId: PollId; checkKind: "revision"; token: string }) => Promise<RevisionCapabilityDigest>;
+  reviseMeetingResponse: (batch: ReviseMeetingResponseBatch) => Promise<void>;
+  strategyFor: (pollType: PollType) => VotingPollTypeStrategy | null;
+  nowMs: () => number;
+};
+
+export async function reviseVote(
+  deps: ReviseVoteDeps,
+  input: ReviseVoteInput,
+): Promise<Result<{ pollId: PollId; voteId: string; acceptedAtMs: number }>> {
+  try {
+    const poll = await deps.findPoll(input.pollId);
+    if (!poll) return failure("poll_deleted", VOTE_COPY.pollDeleted);
+    const nowMs = deps.nowMs();
+    if (effectivePollStatus(poll, nowMs) === "closed") {
+      return failure("poll_closed", VOTE_COPY.pollClosed, { closedAtMs: poll.closedAtMs ?? poll.deadlineMs ?? nowMs });
+    }
+    const digest = await deps.createDigest({ pollId: input.pollId, checkKind: "revision", token: input.revisionCapability });
+    const stored = await deps.findMeetingResponseByRevisionDigest(input.pollId, digest);
+    if (!stored) return failure("revision_capability_invalid", VOTE_COPY.retry);
+    const strategy = deps.strategyFor("meeting");
+    if (!strategy) return failure("vote_failed", VOTE_COPY.retry);
+    const validated = strategy.validateSubmission(
+      { kind: "meeting", selectedOptionIds: [], displayName: input.displayName, availability: input.availability },
+      { options: poll.options, slots: poll.slots ?? [], multiSelectEnabled: false, minSelections: null, maxSelections: null },
+    );
+    if (!validated.ok) return failure(validated.error.code, validated.error.message, {
+      ...(validated.error.fieldErrors ? { fieldErrors: validated.error.fieldErrors } : {}),
+      ...(validated.error.reasonCodes ? { reasonCodes: validated.error.reasonCodes } : {}),
+    });
+    if (validated.value.kind !== "meeting") return failure("vote_failed", VOTE_COPY.retry);
+    await deps.reviseMeetingResponse({
+      pollId: input.pollId,
+      voteId: stored.voteId,
+      displayName: validated.value.displayName,
+      availability: validated.value.availability.map((entry) => ({ meetingSlotId: entry.meetingSlotId, availability: entry.state })),
+      updatedAtMs: nowMs,
+    });
+    return { ok: true, value: { pollId: input.pollId, voteId: stored.voteId, acceptedAtMs: nowMs } };
+  } catch (error) {
+    if (error instanceof PollClosedError) return failure("poll_closed", VOTE_COPY.pollClosed, { closedAtMs: deps.nowMs() });
+    if (error instanceof PollDefinitionChangedError) return failure("poll_definition_changed", VOTE_COPY.pollDefinitionChanged);
+    if (error instanceof PollGoneError) return failure("poll_deleted", VOTE_COPY.pollDeleted);
+    return failure("vote_failed", VOTE_COPY.retry);
+  }
+}
 
 export type VoteApplicationError = ApplicationError & {
   closedAtMs?: number;

@@ -49,7 +49,7 @@ describe("shared Demo delivery contract", () => {
 
   it("keeps the honest no-JavaScript CAPTCHA floor and VOTE as the sole primary", () => {
     expect(surface).toContain("JavaScript is required for the human check on this Poll.");
-    expect(surface).toContain(">VOTE</ButtonPrimary>");
+    expect(surface).toContain('meetingRevisionRecognized ? "SAVE" : "VOTE"');
     expect(root).not.toContain("ButtonPrimary");
     expect(root).toContain("<LandingFooter");
     expect(footer).toContain('class="label-caps landing-footer-link" href="/creator/new"');

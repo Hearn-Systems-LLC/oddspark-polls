@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import {
   assertUuid,
   cleanupCreator,
+  d1Execute,
   d1Query,
   hasBetterAuthSecret,
   requireBaseUrl,
@@ -96,14 +97,34 @@ test("creates heterogeneous Meeting slots with an explicit timezone", async ({
     await page.locator('[data-slot]').nth(1).locator('[data-state="if_need_be"]').click();
     await page.locator('[data-slot]').nth(2).locator('[data-state="no"]').click();
     await page.getByLabel("YOUR NAME").fill("Alex");
+    await expect(page.locator('[data-slot]').nth(0).locator('input[value="yes"]')).toBeChecked();
+    await expect(page.locator('[data-slot]').nth(1).locator('input[value="if_need_be"]')).toBeChecked();
+    await expect(page.locator('[data-slot]').nth(2).locator('input[value="no"]')).toBeChecked();
     await Promise.all([
-      page.waitForURL(`**/${reference}`),
+      page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === `/${reference}`),
       page.getByRole("button", { name: "VOTE" }).click(),
     ]);
     await expect(page.locator("[data-vote-outcome]")).toContainText("Saved. Change it any time while the Poll is open.");
     const responseRow = d1Query(sql`SELECT mr.display_name, mr.revision_capability_digest FROM meeting_response mr JOIN vote v ON v.id = mr.vote_id WHERE v.poll_id = ${pollId}`)[0];
     expect(responseRow).toMatchObject({ display_name: "Alex" });
     expect(responseRow.revision_capability_digest).toMatch(/^[a-f0-9]{64}$/u);
+    await page.reload();
+    await expect(page.locator('[data-slot]').nth(0).locator('input[value="yes"]')).toBeChecked();
+    await expect(page.getByRole("button", { name: "SAVE" })).toBeVisible();
+    await page.locator('[data-slot]').nth(0).locator('[data-state="no"]').click();
+    await Promise.all([
+      page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === `/${reference}`),
+      page.getByRole("button", { name: "SAVE" }).click(),
+    ]);
+    await expect(page.locator("[data-vote-outcome]")).toContainText("Saved. Change it any time while the Poll is open.");
+    expect(d1Query(sql`SELECT COUNT(*) AS count FROM vote WHERE poll_id = ${pollId}`)).toEqual([{ count: 1 }]);
+    expect(d1Query(sql`SELECT availability FROM meeting_availability ma JOIN vote v ON v.id=ma.vote_id WHERE v.poll_id=${pollId} ORDER BY ma.meeting_slot_id`)).toEqual(expect.arrayContaining([expect.objectContaining({ availability: "no" })]));
+    expect(d1Query(sql`SELECT representation_version FROM poll WHERE id=${pollId}`)).toEqual([{ representation_version: 3 }]);
+    d1Execute(sql`UPDATE poll SET closed_at_ms=${Date.now()} WHERE id=${pollId};`);
+    await page.reload();
+    await expect(page.locator("[data-vote-outcome]")).toContainText("This Poll closed");
+    await expect(page.locator("[data-slot]")).toHaveCount(3);
+    await expect(page.locator('input[name^="availability_"]')).toHaveCount(0);
     expect(browserErrors).toEqual([]);
   } finally {
     cleanupCreator(owner.userId);

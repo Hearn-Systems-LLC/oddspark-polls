@@ -21,6 +21,7 @@ export async function allowVoteSubmission(
   binding: RateLimitBinding | undefined,
   clientKey: VoteRateLimitDigest | null,
   pollId: string,
+  operation: "vote" | "revision" = "vote",
 ): Promise<boolean> {
   if (!binding || clientKey === null) {
     return true;
@@ -33,7 +34,7 @@ export async function allowVoteSubmission(
 
   try {
     const result = await binding.limit({
-      key: `vote:${pollId}:${clientKey}`,
+      key: `${operation}:${pollId}:${clientKey}`,
     });
     return result.success;
   } catch {

@@ -61,6 +61,9 @@ import {
   type RankedPreferenceContribution,
   type MeetingAvailabilityContribution,
   type MeetingResponseContribution,
+  type ReviseMeetingResponseBatch,
+  type StoredMeetingResponse,
+  type RevisionCapabilityDigest,
   type VotePersistenceBatch,
   type VoteSelectionContribution,
   type VoterClaimCheckKind,
@@ -1247,6 +1250,62 @@ function isVotePersistenceTimestamp(value: unknown): value is number {
 
 export function createVotePersistence(db: D1Database) {
   return {
+    async findMeetingResponseByRevisionDigest(
+      pollId: PollId,
+      digest: RevisionCapabilityDigest,
+    ): Promise<StoredMeetingResponse | null> {
+      const validated = asRevisionCapabilityDigest(digest);
+      if (validated === null) return null;
+      const response = await db.prepare(
+        `SELECT mr.vote_id AS vote_id, mr.display_name AS display_name
+         FROM meeting_response mr
+         JOIN vote v ON v.id = mr.vote_id
+         WHERE v.poll_id = ?1 AND mr.revision_capability_digest = ?2`,
+      ).bind(pollId, validated).first<{ vote_id: string; display_name: string }>();
+      if (!response) return null;
+      const rows = await db.prepare(
+        `SELECT meeting_slot_id, availability
+         FROM meeting_availability
+         WHERE vote_id = ?1
+         ORDER BY meeting_slot_id`,
+      ).bind(response.vote_id).all<{ meeting_slot_id: string; availability: "yes" | "if_need_be" | "no" }>();
+      return {
+        voteId: response.vote_id,
+        displayName: response.display_name,
+        availability: rows.results.map((row) => ({ meetingSlotId: row.meeting_slot_id, availability: row.availability })),
+      };
+    },
+
+    async reviseMeetingResponse(batch: ReviseMeetingResponseBatch): Promise<void> {
+      if (
+        batch.availability.length < 1 ||
+        new Set(batch.availability.map((entry) => entry.meetingSlotId)).size !== batch.availability.length
+      ) throw new Error("invalid meeting revision batch");
+      try {
+        const results = await db.batch([
+          db.prepare("DELETE FROM meeting_availability WHERE vote_id = ?1").bind(batch.voteId),
+          ...batch.availability.map((entry) => db.prepare(
+            "INSERT INTO meeting_availability (vote_id, meeting_slot_id, availability) VALUES (?1, ?2, ?3)",
+          ).bind(batch.voteId, entry.meetingSlotId, entry.availability)),
+          db.prepare("UPDATE meeting_response SET display_name = ?2 WHERE vote_id = ?1").bind(batch.voteId, batch.displayName),
+          db.prepare("UPDATE poll SET representation_version = representation_version + 1, updated_at_ms = ?2 WHERE id = ?1 AND EXISTS (SELECT 1 FROM meeting_response WHERE vote_id = ?3)").bind(batch.pollId, batch.updatedAtMs, batch.voteId),
+        ]);
+        const responseUpdate = results.at(-2);
+        const pollUpdate = results.at(-1);
+        if ((responseUpdate?.meta?.changes ?? 0) !== 1 || (pollUpdate?.meta?.changes ?? 0) !== 1) throw new PollGoneError();
+      } catch (error) {
+        if (error instanceof PollGoneError) throw error;
+        if (error instanceof Error && /poll_closed/.test(error.message)) throw new PollClosedError();
+        if (error instanceof Error && /meeting_availability_slot_invalid/.test(error.message)) {
+          const vote = await db.prepare("SELECT 1 AS found FROM vote WHERE id = ?1 AND poll_id = ?2").bind(batch.voteId, batch.pollId).first<{ found: number }>();
+          if (!vote) throw new PollGoneError();
+          throw new PollDefinitionChangedError();
+        }
+        if (error instanceof Error && /FOREIGN KEY constraint failed/i.test(error.message)) throw new PollGoneError();
+        throw error;
+      }
+    },
+
     async insertVote(batch: VotePersistenceBatch): Promise<void> {
       // Validate and sanitize the complete contribution set before touching
       // D1. Every contribution and the shared version increment must belong

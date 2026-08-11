@@ -5,9 +5,10 @@ interface Props {
   body: string;
   displayName: string;
   fieldErrors?: Record<string, string>;
+  hideDisplayName?: boolean;
 }
 
-const { body, displayName, fieldErrors = {} } = Astro.props;
+const { body, displayName, fieldErrors = {}, hideDisplayName = false } = Astro.props;
 const visibleBody = body.replace(/\r\n?/g, "\n");
 const remaining = Math.max(0, COMMENT_CAPS.body - visibleBody.length);
 const counterCopy = `${remaining} ${remaining === 1 ? "character" : "characters"} left`;
@@ -35,18 +36,20 @@ const counterCopy = `${remaining} ${remaining === 1 ? "character" : "characters"
   >{counterCopy}</p>
   {fieldErrors.comment && <p class="field-error" id="comment-error">{fieldErrors.comment}</p>}
 
-  <label for="vote-display-name">DISPLAY NAME (OPTIONAL)</label>
-  <input
-    id="vote-display-name"
-    name="display_name"
-    type="text"
-    value={displayName}
-    maxlength={COMMENT_CAPS.displayName}
-    aria-invalid={fieldErrors.displayName ? "true" : undefined}
-    aria-describedby={fieldErrors.displayName ? "display-name-error" : undefined}
-    data-comment-display-name
-  />
-  {fieldErrors.displayName && <p class="field-error" id="display-name-error">{fieldErrors.displayName}</p>}
+  {!hideDisplayName && <>
+    <label for="vote-display-name">DISPLAY NAME (OPTIONAL)</label>
+    <input
+      id="vote-display-name"
+      name="display_name"
+      type="text"
+      value={displayName}
+      maxlength={COMMENT_CAPS.displayName}
+      aria-invalid={fieldErrors.displayName ? "true" : undefined}
+      aria-describedby={fieldErrors.displayName ? "display-name-error" : undefined}
+      data-comment-display-name
+    />
+    {fieldErrors.displayName && <p class="field-error" id="display-name-error">{fieldErrors.displayName}</p>}
+  </>}
 </fieldset>
 
 <style>

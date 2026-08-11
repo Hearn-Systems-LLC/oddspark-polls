@@ -8,6 +8,7 @@ import type {
 } from "../../voting/index";
 import { imageStrategy } from "./image";
 import { meetingStrategy } from "./meeting";
+import { validateMeetingSubmission, type MeetingVoteSubmission } from "./meeting";
 import { multipleChoiceStrategy } from "./multiple-choice";
 import {
   rankedChoiceStrategy,
@@ -105,6 +106,19 @@ export function votingStrategyFor(
           kind: "ranked_choice",
           ...rankedChoiceStrategy.persistFacts!(validated),
         };
+      },
+    };
+  }
+  if (pollType === "meeting") {
+    return {
+      type: "meeting",
+      validateSubmission: (submission, facts) => {
+        if (submission.kind !== "meeting") return { ok: false, error: { code: "availability_invalid", message: "That availability does not match this Poll." } };
+        return validateMeetingSubmission(submission as MeetingVoteSubmission, { slots: facts.slots ?? [] });
+      },
+      persistFacts: (validated) => {
+        if (validated.kind !== "meeting") throw new Error("Poll Type strategy mismatch");
+        return { kind: "meeting", displayName: validated.displayName, availability: validated.availability };
       },
     };
   }

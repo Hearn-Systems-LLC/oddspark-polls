@@ -10,13 +10,14 @@ type Branded<T, B> = T & { readonly [brand]: B };
 export type VoterClaimCheckKind = "session" | "ip";
 
 /** HMAC purpose domain: claim kinds plus the abuse-floor purpose. */
-export type VoteDigestPurpose = VoterClaimCheckKind | "rate_limit";
+export type VoteDigestPurpose = VoterClaimCheckKind | "rate_limit" | "revision";
 
 /** Lowercase 64-hex HMAC for Session/IP voter claims (D1). */
 export type VoterClaimDigest = Branded<string, "VoterClaimDigest">;
 
 /** Lowercase 64-hex HMAC for the Poll-scoped rate-limit key. */
 export type VoteRateLimitDigest = Branded<string, "VoteRateLimitDigest">;
+export type RevisionCapabilityDigest = Branded<string, "RevisionCapabilityDigest">;
 
 const HEX_64 = /^[a-f0-9]{64}$/;
 
@@ -32,7 +33,7 @@ export type IpIdentityResult =
   | { ok: false; code: "invalid_address" };
 
 const VOTER_CLAIM_KINDS = new Set<string>(["session", "ip"]);
-const DIGEST_PURPOSES = new Set<string>(["session", "ip", "rate_limit"]);
+const DIGEST_PURPOSES = new Set<string>(["session", "ip", "rate_limit", "revision"]);
 
 export function isVoterClaimCheckKind(
   value: string,
@@ -52,6 +53,9 @@ export function isVoteRateLimitDigest(
   value: unknown,
 ): value is VoteRateLimitDigest {
   return typeof value === "string" && HEX_64.test(value);
+}
+export function asRevisionCapabilityDigest(value: unknown): RevisionCapabilityDigest | null {
+  return typeof value === "string" && HEX_64.test(value) ? value as RevisionCapabilityDigest : null;
 }
 
 /**

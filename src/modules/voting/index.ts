@@ -12,6 +12,7 @@ import {
 } from "../../shared/application/index";
 import {
   effectivePollStatus,
+  type AvailabilityState,
   type PollId,
   type PollOptionId,
   type PollType,
@@ -34,6 +35,7 @@ import {
 
 export {
   asVoteRateLimitDigest,
+  asRevisionCapabilityDigest,
   asVoterClaimDigest,
   isVoteDigestPurpose,
   isVoteRateLimitDigest,
@@ -44,6 +46,7 @@ export {
   type NormalizedIpIdentity,
   type VoteDigestPurpose,
   type VoteRateLimitDigest,
+  type RevisionCapabilityDigest,
   type VoterClaimCheckKind,
   type VoterClaimDigest,
 } from "./ip-address";
@@ -137,6 +140,7 @@ export type VotingPollSnapshot = {
     label: string;
     position: number;
   }[];
+  slots?: { id: string; position: number }[];
   sessionChecksEnabled: boolean;
   ipChecksEnabled: boolean;
   /** Authoritative CAPTCHA policy from the fresh Poll snapshot (Story 2.3). */
@@ -161,9 +165,17 @@ export type RankedChoiceVoteSubmission = {
   rankedPreferences: readonly RankedPreferenceInput[];
 };
 
+export type MeetingVoteSubmission = {
+  kind: "meeting";
+  selectedOptionIds: readonly string[];
+  displayName: string;
+  availability: readonly { slotId: string; state: string; position: number }[];
+};
+
 export type VoteSubmission =
   | MultipleChoiceVoteSubmission
-  | RankedChoiceVoteSubmission;
+  | RankedChoiceVoteSubmission
+  | MeetingVoteSubmission;
 
 export type MultipleChoiceValidatedVoteSubmission = {
   kind?: "multiple_choice";
@@ -182,7 +194,8 @@ export type RankedChoiceValidatedVoteSubmission = {
 
 export type ValidatedVoteSubmission =
   | MultipleChoiceValidatedVoteSubmission
-  | RankedChoiceValidatedVoteSubmission;
+  | RankedChoiceValidatedVoteSubmission
+  | { kind: "meeting"; selectedOptionIds: readonly PollOptionId[]; displayName: string; availability: { meetingSlotId: string; state: AvailabilityState; position: number }[] };
 
 export type PersistedVoteFacts =
   | {
@@ -194,10 +207,15 @@ export type PersistedVoteFacts =
       kind: "ranked_choice";
       preferences: { pollOptionId: PollOptionId; rank: number }[];
       selections?: never;
+    }
+  | {
+      kind: "meeting";
+      displayName: string;
+      availability: { meetingSlotId: string; state: AvailabilityState; position: number }[];
     };
 
 export type VotingPollTypeStrategy = {
-  readonly type?: "multiple_choice" | "ranked_choice";
+  readonly type?: "multiple_choice" | "ranked_choice" | "meeting";
   validateSubmission: (
     submission: VoteSubmission,
     facts: Pick<
@@ -206,7 +224,7 @@ export type VotingPollTypeStrategy = {
       | "multiSelectEnabled"
       | "minSelections"
       | "maxSelections"
-    >,
+    > & { slots?: readonly { id: string; position: number }[] },
   ) => Result<ValidatedVoteSubmission>;
   persistFacts: (validated: ValidatedVoteSubmission) => PersistedVoteFacts;
 };
@@ -223,6 +241,9 @@ export type RankedPreferenceContribution = {
   pollOptionId: PollOptionId;
   rank: number;
 };
+
+export type MeetingAvailabilityContribution = { kind: "meeting_availability"; voteId: string; meetingSlotId: string; availability: AvailabilityState };
+export type MeetingResponseContribution = { kind: "meeting_response"; voteId: string; displayName: string; revisionCapabilityDigest: string };
 
 export type VoterClaimContribution = {
   kind: "voter_claim";
@@ -243,6 +264,8 @@ export type VotePersistenceContribution =
   | RankedPreferenceContribution
   | VoterClaimContribution
   | VoteCommentContribution
+  | MeetingAvailabilityContribution
+  | MeetingResponseContribution
   | VoteExtensionContribution;
 
 export type VotePersistenceBatch = {
@@ -337,6 +360,14 @@ export type CastVoteInput = CastVoteInputBase &
         selectedOptionIds: readonly string[];
         rankedPreferences: readonly RankedPreferenceInput[];
       }
+    | {
+        pollType: "meeting";
+        displayName: string;
+        availability: readonly { slotId: string; state: string; position: number }[];
+        revisionCapabilityDigest: string;
+        selectedOptionIds: readonly string[];
+        rankedPreferences?: never;
+      }
   );
 
 export type CastVoteOutcome = {
@@ -398,6 +429,25 @@ export function normalizeRankedVotePayload(
   };
   return JSON.stringify(
     comment === null ? ranked : { ...ranked, comment },
+  );
+}
+
+export function normalizeMeetingVotePayload(
+  pollId: PollId,
+  displayName: string,
+  availability: readonly { slotId: string; state: string; position: number }[],
+  comment: CanonicalComment | null = null,
+): string {
+  const base = {
+    pollId,
+    pollType: "meeting" as const,
+    displayName: displayName.trim(),
+    availability: [...availability]
+      .sort((a, b) => a.position - b.position)
+      .map(({ slotId, state }) => ({ slotId, state })),
+  };
+  return JSON.stringify(
+    comment === null ? base : { ...base, comment },
   );
 }
 
@@ -505,7 +555,14 @@ export async function castVote(
   let normalizedPayload: string;
   try {
     normalizedPayload =
-      input.pollType === "ranked_choice"
+      input.pollType === "meeting"
+        ? normalizeMeetingVotePayload(
+            input.pollId,
+            input.displayName,
+            input.availability,
+            comment,
+          )
+      : input.pollType === "ranked_choice"
         ? normalizeRankedVotePayload(
             input.pollId,
             input.rankedPreferences,
@@ -590,7 +647,9 @@ export async function castVote(
   let validated: Result<ValidatedVoteSubmission>;
   try {
     const submission: VoteSubmission =
-      input.pollType === "ranked_choice"
+      input.pollType === "meeting"
+        ? { kind: "meeting", selectedOptionIds: [], displayName: input.displayName, availability: input.availability }
+      : input.pollType === "ranked_choice"
         ? {
             kind: "ranked_choice",
             selectedOptionIds: input.selectedOptionIds,
@@ -599,14 +658,17 @@ export async function castVote(
         : {
             selectedOptionIds: input.selectedOptionIds,
           };
-    validated = strategy.validateSubmission(
-      submission,
-      {
+    const validationFacts = {
         options: poll.options,
         multiSelectEnabled: poll.multiSelectEnabled,
         minSelections: poll.minSelections,
         maxSelections: poll.maxSelections,
-      },
+      };
+    validated = strategy.validateSubmission(
+      submission,
+      poll.pollType === "meeting"
+        ? { ...validationFacts, slots: poll.slots ?? [] }
+        : validationFacts,
     );
   } catch {
     return failure("vote_failed", VOTE_COPY.retry);
@@ -634,6 +696,7 @@ export async function castVote(
     if (strategyError.code === "invalid_ranking") {
       return failure("invalid_ranking", strategyError.message, detail);
     }
+    if (strategyError.code.startsWith("availability_") || strategyError.code.startsWith("display_name_")) return failure(strategyError.code, strategyError.message, detail);
     const message =
       strategyError.message.trim().length > 0
         ? strategyError.message
@@ -704,7 +767,12 @@ export async function castVote(
     return failure("vote_failed", VOTE_COPY.retry);
   }
   const contributions: VotePersistenceContribution[] =
-    persistedFacts.kind === "ranked_choice"
+    persistedFacts.kind === "meeting"
+      ? [
+          { kind: "meeting_response", voteId, displayName: persistedFacts.displayName, revisionCapabilityDigest: input.pollType === "meeting" ? input.revisionCapabilityDigest : "" },
+          ...persistedFacts.availability.map(({ meetingSlotId, state }) => ({ kind: "meeting_availability" as const, voteId, meetingSlotId, availability: state })),
+        ]
+    : persistedFacts.kind === "ranked_choice"
       ? persistedFacts.preferences.map(({ pollOptionId, rank }) => ({
           kind: "ranked_preference" as const,
           voteId,

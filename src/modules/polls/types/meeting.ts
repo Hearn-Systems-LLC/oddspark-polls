@@ -9,6 +9,8 @@ import {
 import { POLL_CAPS } from "../caps";
 import { DEFINITION_COPY } from "../definition";
 import { CIVIL_TIME_NONEXISTENT, civilToUtcMs, isUsableTimeZone } from "../index";
+import type { Result } from "../../../shared/application/index";
+import { AVAILABILITY_STATES, isAvailabilityState, type AvailabilityState } from "../../../shared/domain/index";
 
 export type MeetingSlotInput = {
   date: string;
@@ -31,6 +33,49 @@ export type MeetingSlotFact = {
 export type MeetingCreationFacts = {
   slots: MeetingSlotFact[];
 };
+
+export type MeetingVoteSubmission = {
+  kind: "meeting";
+  selectedOptionIds?: readonly string[];
+  displayName: string;
+  availability: readonly { slotId: string; state: string; position?: number }[];
+};
+
+export type MeetingValidatedSubmission = {
+  kind: "meeting";
+  selectedOptionIds: readonly never[];
+  displayName: string;
+  availability: { meetingSlotId: string; state: AvailabilityState; position: number }[];
+};
+
+export const MEETING_VOTE_COPY = {
+  displayNameMissing: "Add your name so everyone knows whose availability this is.",
+  displayNameInvalid: "Use a name between 1 and 80 characters.",
+  availabilityMissing: "Answer every time slot, then save.",
+  availabilityInvalid: "Choose Yes, If need be, or No for every time slot.",
+  availabilitySlotUnknown: "The available times changed. Review them and try again.",
+} as const;
+
+export function validateMeetingSubmission(
+  submission: MeetingVoteSubmission,
+  facts: { slots: readonly { id: string; position: number }[] },
+): Result<MeetingValidatedSubmission> {
+  const displayName = submission.displayName.trim();
+  if (displayName.length === 0) return validationFailure({ display_name: MEETING_VOTE_COPY.displayNameMissing }, { display_name: "display_name_missing" });
+  if (displayName.length > 80) return validationFailure({ display_name: MEETING_VOTE_COPY.displayNameInvalid }, { display_name: "display_name_invalid" });
+  const known = new Map(facts.slots.map((slot) => [slot.id, slot.position]));
+  const seen = new Set<string>();
+  const availability: MeetingValidatedSubmission["availability"] = [];
+  for (const row of submission.availability) {
+    if (!known.has(row.slotId) || seen.has(row.slotId)) return validationFailure({ availability: MEETING_VOTE_COPY.availabilitySlotUnknown }, { availability: "availability_slot_unknown" });
+    if (!isAvailabilityState(row.state)) return validationFailure({ availability: MEETING_VOTE_COPY.availabilityInvalid }, { availability: "availability_invalid" });
+    seen.add(row.slotId);
+    availability.push({ meetingSlotId: row.slotId, state: row.state, position: known.get(row.slotId)! });
+  }
+  if (availability.length !== facts.slots.length) return validationFailure({ availability: MEETING_VOTE_COPY.availabilityMissing }, { availability: "availability_missing" });
+  availability.sort((a, b) => a.position - b.position);
+  return { ok: true, value: { kind: "meeting", selectedOptionIds: [], displayName, availability } };
+}
 
 export const MEETING_DEFINITION_COPY = {
   slotsMissing: "A Poll needs options. Add at least two.",

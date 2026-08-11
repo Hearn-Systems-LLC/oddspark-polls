@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Meeting Poll availability responses. Voters see each proposed slot in their
+  local timezone with the Creator's source time retained, answer Yes / If need
+  be / No under a required display name, and receive a first-party capability
+  for changing the response while the Poll remains open.
+
 - Meeting Poll creation on `/creator/new`. Creators can propose two or more
   heterogeneous date/start/end slots in an explicitly stated timezone; slots
   persist as absolute instants with their IANA timezone and render read-only in

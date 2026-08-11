@@ -18,6 +18,12 @@ export const POLL_TYPES = [
 ] as const;
 export type PollType = (typeof POLL_TYPES)[number];
 
+export const AVAILABILITY_STATES = ["yes", "if_need_be", "no"] as const;
+export type AvailabilityState = (typeof AVAILABILITY_STATES)[number];
+export function isAvailabilityState(state: string): state is AvailabilityState {
+  return (AVAILABILITY_STATES as readonly string[]).includes(state);
+}
+
 export const RESULT_VISIBILITIES = [
   "live",
   "after_close",

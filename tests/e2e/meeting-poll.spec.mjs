@@ -61,6 +61,9 @@ test("creates heterogeneous Meeting slots with an explicit timezone", async ({
     await page.getByRole("button", { name: "ADD SLOT" }).click();
     await expect(page.locator("[data-slot-row]")).toHaveCount(3);
     await expect(page.getByLabel("SLOT 1 DATE")).toHaveValue("2027-01-15");
+    await page.getByLabel("SLOT 3 DATE").fill("2027-01-17");
+    await page.getByLabel("START").nth(2).fill("10:00");
+    await page.getByLabel("END").nth(2).fill("11:00");
     await page.setViewportSize({ width: 375, height: 812 });
     await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
     await page.screenshot({
@@ -83,7 +86,24 @@ test("creates heterogeneous Meeting slots with an explicit timezone", async ({
     ).toEqual([
       expect.objectContaining({ position: 0, time_zone: timezone || "UTC" }),
       expect.objectContaining({ position: 1, time_zone: timezone || "UTC" }),
+      expect.objectContaining({ position: 2, time_zone: timezone || "UTC" }),
     ]);
+    await page.goto(`/${reference}`);
+    expect((await context.cookies()).some((cookie) => cookie.name === "oddspark.voter")).toBe(true);
+    await expect(page.locator("[data-slot]")).toHaveCount(3);
+    await expect(page.locator("[data-timezone-label]")).toContainText("TIMES SHOWN IN");
+    await page.locator('[data-slot]').nth(0).locator('[data-state="yes"]').click();
+    await page.locator('[data-slot]').nth(1).locator('[data-state="if_need_be"]').click();
+    await page.locator('[data-slot]').nth(2).locator('[data-state="no"]').click();
+    await page.getByLabel("YOUR NAME").fill("Alex");
+    await Promise.all([
+      page.waitForURL(`**/${reference}`),
+      page.getByRole("button", { name: "VOTE" }).click(),
+    ]);
+    await expect(page.locator("[data-vote-outcome]")).toContainText("Saved. Change it any time while the Poll is open.");
+    const responseRow = d1Query(sql`SELECT mr.display_name, mr.revision_capability_digest FROM meeting_response mr JOIN vote v ON v.id = mr.vote_id WHERE v.poll_id = ${pollId}`)[0];
+    expect(responseRow).toMatchObject({ display_name: "Alex" });
+    expect(responseRow.revision_capability_digest).toMatch(/^[a-f0-9]{64}$/u);
     expect(browserErrors).toEqual([]);
   } finally {
     cleanupCreator(owner.userId);

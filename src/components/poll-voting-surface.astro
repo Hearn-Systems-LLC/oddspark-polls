@@ -10,6 +10,7 @@ import RankedResultsSummary from "./ranked-results-summary.astro";
 import ShareAction from "./share-action.astro";
 import TrustBadge from "./trust-badge.astro";
 import Turnstile from "./turnstile.astro";
+import AvailabilityGrid from "./availability-grid.astro";
 import { formatUtc } from "../lib/datetime";
 import { VOTE_COPY } from "../modules/voting/index";
 import {
@@ -61,9 +62,13 @@ const {
   commentDisplayName,
   commentFieldErrors,
   commentModerationCsrfToken,
+  meetingAvailability,
+  meetingDisplayName,
+  meetingFieldErrors,
 } = delivery;
 const selectedCount = selected.size;
 const rankedChoice = poll.pollType === "ranked_choice";
+const meeting = poll.pollType === "meeting";
 const rankedCount = rankedPreferences.length;
 
 const splitTimedText = (
@@ -198,6 +203,7 @@ const tallyOwnsBadge = readOnly;
         data-vote-locked={actionDisabled ? "true" : "false"}
         data-multi-select={multiSelect ? "true" : "false"}
         data-ranked-choice={rankedChoice ? "true" : "false"}
+        data-meeting={meeting ? "true" : "false"}
         data-min={effectiveMinSelections}
         data-max={effectiveMaxSelections}
         {...(multiSelect && selectedCount >= effectiveMaxSelections ? { "data-max-reached": "true" } : {})}
@@ -207,7 +213,9 @@ const tallyOwnsBadge = readOnly;
         {multiSelect && (
           <p class="vote-bounds-hint" id="vote-bounds-hint" data-bounds-hint aria-live="polite">{boundsHint}</p>
         )}
-        {rankedChoice ? (
+        {meeting ? (
+          <AvailabilityGrid slots={poll.slots ?? []} values={meetingAvailability} displayName={meetingDisplayName} fieldErrors={meetingFieldErrors} locked={actionDisabled} />
+        ) : rankedChoice ? (
           <RankBuilder
             options={poll.options}
             preferences={rankedPreferences}
@@ -226,11 +234,12 @@ const tallyOwnsBadge = readOnly;
             body={commentBody}
             displayName={commentDisplayName}
             fieldErrors={commentFieldErrors}
+            hideDisplayName={meeting}
           />
         )}
         <TrustBadge toggles={pollToggles} />
         <div class="vote-action">
-          {!multiSelect && !rankedChoice && <p class="vote-hint" data-vote-hint hidden>SELECT AN OPTION TO UNLOCK VOTE</p>}
+          {!multiSelect && !rankedChoice && !meeting && <p class="vote-hint" data-vote-hint hidden>SELECT AN OPTION TO UNLOCK VOTE</p>}
           {rankedChoice && rankedCount === 0 && <p class="vote-hint" data-vote-hint>RANK AN OPTION TO UNLOCK VOTE</p>}
           {poll.captchaEnabled && typeof turnstileSiteKey === "string" && turnstileSiteKey.trim().length > 0 && <Turnstile siteKey={turnstileSiteKey} />}
           {poll.captchaEnabled && typeof turnstileSiteKey === "string" && turnstileSiteKey.trim().length > 0 && <noscript>JavaScript is required for the human check on this Poll.</noscript>}
@@ -294,6 +303,7 @@ const tallyOwnsBadge = readOnly;
 </section>
 
 <script src="../scripts/vote-form.ts"></script>
+{!readOnly && meeting && <script src="../scripts/availability-grid.ts"></script>}
 {!readOnly && poll.captchaEnabled && turnstileSiteKey.trim().length > 0 && <script src="../scripts/turnstile.ts"></script>}
 <script src="../scripts/share-action.ts"></script>
 {showTally && postVoteResults?.kind === "visible" && <script src="../scripts/chart-form-toggle.ts"></script>}

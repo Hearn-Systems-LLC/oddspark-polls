@@ -1,0 +1,79 @@
+---
+import { isUsableTimeZone } from "../modules/polls/index";
+
+interface Props {
+  slots: readonly { id: string; startsAtMs: number; endsAtMs: number; timeZone: string; position: number }[];
+  values: Record<string, string>;
+  displayName: string;
+  fieldErrors: Record<string, string>;
+  locked?: boolean;
+}
+const { slots, values, displayName, fieldErrors, locked = false } = Astro.props;
+const sourceZone = slots.find((slot) => isUsableTimeZone(slot.timeZone))?.timeZone ?? "UTC";
+const formatTime = (ms: number, zone: string) => new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zone }).format(ms);
+const formatDate = (ms: number, zone: string) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: zone }).format(ms);
+const sourceCaption = (slot: Props["slots"][number]) => `created ${formatTime(slot.startsAtMs, sourceZone)}–${formatTime(slot.endsAtMs, sourceZone)} ${new Intl.DateTimeFormat("en-US", { timeZone: sourceZone, timeZoneName: "short" }).formatToParts(slot.startsAtMs).find((p) => p.type === "timeZoneName")?.value ?? sourceZone}`;
+const states = [{ value: "yes", label: "Yes" }, { value: "if_need_be", label: "If need be" }, { value: "no", label: "No" }] as const;
+---
+
+<section class="availability" data-availability-grid data-source-zone={sourceZone}>
+  <div class="timezone-control">
+    <label for="availability-time-zone" data-timezone-label>TIMES SHOWN IN {sourceZone}</label>
+    <select id="availability-time-zone" data-timezone-select aria-label="Time zone override">
+      {[sourceZone, "UTC", "America/Detroit", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Asia/Tokyo"].filter((zone, index, all) => all.indexOf(zone) === index && isUsableTimeZone(zone)).map((zone) => <option value={zone}>{zone}</option>)}
+    </select>
+  </div>
+  <div class="availability-rows">
+    {slots.map((slot) => (
+      <fieldset class="availability-row" role="radiogroup" data-slot data-starts-at={slot.startsAtMs} data-ends-at={slot.endsAtMs} data-source-zone={isUsableTimeZone(slot.timeZone) ? slot.timeZone : "UTC"}>
+        <div class="slot-header">
+          <legend class="slot-label" data-local-time>{formatDate(slot.startsAtMs, sourceZone)} · {formatTime(slot.startsAtMs, sourceZone)}–{formatTime(slot.endsAtMs, sourceZone)}</legend>
+          <span class="source-caption">{sourceCaption(slot)}</span>
+          <span class="day-shift" data-day-shift hidden>+1 day</span>
+        </div>
+        <div class="availability-cells">
+          {states.map((state) => (
+            <label class={`availability-cell is-${state.value}`} data-state={state.value}>
+              <input class="visually-hidden" type="radio" name={`availability_${slot.id}`} value={state.value} checked={values[slot.id] === state.value} disabled={locked} />
+              <span class="visually-hidden">{state.label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    ))}
+  </div>
+  {fieldErrors.availability && <p class="field-error">{fieldErrors.availability}</p>}
+  <div class="display-name">
+    <label for="meeting-display-name">YOUR NAME</label>
+    <input id="meeting-display-name" name="display_name" value={displayName} maxlength="80" aria-invalid={fieldErrors.display_name ? "true" : undefined} aria-describedby={fieldErrors.display_name ? "meeting-display-name-error" : undefined} />
+    {fieldErrors.display_name && <p id="meeting-display-name-error" class="field-error">{fieldErrors.display_name}</p>}
+  </div>
+</section>
+
+<style>
+  .availability { display: grid; gap: var(--space-5); }
+  .timezone-control { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); font: var(--type-label-caps-lg-size)/var(--type-label-caps-lh) var(--font-machine); letter-spacing: var(--type-label-caps-ls); text-transform: uppercase; }
+  .timezone-control select { min-height: 48px; color: var(--color-text); background: transparent; border: 0; border-bottom: 1px solid var(--color-rule); }
+  .availability-rows { display: grid; }
+  .availability-row { display: grid; grid-template-columns: minmax(10rem, 1fr) auto; align-items: center; gap: var(--space-3); margin: 0; padding: var(--space-2) 0; border: 0; }
+  .slot-header { display: grid; }
+  .slot-label { padding: 0; font-size: var(--type-body-size); font-weight: normal; }
+  .source-caption, .field-error { color: var(--color-dim); font-size: var(--type-caption-size); line-height: var(--type-caption-lh); }
+  .day-shift, .field-error { color: var(--color-entropy); }
+  .availability-cells { display: grid; grid-template-columns: repeat(3, 48px); }
+  .availability-cell { position: relative; display: grid; width: 48px; height: 48px; place-items: center; border: 1px solid var(--color-rule); margin-left: -1px; cursor: pointer; }
+  .availability-cell::before { color: var(--color-faint); font: 1.5rem/1 var(--font-machine); content: "·"; }
+  .availability-cell:has(input:focus-visible) { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); z-index: 1; }
+  .availability-cell.is-yes:has(input:checked) { background: var(--color-solar-wash); }
+  .availability-cell.is-yes:has(input:checked)::before { color: var(--availability-solar-ink); content: "✓"; }
+  .availability-cell.is-if_need_be:has(input:checked) { background: var(--color-entropy-wash); }
+  .availability-cell.is-if_need_be:has(input:checked)::before { color: var(--color-entropy); content: "~"; }
+  .availability-cell.is-no:has(input:checked)::before { color: var(--color-dim); content: "×"; }
+  .display-name { display: grid; gap: var(--space-1); margin-top: var(--space-3); }
+  .display-name label { font: var(--type-label-caps-size)/var(--type-label-caps-lh) var(--font-machine); letter-spacing: var(--type-label-caps-ls); }
+  .display-name input { min-height: 48px; color: var(--color-text); background: transparent; border: 0; border-bottom: 1px solid var(--color-rule); border-radius: 0; }
+  .display-name input:focus { border-bottom-color: var(--color-solar-ink); outline: none; }
+  .display-name input[aria-invalid="true"] { border-bottom-color: var(--color-alarm); }
+  .field-error { margin: 0; }
+  @media (max-width: 1023px) { .availability-row { grid-template-columns: 1fr; } .availability-cells { width: 100%; grid-template-columns: repeat(3, minmax(48px, 1fr)); } .availability-cell { width: 100%; } }
+</style>

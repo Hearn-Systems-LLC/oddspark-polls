@@ -15,6 +15,11 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Returning Meeting Poll voters can revise their own availability from the
+  same browser while the Poll remains open. Their saved row is pre-filled,
+  revisions replace rather than duplicate the Vote, and closed Polls retain a
+  read-only glyph view of that row.
+
 - Meeting Poll availability responses. Voters see each proposed slot in their
   local timezone with the Creator's source time retained, answer Yes / If need
   be / No under a required display name, and receive a first-party capability

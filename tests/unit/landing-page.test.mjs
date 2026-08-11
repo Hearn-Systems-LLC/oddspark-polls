@@ -128,7 +128,7 @@ describe("landing page source contract", () => {
 
   it("reserves the sole primary action for VOTE and demotes Create", () => {
     expect(votingSurfaceSource.match(/<ButtonPrimary\b/g) ?? []).toHaveLength(1);
-    expect(votingSurfaceSource).toContain(">VOTE</ButtonPrimary>");
+    expect(votingSurfaceSource).toContain('meetingRevisionRecognized ? "SAVE" : "VOTE"');
     expect(source).not.toContain("ButtonPrimary");
     expect(footerSource).toContain(
       'class="label-caps landing-footer-link" href="/creator/new"',

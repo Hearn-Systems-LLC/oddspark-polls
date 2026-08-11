@@ -44,8 +44,10 @@ import { resolveAuthorizedBallotLabels } from "../modules/results/post-vote";
 import {
   VOTE_COPY,
   asVoteRateLimitDigest,
+  asRevisionCapabilityDigest,
   asVoterClaimDigest,
   castVote,
+  reviseVote,
   type CastVoteInput,
   type VoteApplicationError,
   type VoteRateLimitDigest,
@@ -182,6 +184,7 @@ export type PollDeliveryState = {
   meetingAvailability: Record<string, string>;
   meetingDisplayName: string;
   meetingFieldErrors: Record<string, string>;
+  meetingRevisionRecognized: boolean;
 };
 
 export type PollDeliveryResult = {
@@ -201,6 +204,7 @@ export type PollDeliveryInput = {
   requestContext: RequestContext | null;
   voterCookie: string | null;
   flashCookie: string | null;
+  revisionCookie: string | null;
   formAction: string;
   successRedirect: string;
   includeEditableTally: boolean;
@@ -376,6 +380,19 @@ export async function deliverPollVotingSurface(
   let meetingAvailability: Record<string, string> = {};
   let meetingDisplayName = "";
   let meetingFieldErrors: Record<string, string> = {};
+  let meetingRevisionRecognized = false;
+  const deliveryPollId = poll.pollId;
+  const deliveryPollType = poll.pollType;
+
+  const cookieHeader = input.request.headers.get("cookie") ?? "";
+  const suffixedRevisionName = `${MEETING_REVISION_COOKIE_NAME}.${deliveryPollId}`;
+  const suffixedRevisionCookie = cookieHeader.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${suffixedRevisionName}=`))?.slice(suffixedRevisionName.length + 1) ?? null;
+  const revisionCapability = suffixedRevisionCookie ?? input.revisionCookie;
+  const findRevision = async () => {
+    if (deliveryPollType !== "meeting" || !revisionCapability) return null;
+    const digest = asRevisionCapabilityDigest(await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: deliveryPollId, checkKind: "revision", token: revisionCapability }));
+    return digest === null ? null : votePersistence.findMeetingResponseByRevisionDigest(deliveryPollId, digest);
+  };
 
   const issueVoterCookie = (): void => {
     voterToken = createVoterToken();
@@ -513,6 +530,40 @@ export async function deliverPollVotingSurface(
           response = immediate("Voting is unavailable.", 500);
           return { state: null, status: 500, headers, cookies, response, unavailable };
         }
+        const matchedRevision = await findRevision();
+        if (revisionCapability && !matchedRevision && input.requestContext) {
+          input.requestContext.authorizationDenied = true;
+        }
+        if (matchedRevision && poll.pollType === "meeting") {
+          meetingRevisionRecognized = true;
+          const identity = selectCloudflareClientAddress(input.request.headers);
+          let revisionRateDigest: VoteRateLimitDigest | null = null;
+          if (identity.ok) {
+            try { revisionRateDigest = asVoteRateLimitDigest(await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: poll.pollId, checkKind: "rate_limit", token: identity.value.rateLimitToken })); } catch { revisionRateDigest = null; }
+          }
+          if (!await allowVoteSubmission(input.env.VOTE_RATE_LIMITER, revisionRateDigest, poll.pollId, "revision")) {
+            outcome = rateLimitedOutcome(); actionDisabled = true; status = 429; headers["retry-after"] = "60"; markVoteRejection();
+          } else {
+            const flashDigest = await flashDigestFor(poll.pollId);
+            const revised = await reviseVote({
+              findPoll: votePersistence.findPoll,
+              findMeetingResponseByRevisionDigest: votePersistence.findMeetingResponseByRevisionDigest,
+              createDigest: (digestInput) => createVoteDigest(input.env.VOTE_DIGEST_SECRET, digestInput),
+              reviseMeetingResponse: votePersistence.reviseMeetingResponse,
+              strategyFor: votingStrategyFor,
+              nowMs: () => Date.now(),
+            }, { pollId: poll.pollId, revisionCapability: revisionCapability!, displayName: parsed.data.meetingDisplayName, availability: parsed.data.meetingAvailability, submissionId: submittedId });
+            if (revised.ok) {
+              cookies.push({ kind: "set", name: VOTE_FLASH_COOKIE_NAME, value: flashDigest, options: { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure } });
+              response = immediate(null, 303, { location: input.successRedirect });
+              return { state: null, status: 303, headers, cookies, response, unavailable };
+            }
+            outcome = revised.error.code === "revision_capability_invalid" ? null : outcomeFromVoteError(revised.error);
+            meetingFieldErrors = revised.error.fieldErrors ?? {};
+            if (outcome) { readOnly = revised.error.code === "poll_closed"; status = revised.error.code === "vote_failed" ? 500 : 422; markVoteRejection(); }
+          }
+        }
+        if (!outcome && !response && !matchedRevision) {
         const existing = await votePersistence.findVoteBySubmission(poll.pollId, submittedId);
         let ipClaimDigest: VoterClaimDigest | null = null;
         let rateLimitDigest: VoteRateLimitDigest | null = null;
@@ -557,8 +608,8 @@ export async function deliverPollVotingSurface(
           // surface as vote_failed instead — accepted trade-off, since a
           // signing failure still commits nothing.
           const flashDigest = await flashDigestFor(poll.pollId);
-          const revisionCapability = poll.pollType === "meeting" ? createRevisionCapability() : null;
-          const revisionCapabilityDigest = revisionCapability === null ? null : await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: poll.pollId, checkKind: "revision", token: revisionCapability });
+          const newRevisionCapability = poll.pollType === "meeting" ? createRevisionCapability() : null;
+          const revisionCapabilityDigest = newRevisionCapability === null ? null : await createVoteDigest(input.env.VOTE_DIGEST_SECRET, { pollId: poll.pollId, checkKind: "revision", token: newRevisionCapability });
           const sharedVoteInput = {
             pollId: poll.pollId,
             submissionId: submittedId,
@@ -610,10 +661,10 @@ export async function deliverPollVotingSurface(
               value: flashDigest,
               options: { httpOnly: true, maxAge: 60, path: "/", sameSite: "lax", secure },
             });
-            if (revisionCapability !== null) cookies.push({
+            if (newRevisionCapability !== null) cookies.push({
               kind: "set",
-              name: MEETING_REVISION_COOKIE_NAME,
-              value: revisionCapability,
+              name: `${MEETING_REVISION_COOKIE_NAME}.${poll.pollId}`,
+              value: newRevisionCapability,
               options: { httpOnly: true, maxAge: VOTER_COOKIE_MAX_AGE_SECONDS, path: "/", sameSite: "lax", secure },
             });
             response = immediate(null, 303, { location: input.successRedirect });
@@ -672,6 +723,7 @@ export async function deliverPollVotingSurface(
           }
         }
         }
+        }
       }
     } catch (error) {
       // Once form parsing has started, keep the server-rendered retry surface
@@ -708,6 +760,13 @@ export async function deliverPollVotingSurface(
         } catch { ipPreflightDigest = null; }
       }
     }
+    let matchedRevision = null;
+    try { matchedRevision = await findRevision(); } catch { matchedRevision = null; }
+    if (matchedRevision) {
+      meetingRevisionRecognized = true;
+      meetingDisplayName = matchedRevision.displayName;
+      meetingAvailability = Object.fromEntries(matchedRevision.availability.map((entry) => [entry.meetingSlotId, entry.availability]));
+    }
     if (method === "GET" && input.flashCookie) {
       try {
         if (input.flashCookie === await flashDigestFor(poll.pollId)) {
@@ -715,14 +774,16 @@ export async function deliverPollVotingSurface(
           outcome = poll.pollType === "meeting"
             ? { code: "counted", heading: "Saved.", body: "Change it any time while the Poll is open.", time: null, titlePrefix: "Saved", tone: "confirmation" }
             : { code: "counted", heading: VOTE_COPY.counted, body: "", time: null, titlePrefix: "Counted", tone: "confirmation" };
-          readOnly = true;
+          readOnly = poll.pollType === "meeting" && matchedRevision ? false : true;
         }
       } catch { /* stale or unavailable flash is ignored */ }
     }
     const closedCheckMs = Date.now();
-    if (outcome === null && effectivePollStatus(poll, closedCheckMs) === "closed") {
+    if ((outcome === null || matchedRevision !== null) && effectivePollStatus(poll, closedCheckMs) === "closed") {
       outcome = { code: "poll_closed_get", heading: VOTE_COPY.closedOnGet, body: "", time: { placeholder: "{when}", timestampMs: poll.closedAtMs ?? poll.deadlineMs ?? closedCheckMs }, titlePrefix: "Poll closed", tone: "rejection" };
       readOnly = true;
+    } else if (matchedRevision) {
+      readOnly = false;
     } else if (outcome === null && voterDigest !== null) {
       try {
         if (await votePersistence.findClaim(poll.pollId, "session", voterDigest)) {
@@ -890,6 +951,7 @@ export async function deliverPollVotingSurface(
       meetingAvailability,
       meetingDisplayName,
       meetingFieldErrors,
+      meetingRevisionRecognized,
     },
     status,
     headers,

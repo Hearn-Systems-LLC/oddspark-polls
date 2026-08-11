@@ -93,6 +93,9 @@ if (form) {
   const meetingDisplayNameInput = form.querySelector<HTMLInputElement>(
     "#meeting-display-name",
   );
+  availabilityInputs.forEach((input) => input.addEventListener("keydown", (event) => {
+    if (form.dataset.voteInflight === "true") event.preventDefault();
+  }));
   const rankActions = Array.from(
     form.querySelectorAll<HTMLButtonElement>("[data-rank-action]"),
   );
@@ -253,16 +256,16 @@ if (form) {
     );
     form.dataset.voteInflight = "true";
     if (voteButton) {
-      voteButton.textContent = "COUNTING…";
+      voteButton.textContent = idleVoteLabel === "SAVE" ? "SAVING…" : "COUNTING…";
       voteButton.disabled = true;
       voteButton.setAttribute("aria-busy", "true");
     }
     if (commentBody) commentBody.readOnly = true;
     if (commentDisplayName) commentDisplayName.readOnly = true;
     if (meetingDisplayNameInput) meetingDisplayNameInput.readOnly = true;
-    availabilityInputs.forEach((input) => {
-      input.disabled = true;
-    });
+    // Keep successful controls enabled so native form serialization includes
+    // the checked Meeting row. The in-flight data state blocks pointer and
+    // keyboard edits without dropping values from the request body.
     rankActions.forEach((action) => {
       action.disabled = true;
     });

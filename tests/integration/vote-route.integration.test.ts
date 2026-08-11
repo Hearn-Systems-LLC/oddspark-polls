@@ -294,18 +294,44 @@ describe("Meeting response delivery boundary", () => {
     const post = (body: URLSearchParams) => runVoteRoute(makeContext(new Request(`${ORIGIN}/${poll.reference}`, { method: "POST", headers: voteHeaders(), body })), poll.reference);
     const first = await post(meetingBody(submissionId, poll.slots));
     expect(first.status).toBe(303);
-    expect(first.headers.get("set-cookie")).toContain("oddspark.meeting_revision=");
+    const setCookie = first.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain(`oddspark.meeting_revision.${poll.pollId}=`);
+    const capability = setCookie.match(new RegExp(`oddspark\\.meeting_revision\\.${poll.pollId}=([^;,]+)`))?.[1];
+    expect(capability).toBeTruthy();
     const stored = await testEnv.DB.prepare("SELECT mr.display_name, mr.revision_capability_digest FROM meeting_response mr JOIN vote v ON v.id=mr.vote_id WHERE v.poll_id=?1").bind(poll.pollId).first<{ display_name: string; revision_capability_digest: string }>();
     expect(stored?.display_name).toBe("Alex");
     expect(stored?.revision_capability_digest).toMatch(/^[a-f0-9]{64}$/u);
+
+    const cookie = `oddspark.meeting_revision.${poll.pollId}=${capability}`;
+    const returning = await runVoteRoute(makeContext(new Request(`${ORIGIN}/${poll.reference}`, { headers: { cookie } })), poll.reference);
+    const returningHtml = await returning.text();
+    expect(returning.status).toBe(200);
+    expect(returningHtml).toContain('value="yes" checked');
+    expect(returningHtml).toContain(">SAVE<");
+    expect(returningHtml).not.toContain("already_voted");
+
+    const revisedBody = meetingBody(crypto.randomUUID(), poll.slots, "Alex R");
+    revisedBody.set(`availability_${poll.slots[0]}`, "no");
+    const revised = await runVoteRoute(makeContext(new Request(`${ORIGIN}/${poll.reference}`, { method: "POST", headers: voteHeaders({ cookie }), body: revisedBody })), poll.reference);
+    expect(revised.status).toBe(303);
+    const secondRevision = await runVoteRoute(makeContext(new Request(`${ORIGIN}/${poll.reference}`, { method: "POST", headers: voteHeaders({ cookie }), body: meetingBody(crypto.randomUUID(), poll.slots, "Alex R") })), poll.reference);
+    expect(secondRevision.status).toBe(303);
+    await expect(testEnv.DB.prepare("SELECT COUNT(*) n FROM vote WHERE poll_id=?1").bind(poll.pollId).first()).resolves.toEqual({ n: 1 });
+    await expect(testEnv.DB.prepare("SELECT COUNT(*) n FROM voter_claim WHERE poll_id=?1").bind(poll.pollId).first()).resolves.toEqual({ n: 0 });
+    await expect(testEnv.DB.prepare("SELECT representation_version FROM poll WHERE id=?1").bind(poll.pollId).first()).resolves.toEqual({ representation_version: 4 });
     expect((await post(meetingBody(submissionId, poll.slots))).status).toBe(303);
     const conflict = await post(meetingBody(submissionId, poll.slots, "Sam"));
     expect(conflict.status).toBe(422);
     expect(await conflict.text()).toContain("Your earlier Vote stands");
     await testEnv.DB.prepare("UPDATE poll SET closed_at_ms=?2 WHERE id=?1").bind(poll.pollId, Date.now()).run();
-    const closed = await post(meetingBody(crypto.randomUUID(), poll.slots));
+    const closed = await runVoteRoute(makeContext(new Request(`${ORIGIN}/${poll.reference}`, { method: "POST", headers: voteHeaders({ cookie }), body: meetingBody(crypto.randomUUID(), poll.slots) })), poll.reference);
     expect(closed.status).toBe(422);
     expect(await closed.text()).toContain("This Poll closed while you were deciding");
+    const closedGet = await runVoteRoute(makeContext(new Request(`${ORIGIN}/${poll.reference}`, { headers: { cookie } })), poll.reference);
+    const closedHtml = await closedGet.text();
+    expect(closedHtml).toContain("This Poll closed");
+    expect(closedHtml).toContain("is-selected");
+    expect(closedHtml).not.toContain('type="radio"');
   });
 });
 

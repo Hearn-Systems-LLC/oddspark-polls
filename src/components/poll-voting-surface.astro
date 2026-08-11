@@ -65,6 +65,7 @@ const {
   meetingAvailability,
   meetingDisplayName,
   meetingFieldErrors,
+  meetingRevisionRecognized,
 } = delivery;
 const selectedCount = selected.size;
 const rankedChoice = poll.pollType === "ranked_choice";
@@ -187,7 +188,9 @@ const tallyOwnsBadge = readOnly;
     )
   }
   {
-    showReadOnlyOptions ? (
+    meeting && readOnly && meetingRevisionRecognized ? (
+      <AvailabilityGrid slots={poll.slots ?? []} values={meetingAvailability} displayName={meetingDisplayName} fieldErrors={{}} readOnly />
+    ) : showReadOnlyOptions ? (
       <ul class="poll-options">
         {poll.options.map((option) => (
           <li>
@@ -243,7 +246,7 @@ const tallyOwnsBadge = readOnly;
           {rankedChoice && rankedCount === 0 && <p class="vote-hint" data-vote-hint>RANK AN OPTION TO UNLOCK VOTE</p>}
           {poll.captchaEnabled && typeof turnstileSiteKey === "string" && turnstileSiteKey.trim().length > 0 && <Turnstile siteKey={turnstileSiteKey} />}
           {poll.captchaEnabled && typeof turnstileSiteKey === "string" && turnstileSiteKey.trim().length > 0 && <noscript>JavaScript is required for the human check on this Poll.</noscript>}
-          <ButtonPrimary type="submit" class="vote-button" disabled={actionDisabled || (rankedChoice && rankedCount === 0)}>VOTE</ButtonPrimary>
+          <ButtonPrimary type="submit" class="vote-button" disabled={actionDisabled || (rankedChoice && rankedCount === 0)}>{meetingRevisionRecognized ? "SAVE" : "VOTE"}</ButtonPrimary>
         </div>
       </form>
     )
@@ -324,6 +327,7 @@ const tallyOwnsBadge = readOnly;
   .poll-options { margin: 0; padding: 0; border: 0; }
   .poll-options > li { list-style: none; }
   [data-vote-form][data-vote-inflight="true"] .poll-options { pointer-events: none; }
+  [data-vote-form][data-vote-inflight="true"] :global(.availability) { pointer-events: none; }
   [data-vote-form][data-vote-inflight="true"] :global([data-comment-composer]) { pointer-events: none; opacity: 0.8; }
   [data-vote-form][data-vote-inflight="true"] :global(.vote-button) { outline: var(--focus-outline); outline-offset: var(--focus-outline-offset); }
   [data-vote-form][data-max-reached="true"] :global(label.poll-option:has(.poll-option-input:not(:checked))) { cursor: default; }

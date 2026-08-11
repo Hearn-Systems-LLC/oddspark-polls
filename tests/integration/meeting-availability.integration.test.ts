@@ -33,6 +33,44 @@ async function vote(pollId = "meeting-vote", id = "meeting-vote-1") {
 }
 
 describe("meeting availability schema (0017)", () => {
+  it("reads and replaces only the capability-matched Meeting response", async () => {
+    await seed(); await vote();
+    const persistence = createVotePersistence(testEnv.DB);
+    await testEnv.DB.batch([
+      testEnv.DB.prepare("INSERT INTO meeting_response VALUES ('meeting-vote-1','Alex',?1)").bind("a".repeat(64)),
+      testEnv.DB.prepare("INSERT INTO meeting_availability VALUES ('meeting-vote-1','meeting-vote-slot','yes')"),
+    ]);
+    await expect(persistence.findMeetingResponseByRevisionDigest("meeting-vote" as PollId, "a".repeat(64) as never)).resolves.toMatchObject({ voteId: "meeting-vote-1", displayName: "Alex", availability: [{ meetingSlotId: "meeting-vote-slot", availability: "yes" }] });
+    await expect(persistence.findMeetingResponseByRevisionDigest("other-meeting" as PollId, "a".repeat(64) as never)).resolves.toBeNull();
+    await persistence.reviseMeetingResponse({ pollId: "meeting-vote" as PollId, voteId: "meeting-vote-1", displayName: "Alex R", availability: [{ meetingSlotId: "meeting-vote-slot", availability: "no" }], updatedAtMs: NOW + 1 });
+    await expect(testEnv.DB.prepare("SELECT display_name FROM meeting_response").first()).resolves.toEqual({ display_name: "Alex R" });
+    await expect(testEnv.DB.prepare("SELECT availability FROM meeting_availability").first()).resolves.toEqual({ availability: "no" });
+    await expect(testEnv.DB.prepare("SELECT representation_version FROM poll").first()).resolves.toEqual({ representation_version: 2 });
+    await expect(testEnv.DB.prepare("SELECT COUNT(*) count FROM vote").first()).resolves.toEqual({ count: 1 });
+    await expect(testEnv.DB.prepare("SELECT COUNT(*) count FROM voter_claim").first()).resolves.toEqual({ count: 0 });
+  });
+
+  it("maps a concurrently deleted Vote to a clean gone error", async () => {
+    await seed(); await vote();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare("INSERT INTO meeting_response VALUES ('meeting-vote-1','Alex',?1)").bind("c".repeat(64)),
+      testEnv.DB.prepare("INSERT INTO meeting_availability VALUES ('meeting-vote-1','meeting-vote-slot','yes')"),
+    ]);
+    await testEnv.DB.prepare("DELETE FROM vote WHERE id='meeting-vote-1'").run();
+    await expect(createVotePersistence(testEnv.DB).reviseMeetingResponse({ pollId: "meeting-vote" as PollId, voteId: "meeting-vote-1", displayName: "Alex", availability: [{ meetingSlotId: "meeting-vote-slot", availability: "no" }], updatedAtMs: NOW + 1 })).rejects.toThrow(/poll no longer exists/);
+  });
+
+  it("aborts a closed revision with the original availability intact", async () => {
+    await seed(); await vote();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare("INSERT INTO meeting_response VALUES ('meeting-vote-1','Alex',?1)").bind("b".repeat(64)),
+      testEnv.DB.prepare("INSERT INTO meeting_availability VALUES ('meeting-vote-1','meeting-vote-slot','yes')"),
+      testEnv.DB.prepare("UPDATE poll SET closed_at_ms=?1 WHERE id='meeting-vote'").bind(NOW),
+    ]);
+    await expect(createVotePersistence(testEnv.DB).reviseMeetingResponse({ pollId: "meeting-vote" as PollId, voteId: "meeting-vote-1", displayName: "Changed", availability: [{ meetingSlotId: "meeting-vote-slot", availability: "no" }], updatedAtMs: NOW + 1 })).rejects.toThrow(/poll is closed/);
+    await expect(testEnv.DB.prepare("SELECT display_name FROM meeting_response").first()).resolves.toEqual({ display_name: "Alex" });
+    await expect(testEnv.DB.prepare("SELECT availability FROM meeting_availability").first()).resolves.toEqual({ availability: "yes" });
+  });
   it("commits one Vote, response, and all availability facts in one adapter batch", async () => {
     await seed();
     await createVotePersistence(testEnv.DB).insertVote({

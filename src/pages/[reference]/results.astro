@@ -2,6 +2,7 @@
 import { env } from "cloudflare:workers";
 import ResultsTally from "../../components/results-tally.astro";
 import RankedResultsSummary from "../../components/ranked-results-summary.astro";
+import AvailabilityTally from "../../components/availability-tally.astro";
 import CommentList from "../../components/comment-list.astro";
 import PublicRepositoryLink from "../../components/public-repository-link.astro";
 import ShareAction from "../../components/share-action.astro";
@@ -171,6 +172,29 @@ const afterCloseParts =
               />
             </section>
           )}
+          {view.kind === "meeting_visible" && (
+            <section data-results-region>
+              <AvailabilityTally
+                meeting={view.meeting}
+                status={view.status}
+                toggles={view.securityToggles}
+                liveEndpoint={
+                  view.status === "open"
+                    ? `/${encodeURIComponent(view.canonicalReference)}/results/live`
+                    : undefined
+                }
+                initialRenderAtMs={resultsRenderedAtMs}
+                initialValidator={view.validator}
+              />
+              <CommentList
+                comments={view.comments}
+                moderationComments={view.ownerComments}
+                csrfToken={Astro.locals.requestContext?.csrfToken?.value ?? ""}
+                cancelHref={`/${encodeURIComponent(view.canonicalReference)}/results`}
+                mode="owner"
+              />
+            </section>
+          )}
           {view.kind === "after_close_hidden" && (
             <p class="results-explanation">
               {afterCloseParts && view.deadlineMs !== null ? (
@@ -229,9 +253,22 @@ const afterCloseParts =
     )
   }
   {
-    view.kind === "visible" && (view.ownerComments?.length ?? 0) > 0 && (
-      <script src="../../scripts/overlay.ts"></script>
+    view.kind === "meeting_visible" && (
+      <script src="../../scripts/availability-grid.ts"></script>
     )
+  }
+  {
+    view.kind === "meeting_visible" && view.status === "open" && (
+      <script src="../../scripts/meeting-results-live.ts"></script>
+    )
+  }
+  {
+    (view.kind === "visible" ||
+      view.kind === "ranked_visible" ||
+      view.kind === "meeting_visible") &&
+      (view.ownerComments?.length ?? 0) > 0 && (
+        <script src="../../scripts/overlay.ts"></script>
+      )
   }
   {
     view.kind !== "not_found" && (

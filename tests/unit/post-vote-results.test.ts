@@ -5,6 +5,7 @@ describe("resolveAuthorizedBallotLabels", () => {
   it.each([
     "after_close_hidden",
     "creator_only_hidden",
+    "meeting_visible",
     "unavailable",
     "not_found",
   ] as const)(

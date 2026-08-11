@@ -44,6 +44,9 @@ const OPTION_A = `${POLL_ID}-option-a` as PollOptionId;
 
 beforeEach(async () => {
   await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+  await testEnv.DB.prepare("DELETE FROM meeting_availability").run();
+  await testEnv.DB.prepare("DELETE FROM meeting_response").run();
+  await testEnv.DB.prepare("DELETE FROM meeting_slot").run();
   await testEnv.DB.prepare("DELETE FROM voter_claim").run();
   await testEnv.DB.prepare("DELETE FROM vote_selection").run();
   await testEnv.DB.prepare("DELETE FROM vote").run();
@@ -94,6 +97,86 @@ async function seedPoll(
     ).bind(reference, pollId),
   ]);
   return { pollId, reference };
+}
+
+async function seedMeetingPoll(
+  overrides: {
+    resultVisibility?: "live" | "after_close" | "creator_only";
+    deadlineMs?: number | null;
+  } = {},
+): Promise<{
+  pollId: PollId;
+  reference: string;
+  slotIds: readonly [string, string];
+  startsAtMs: number;
+}> {
+  const reference = "live-route-meeting";
+  const startsAtMs = Date.now() + 3_600_000;
+  const slotIds = [
+    `${POLL_ID}-meeting-slot-a`,
+    `${POLL_ID}-meeting-slot-b`,
+  ] as const;
+  await testEnv.DB.batch([
+    testEnv.DB.prepare(
+      `INSERT INTO poll (
+         id, owner_user_id, poll_type, question, result_visibility,
+         comments_enabled, session_checks_enabled, multi_select_enabled,
+         min_selections, max_selections, deadline_ms, closed_at_ms,
+         representation_version, created_at_ms, updated_at_ms
+       ) VALUES (?1, ?2, 'meeting', 'When can everyone meet?', ?3,
+         1, 0, 0, NULL, NULL, ?4, NULL, 1, 0, 0)`,
+    ).bind(
+      POLL_ID,
+      OWNER_ID,
+      overrides.resultVisibility ?? "live",
+      overrides.deadlineMs ?? null,
+    ),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_slot (id, poll_id, position, starts_at_ms, ends_at_ms, time_zone, created_at_ms) VALUES (?1, ?2, 0, ?3, ?4, 'America/Detroit', 0)",
+    ).bind(slotIds[0], POLL_ID, startsAtMs, startsAtMs + 3_600_000),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_slot (id, poll_id, position, starts_at_ms, ends_at_ms, time_zone, created_at_ms) VALUES (?1, ?2, 1, ?3, ?4, 'America/Detroit', 0)",
+    ).bind(
+      slotIds[1],
+      POLL_ID,
+      startsAtMs + 86_400_000,
+      startsAtMs + 90_000_000,
+    ),
+    testEnv.DB.prepare(
+      "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (?1, ?2, 'generated', 1, 0)",
+    ).bind(reference, POLL_ID),
+  ]);
+  return { pollId: POLL_ID, reference, slotIds, startsAtMs };
+}
+
+async function insertMeetingResponse(input: {
+  voteId: string;
+  displayName: string;
+  createdAtMs: number;
+  availability: readonly {
+    slotId: string;
+    state: "yes" | "if_need_be" | "no";
+  }[];
+}): Promise<void> {
+  await testEnv.DB.batch([
+    testEnv.DB.prepare(
+      "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+    ).bind(
+      input.voteId,
+      POLL_ID,
+      `submission-${input.voteId}`,
+      `hash-${input.voteId}`,
+      input.createdAtMs,
+    ),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_response (vote_id, display_name, revision_capability_digest) VALUES (?1, ?2, ?3)",
+    ).bind(input.voteId, input.displayName, `digest-${input.voteId}`),
+    ...input.availability.map(({ slotId, state }) =>
+      testEnv.DB.prepare(
+        "INSERT INTO meeting_availability (vote_id, meeting_slot_id, availability) VALUES (?1, ?2, ?3)",
+      ).bind(input.voteId, slotId, state),
+    ),
+  ]);
 }
 
 function requestContext(): RequestContext {
@@ -187,6 +270,77 @@ async function castAcceptedVote(): Promise<void> {
 }
 
 describe("live Results endpoint", () => {
+  it("returns a discriminated identifier-free Meeting payload and revalidates it", async () => {
+    const meeting = await seedMeetingPoll();
+    await insertMeetingResponse({
+      voteId: "meeting-live-vote-a",
+      displayName: "<Alex & Co>",
+      createdAtMs: meeting.startsAtMs,
+      availability: [
+        { slotId: meeting.slotIds[0], state: "yes" },
+        { slotId: meeting.slotIds[1], state: "no" },
+      ],
+    });
+    await insertMeetingResponse({
+      voteId: "meeting-live-vote-b",
+      displayName: "Sam",
+      createdAtMs: meeting.startsAtMs + 1,
+      availability: [{ slotId: meeting.slotIds[0], state: "yes" }],
+    });
+    await testEnv.DB.prepare(
+      "UPDATE poll SET representation_version = 3 WHERE id = ?1",
+    )
+      .bind(POLL_ID)
+      .run();
+
+    const response = await GET(makeContext(meeting.reference).context);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("etag")).toBe('"3:open"');
+    const payload = await response.json();
+    expect(payload).toEqual({
+      pollType: "meeting",
+      status: "open",
+      empty: false,
+      voterCount: 2,
+      slots: [
+        {
+          startsAtMs: meeting.startsAtMs,
+          endsAtMs: meeting.startsAtMs + 3_600_000,
+          timeZone: "America/Detroit",
+          position: 0,
+          yesCount: 2,
+          ifNeedBeCount: 0,
+          noCount: 0,
+          isBest: true,
+        },
+        {
+          startsAtMs: meeting.startsAtMs + 86_400_000,
+          endsAtMs: meeting.startsAtMs + 90_000_000,
+          timeZone: "America/Detroit",
+          position: 1,
+          yesCount: 0,
+          ifNeedBeCount: 0,
+          noCount: 1,
+          isBest: false,
+        },
+      ],
+      voters: [
+        { displayName: "<Alex & Co>", availability: ["yes", "no"] },
+        { displayName: "Sam", availability: ["yes", null] },
+      ],
+      comments: [],
+    });
+    expect(JSON.stringify(payload)).not.toMatch(
+      /meeting-live-vote|meeting-slot|representationVersion|revision/i,
+    );
+
+    const unchanged = await GET(
+      makeContext(meeting.reference, { ifNoneMatch: '"3:open"' }).context,
+    );
+    expect(unchanged.status).toBe(304);
+    expect(await unchanged.text()).toBe("");
+  });
+
   it.each(["POST", "PUT", "DELETE", "PATCH"])(
     "rejects %s with 405 and Allow before any Poll read",
     async (method) => {

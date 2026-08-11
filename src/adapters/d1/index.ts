@@ -1288,11 +1288,11 @@ export function createVotePersistence(db: D1Database) {
             "INSERT INTO meeting_availability (vote_id, meeting_slot_id, availability) VALUES (?1, ?2, ?3)",
           ).bind(batch.voteId, entry.meetingSlotId, entry.availability)),
           db.prepare("UPDATE meeting_response SET display_name = ?2 WHERE vote_id = ?1").bind(batch.voteId, batch.displayName),
-          db.prepare("UPDATE poll SET representation_version = representation_version + 1, updated_at_ms = ?2 WHERE id = ?1").bind(batch.pollId, batch.updatedAtMs),
+          db.prepare("UPDATE poll SET representation_version = representation_version + 1, updated_at_ms = ?2 WHERE id = ?1 AND EXISTS (SELECT 1 FROM meeting_response WHERE vote_id = ?3)").bind(batch.pollId, batch.updatedAtMs, batch.voteId),
         ]);
         const responseUpdate = results.at(-2);
         const pollUpdate = results.at(-1);
-        if ((responseUpdate?.meta.changes ?? 0) !== 1 || (pollUpdate?.meta.changes ?? 0) !== 1) throw new PollGoneError();
+        if ((responseUpdate?.meta?.changes ?? 0) !== 1 || (pollUpdate?.meta?.changes ?? 0) !== 1) throw new PollGoneError();
       } catch (error) {
         if (error instanceof PollGoneError) throw error;
         if (error instanceof Error && /poll_closed/.test(error.message)) throw new PollClosedError();

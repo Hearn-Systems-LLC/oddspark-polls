@@ -443,7 +443,7 @@ export async function reviseVote(
     });
     return { ok: true, value: { pollId: input.pollId, voteId: stored.voteId, acceptedAtMs: nowMs } };
   } catch (error) {
-    if (error instanceof PollClosedError) return failure("poll_closed", VOTE_COPY.pollClosed);
+    if (error instanceof PollClosedError) return failure("poll_closed", VOTE_COPY.pollClosed, { closedAtMs: deps.nowMs() });
     if (error instanceof PollDefinitionChangedError) return failure("poll_definition_changed", VOTE_COPY.pollDefinitionChanged);
     if (error instanceof PollGoneError) return failure("poll_deleted", VOTE_COPY.pollDeleted);
     return failure("vote_failed", VOTE_COPY.retry);

@@ -761,7 +761,9 @@ export async function deliverPollVotingSurface(
       }
     }
     let matchedRevision = null;
-    try { matchedRevision = await findRevision(); } catch { matchedRevision = null; }
+    if (method === "GET") {
+      try { matchedRevision = await findRevision(); } catch { matchedRevision = null; }
+    }
     if (matchedRevision) {
       meetingRevisionRecognized = true;
       meetingDisplayName = matchedRevision.displayName;

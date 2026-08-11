@@ -188,7 +188,7 @@ const tallyOwnsBadge = readOnly;
     )
   }
   {
-    meeting && readOnly && meetingRevisionRecognized ? (
+    meeting && readOnly ? (
       <AvailabilityGrid slots={poll.slots ?? []} values={meetingAvailability} displayName={meetingDisplayName} fieldErrors={{}} readOnly />
     ) : showReadOnlyOptions ? (
       <ul class="poll-options">

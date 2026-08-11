@@ -4,7 +4,7 @@ baseline_commit: 9c0aa3772cf2d443bbb4e2da74f22c8ef7df1c3a
 
 # Story 7.3: Revise Your Availability
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Depends on Story 7.2 (branch story/7-2-mark-availability, currently in review). Start only after 7.2 merges; set baseline_commit to that merge. -->
@@ -51,6 +51,15 @@ So that a remembered conflict doesn't poison the schedule — without my revisio
   - [x] Integration `tests/integration/vote-route.integration.test.ts` (extend meeting describe): GET with valid revision cookie → 200 with pre-filled radios (`checked` in HTML) and no `already_voted` outcome; GET with foreign/absent cookie → fresh grid; POST revise → 303 + "Saved." flash + single vote row; POST revise after close → 422 closed copy; second revision succeeds (no idempotency conflict)
   - [x] E2E `tests/e2e/meeting-poll.spec.mjs` (extend serial spec): after 7.2's submit, reload → grid pre-filled → flip one slot → `SAVE` → "Saved." → D1 shows one vote, replaced availability, bumped `representation_version`; then close poll → reload → read-only glyph row + closed message
   - [x] Full gate: `pnpm migrations:guard && pnpm test && pnpm check`; `pnpm test:e2e`; `pnpm types && git diff --exit-code worker-configuration.d.ts && pnpm build:production && git diff --check`; CHANGELOG entry
+
+### Review Findings
+
+- [x] [Review][Patch] POST revision validation failure overwrites submitted form fields with database values [`src/lib/poll-delivery.ts:767`]
+- [x] [Review][Patch] Read-only availability grid omits accessibility markers for submitted choices [`src/components/availability-grid.astro:37`]
+- [x] [Review][Patch] Closed Meeting Poll renders empty option list for non-recognized visitors [`src/components/poll-voting-surface.astro:191`]
+- [x] [Review][Patch] Unguarded meta.changes access in reviseMeetingResponse batch results [`src/adapters/d1/index.ts:1295`]
+- [x] [Review][Patch] Missing closedAtMs when reviseVote catches in-transaction PollClosedError [`src/modules/voting/index.ts:446`]
+- [x] [Review][Patch] Version incremented in D1 batch when vote row is concurrently deleted [`src/adapters/d1/index.ts:1291`]
 
 ## Dev Notes
 

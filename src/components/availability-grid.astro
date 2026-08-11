@@ -33,12 +33,19 @@ const states = [{ value: "yes", label: "Yes" }, { value: "if_need_be", label: "I
           <span class="day-shift" data-day-shift hidden>+1 day</span>
         </div>
         <div class="availability-cells">
-          {states.map((state) => (
-            <label class:list={["availability-cell", `is-${state.value}`, values[slot.id] === state.value && "is-selected"]} data-state={state.value}>
-              {!readOnly && <input class="visually-hidden" type="radio" name={`availability_${slot.id}`} value={state.value} checked={values[slot.id] === state.value} disabled={locked} />}
-              <span class="visually-hidden">{state.label}</span>
-            </label>
-          ))}
+          {states.map((state) => {
+            const isSelected = values[slot.id] === state.value;
+            return (
+              <label
+                class:list={["availability-cell", `is-${state.value}`, isSelected && "is-selected"]}
+                data-state={state.value}
+                aria-selected={readOnly ? (isSelected ? "true" : "false") : undefined}
+              >
+                {!readOnly && <input class="visually-hidden" type="radio" name={`availability_${slot.id}`} value={state.value} checked={isSelected} disabled={locked} />}
+                <span class="visually-hidden">{state.label}{readOnly && isSelected ? " (submitted)" : ""}</span>
+              </label>
+            );
+          })}
         </div>
       </fieldset>
     ))}

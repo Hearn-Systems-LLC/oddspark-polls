@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import BaseLayout from "../../../layouts/base-layout.astro";
 import ButtonSecondary from "../../../components/button-secondary.astro";
 import ButtonDestructive from "../../../components/button-destructive.astro";
+import AvailabilityTally from "../../../components/availability-tally.astro";
 import LiveIndicator from "../../../components/live-indicator.astro";
 import ListingBadge from "../../../components/listing-badge.astro";
 import Overlay from "../../../components/overlay.astro";
@@ -13,7 +14,10 @@ import SecurityToggle from "../../../components/security-toggle.astro";
 import ShareAction from "../../../components/share-action.astro";
 import { buildPollCardViewModel } from "../../../components/poll-card";
 import { formatVoteTotal } from "../../../components/live-indicator";
-import { createPollPersistence } from "../../../adapters/d1/index";
+import {
+  createPollPersistence,
+  createResultsPersistence,
+} from "../../../adapters/d1/index";
 import { createDemoPollPersistence } from "../../../adapters/d1/demo-poll";
 import { parseLifecycleForm } from "../../../lib/creator-lifecycle-form";
 import {
@@ -31,6 +35,7 @@ import {
   closePoll,
   deletePoll,
   isDemoPollCompatible,
+  isUsableTimeZone,
   resetDemoPoll,
   validateDemoPollReference,
   parseSecurityToggleDraft,
@@ -40,6 +45,7 @@ import {
   updatePollSecurityToggles,
   type PollDefinitionDraft,
 } from "../../../modules/polls/index";
+import { queryResults } from "../../../modules/results/index";
 import {
   POLL_CAPS,
   RENDER_OPTION_CEILING,
@@ -663,9 +669,13 @@ const definitionLocked =
   !isEditablePollType;
 
 const meetingTimeZone = poll?.slots?.[0]?.timeZone ?? null;
+const creatorMeetingTimeZone =
+  meetingTimeZone && isUsableTimeZone(meetingTimeZone)
+    ? meetingTimeZone
+    : "UTC";
 const meetingSlotRows = (poll?.slots ?? []).map((slot) => {
   const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: slot.timeZone,
+    timeZone: creatorMeetingTimeZone,
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -675,12 +685,26 @@ const meetingSlotRows = (poll?.slots ?? []).map((slot) => {
   });
   const start = formatter.format(new Date(slot.startsAtMs));
   const end = new Intl.DateTimeFormat("en-US", {
-    timeZone: slot.timeZone,
+    timeZone: creatorMeetingTimeZone,
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(slot.endsAtMs));
   return `${start}–${end}`;
 });
+
+const creatorMeetingQuery =
+  poll?.pollType === "meeting"
+    ? await queryResults(
+        createResultsPersistence(env.DB),
+        poll.canonicalReference,
+        { userId: ownerId },
+        nowMs,
+      )
+    : null;
+const creatorMeetingResults =
+  creatorMeetingQuery?.kind === "meeting_visible"
+    ? creatorMeetingQuery
+    : null;
 
 const listCards = ownedPolls.map((row) =>
   buildPollCardViewModel({
@@ -888,11 +912,24 @@ const detailPath = `/creator/polls/${pollId}`;
                       : null
                 }
                 lockedSlots={meetingSlotRows}
-                lockedTimeZone={meetingTimeZone}
+                lockedTimeZone={creatorMeetingTimeZone}
                 showSave={true}
                 saveLabel="SAVE CHANGES"
               />
             </form>
+
+            {
+              creatorMeetingResults && (
+                <AvailabilityTally
+                  meeting={creatorMeetingResults.meeting}
+                  status={creatorMeetingResults.status}
+                  creatorTimeZone={creatorMeetingTimeZone}
+                  liveEndpoint={`/${creatorMeetingResults.canonicalReference}/results/live`}
+                  initialValidator={creatorMeetingResults.validator}
+                  initialRenderAtMs={nowMs}
+                />
+              )
+            }
 
             <form
               method="post"
@@ -1139,6 +1176,11 @@ const detailPath = `/creator/polls/${pollId}`;
         <script src="../../../scripts/overlay.ts"></script>
         <script src="../../../scripts/share-action.ts"></script>
       </>
+    )
+  }
+  {
+    creatorMeetingResults?.status === "open" && (
+      <script src="../../../scripts/meeting-results-live.ts"></script>
     )
   }
 </BaseLayout>

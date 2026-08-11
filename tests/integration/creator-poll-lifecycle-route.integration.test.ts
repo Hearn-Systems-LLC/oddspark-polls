@@ -114,6 +114,8 @@ async function seedDemoPoll(ownerUserId: string): Promise<string> {
 
 async function seedMeetingPoll(ownerUserId: string): Promise<string> {
   const pollId = crypto.randomUUID();
+  const firstSlotId = crypto.randomUUID();
+  const secondSlotId = crypto.randomUUID();
   const nowMs = Date.now();
   await testEnv.DB.batch([
     testEnv.DB.prepare(
@@ -128,7 +130,7 @@ async function seedMeetingPoll(ownerUserId: string): Promise<string> {
     testEnv.DB.prepare(
       "INSERT INTO meeting_slot (id, poll_id, position, starts_at_ms, ends_at_ms, time_zone, created_at_ms) VALUES (?1, ?2, 0, ?3, ?4, 'America/Detroit', ?5)",
     ).bind(
-      crypto.randomUUID(),
+      firstSlotId,
       pollId,
       Date.parse("2027-01-15T14:00:00.000Z"),
       Date.parse("2027-01-15T14:30:00.000Z"),
@@ -137,7 +139,7 @@ async function seedMeetingPoll(ownerUserId: string): Promise<string> {
     testEnv.DB.prepare(
       "INSERT INTO meeting_slot (id, poll_id, position, starts_at_ms, ends_at_ms, time_zone, created_at_ms) VALUES (?1, ?2, 1, ?3, ?4, 'America/Detroit', ?5)",
     ).bind(
-      crypto.randomUUID(),
+      secondSlotId,
       pollId,
       Date.parse("2027-01-16T19:00:00.000Z"),
       Date.parse("2027-01-16T20:30:00.000Z"),
@@ -147,7 +149,27 @@ async function seedMeetingPoll(ownerUserId: string): Promise<string> {
       "INSERT INTO poll_reference (reference, poll_id, kind, is_canonical, created_at_ms) VALUES (?1, ?2, 'generated', 1, ?3)",
     ).bind(`meeting-${crypto.randomUUID()}`, pollId, nowMs),
   ]);
-  await insertVote(pollId);
+  const voteId = crypto.randomUUID();
+  await testEnv.DB.batch([
+    testEnv.DB.prepare(
+      "INSERT INTO vote (id, poll_id, submission_id, payload_hash, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+    ).bind(
+      voteId,
+      pollId,
+      `submission-${voteId}`,
+      `payload-${voteId}`,
+      nowMs,
+    ),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_response (vote_id, display_name, revision_capability_digest) VALUES (?1, ?2, ?3)",
+    ).bind(voteId, "<Alex & Co>", `digest-${voteId}`),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_availability (vote_id, meeting_slot_id, availability) VALUES (?1, ?2, 'yes')",
+    ).bind(voteId, firstSlotId),
+    testEnv.DB.prepare(
+      "INSERT INTO meeting_availability (vote_id, meeting_slot_id, availability) VALUES (?1, ?2, 'if_need_be')",
+    ).bind(voteId, secondSlotId),
+  ]);
   return pollId;
 }
 
@@ -505,6 +527,38 @@ describe("creator poll lifecycle route middleware (Story 1.12)", () => {
     expect(html).toContain("Sat, Jan 16, 2027, 2:00 PM–3:30 PM");
     expect(html).toContain("data-locked-options");
     expect(html).not.toContain('name="slot_date_0"');
+    expect(html).toContain("data-meeting-results");
+    expect(html).toContain("TIMES SHOWN IN America/Detroit · CREATOR TIMEZONE");
+    expect(html).not.toContain("data-timezone-select");
+    expect(html).toContain("&lt;Alex &amp; Co&gt;");
+    expect(html).not.toContain("<Alex & Co>");
+    expect(html).toContain("YES 1");
+    expect(html).toContain("IF NEED BE 1");
+    expect(html).toContain("is-best");
+  });
+
+  it("falls back to UTC before formatting a malformed Creator timezone", async () => {
+    const { cookie, userId } = await createAuthenticatedCookie();
+    const pollId = await seedMeetingPoll(userId);
+    await testEnv.DB.prepare(
+      "UPDATE meeting_slot SET time_zone = 'Mars/Olympus' WHERE poll_id = ?1",
+    )
+      .bind(pollId)
+      .run();
+
+    const response = await runRealRoute(
+      makeContext(
+        new Request(`https://polls.example.test/creator/polls/${pollId}`, {
+          headers: { cookie },
+        }),
+      ),
+      pollId,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("TIMES SHOWN IN UTC · CREATOR TIMEZONE");
+    expect(html).toContain("Fri, Jan 15, 2027, 2:00 PM–2:30 PM");
   });
 
   it("persists the Comment opt-in through create and renders that stored definition", async () => {

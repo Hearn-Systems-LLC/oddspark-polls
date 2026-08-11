@@ -24,6 +24,7 @@ import type {
 import type {
   ResultsAccessEnvelope,
   BallotManifestRow,
+  MeetingProjectionInput,
   ResultsProjection,
   ResultsTallyProjection,
   VersionedRankedTallyProjection,
@@ -73,6 +74,7 @@ import {
 } from "../../modules/voting/index";
 import type { RepresentationVersionIncrement } from "../../shared/application/index";
 import type {
+  AvailabilityState,
   DiscoveryState,
   CommentId,
   PollId,
@@ -84,6 +86,7 @@ import type {
 } from "../../shared/domain/index";
 import {
   DISCOVERY_STATES,
+  isAvailabilityState,
   makeSecurityToggles,
   POLL_TYPES,
 } from "../../shared/domain/index";
@@ -2537,6 +2540,362 @@ export function createResultsPersistence(db: D1Database) {
         };
       }
       throw new Error("Ranked projection snapshot race");
+    },
+
+    /**
+     * Meeting Results fact projection (AD-9/AD-21). One statement reads the
+     * Poll generation/state, positioned Slots, attributed responses, sparse
+     * availability cells, and SQL-computed state totals from one D1 snapshot.
+     * Persistence identifiers are used only to join and order; none cross the
+     * adapter boundary.
+     */
+    async projectMeetingResults(
+      pollId: PollId,
+      nowMs: number,
+    ): Promise<MeetingProjectionInput | null> {
+      if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+        throw new Error("Invalid Meeting projection time");
+      }
+
+      const rows = await db
+        .prepare(
+          `WITH target_poll AS MATERIALIZED (
+             SELECT
+               p.poll_type,
+               p.representation_version,
+               CASE
+                 WHEN p.closed_at_ms IS NOT NULL
+                   OR (p.deadline_ms IS NOT NULL AND p.deadline_ms <= ?2)
+                 THEN 'closed'
+                 ELSE 'open'
+               END AS effective_status,
+               (SELECT COUNT(*) FROM vote v WHERE v.poll_id = p.id)
+                 AS vote_count
+             FROM poll p
+             WHERE p.id = ?1
+           ),
+           target_slots AS MATERIALIZED (
+             SELECT
+               ms.id AS slot_id,
+               ms.starts_at_ms,
+               ms.ends_at_ms,
+               ms.time_zone,
+               ms.position
+             FROM meeting_slot ms
+             WHERE ms.poll_id = ?1
+           ),
+           target_responses AS MATERIALIZED (
+             SELECT
+               v.id AS vote_id,
+               mr.display_name,
+               v.created_at_ms
+             FROM vote v
+             JOIN meeting_response mr ON mr.vote_id = v.id
+             WHERE v.poll_id = ?1
+           ),
+           slot_totals AS MATERIALIZED (
+             SELECT
+               ts.slot_id,
+               SUM(CASE WHEN tr.vote_id IS NOT NULL
+                          AND ma.availability = 'yes'
+                        THEN 1 ELSE 0 END) AS yes_count,
+               SUM(CASE WHEN tr.vote_id IS NOT NULL
+                          AND ma.availability = 'if_need_be'
+                        THEN 1 ELSE 0 END) AS if_need_be_count,
+               SUM(CASE WHEN tr.vote_id IS NOT NULL
+                          AND ma.availability = 'no'
+                        THEN 1 ELSE 0 END) AS no_count
+             FROM target_slots ts
+             LEFT JOIN meeting_availability ma
+               ON ma.meeting_slot_id = ts.slot_id
+             LEFT JOIN target_responses tr ON tr.vote_id = ma.vote_id
+             GROUP BY ts.slot_id
+           ),
+           matrix AS MATERIALIZED (
+             SELECT
+               ts.slot_id,
+               ts.starts_at_ms,
+               ts.ends_at_ms,
+               ts.time_zone,
+               ts.position AS slot_position,
+               st.yes_count,
+               st.if_need_be_count,
+               st.no_count,
+               tr.vote_id,
+               tr.display_name,
+               tr.created_at_ms AS response_created_at_ms,
+               ma.availability
+             FROM target_slots ts
+             JOIN slot_totals st ON st.slot_id = ts.slot_id
+             LEFT JOIN target_responses tr ON 1 = 1
+             LEFT JOIN meeting_availability ma
+               ON ma.vote_id = tr.vote_id
+              AND ma.meeting_slot_id = ts.slot_id
+           )
+           SELECT
+             tp.poll_type,
+             tp.representation_version,
+             tp.effective_status,
+             tp.vote_count,
+             (SELECT COUNT(*) FROM target_responses) AS response_count,
+             m.slot_id,
+             m.starts_at_ms,
+             m.ends_at_ms,
+             m.time_zone,
+             m.slot_position,
+             m.yes_count,
+             m.if_need_be_count,
+             m.no_count,
+             m.vote_id,
+             m.display_name,
+             m.response_created_at_ms,
+             m.availability
+           FROM target_poll tp
+           LEFT JOIN matrix m ON 1 = 1
+           ORDER BY
+             m.slot_position,
+             m.response_created_at_ms,
+             m.vote_id COLLATE BINARY`,
+        )
+        .bind(pollId, nowMs)
+        .all<{
+          poll_type: unknown;
+          representation_version: number;
+          effective_status: unknown;
+          vote_count: number;
+          response_count: number;
+          slot_id: string | null;
+          starts_at_ms: number | null;
+          ends_at_ms: number | null;
+          time_zone: string | null;
+          slot_position: number | null;
+          yes_count: number | null;
+          if_need_be_count: number | null;
+          no_count: number | null;
+          vote_id: string | null;
+          display_name: string | null;
+          response_created_at_ms: number | null;
+          availability: string | null;
+        }>();
+
+      const first = rows.results[0];
+      if (!first) return null;
+      if (first.poll_type !== "meeting") {
+        throw new Error("Meeting projection requested for non-Meeting Poll");
+      }
+      if (
+        !Number.isSafeInteger(first.representation_version) ||
+        first.representation_version < 1
+      ) {
+        throw new Error("Malformed representation version");
+      }
+      if (
+        first.effective_status !== "open" &&
+        first.effective_status !== "closed"
+      ) {
+        throw new Error("Malformed Meeting effective status");
+      }
+
+      const toCount = (value: number, column: string): number => {
+        if (!Number.isSafeInteger(value) || value < 0) {
+          throw new Error(`Malformed Meeting projection: ${column}`);
+        }
+        return value;
+      };
+      const voteCount = toCount(first.vote_count, "vote_count");
+      const responseCount = toCount(first.response_count, "response_count");
+      if (voteCount !== responseCount) {
+        throw new Error(
+          "Malformed Meeting projection: Vote rows without responses",
+        );
+      }
+      if (
+        rows.results.some(
+          (row) =>
+            row.poll_type !== first.poll_type ||
+            row.representation_version !== first.representation_version ||
+            row.effective_status !== first.effective_status ||
+            row.vote_count !== first.vote_count ||
+            row.response_count !== first.response_count,
+        )
+      ) {
+        throw new Error("Malformed Meeting projection snapshot");
+      }
+      if (first.slot_id === null) {
+        throw new Error(
+          "Malformed Meeting projection: resolved Poll has no slots",
+        );
+      }
+
+      type SlotProjection = {
+        startsAtMs: number;
+        endsAtMs: number;
+        timeZone: string;
+        position: number;
+        yesCount: number;
+        ifNeedBeCount: number;
+        noCount: number;
+      };
+      type VoterProjection = {
+        displayName: string;
+        availability: (AvailabilityState | null)[];
+      };
+
+      const slotById = new Map<string, SlotProjection>();
+      const voterById = new Map<
+        string,
+        { displayName: string; createdAtMs: number }
+      >();
+
+      for (const row of rows.results) {
+        if (
+          typeof row.slot_id !== "string" ||
+          !Number.isSafeInteger(row.starts_at_ms) ||
+          !Number.isSafeInteger(row.ends_at_ms) ||
+          (row.ends_at_ms as number) <= (row.starts_at_ms as number) ||
+          typeof row.time_zone !== "string" ||
+          row.time_zone.length === 0 ||
+          !Number.isSafeInteger(row.slot_position) ||
+          (row.slot_position as number) < 0 ||
+          row.yes_count === null ||
+          row.if_need_be_count === null ||
+          row.no_count === null
+        ) {
+          throw new Error("Malformed Meeting projection: invalid slot row");
+        }
+        const slot: SlotProjection = {
+          startsAtMs: row.starts_at_ms as number,
+          endsAtMs: row.ends_at_ms as number,
+          timeZone: row.time_zone,
+          position: row.slot_position as number,
+          yesCount: toCount(row.yes_count, "yes_count"),
+          ifNeedBeCount: toCount(
+            row.if_need_be_count,
+            "if_need_be_count",
+          ),
+          noCount: toCount(row.no_count, "no_count"),
+        };
+        const answeredCount =
+          slot.yesCount + slot.ifNeedBeCount + slot.noCount;
+        if (
+          !Number.isSafeInteger(answeredCount) ||
+          answeredCount > responseCount
+        ) {
+          throw new Error("Malformed Meeting projection: invalid slot totals");
+        }
+        const existingSlot = slotById.get(row.slot_id);
+        if (existingSlot) {
+          if (
+            existingSlot.startsAtMs !== slot.startsAtMs ||
+            existingSlot.endsAtMs !== slot.endsAtMs ||
+            existingSlot.timeZone !== slot.timeZone ||
+            existingSlot.position !== slot.position ||
+            existingSlot.yesCount !== slot.yesCount ||
+            existingSlot.ifNeedBeCount !== slot.ifNeedBeCount ||
+            existingSlot.noCount !== slot.noCount
+          ) {
+            throw new Error("Malformed Meeting projection: unstable slot row");
+          }
+        } else {
+          slotById.set(row.slot_id, slot);
+        }
+
+        if (row.vote_id === null) {
+          if (
+            row.display_name !== null ||
+            row.response_created_at_ms !== null ||
+            row.availability !== null
+          ) {
+            throw new Error(
+              "Malformed Meeting projection: incomplete response row",
+            );
+          }
+          continue;
+        }
+        if (
+          typeof row.display_name !== "string" ||
+          row.display_name.length < 1 ||
+          row.display_name.length > 80 ||
+          !Number.isSafeInteger(row.response_created_at_ms)
+        ) {
+          throw new Error("Malformed Meeting projection: invalid response row");
+        }
+        const existingVoter = voterById.get(row.vote_id);
+        if (
+          existingVoter &&
+          (existingVoter.displayName !== row.display_name ||
+            existingVoter.createdAtMs !== row.response_created_at_ms)
+        ) {
+          throw new Error(
+            "Malformed Meeting projection: unstable response row",
+          );
+        }
+        if (!existingVoter) {
+          voterById.set(row.vote_id, {
+            displayName: row.display_name,
+            createdAtMs: row.response_created_at_ms as number,
+          });
+        }
+        if (
+          row.availability !== null &&
+          !isAvailabilityState(row.availability)
+        ) {
+          throw new Error(
+            "Malformed Meeting projection: invalid availability state",
+          );
+        }
+      }
+
+      const orderedSlots = [...slotById.entries()].sort(
+        ([, left], [, right]) => left.position - right.position,
+      );
+      if (
+        orderedSlots.some(
+          ([, slot], index) =>
+            index > 0 &&
+            orderedSlots[index - 1]?.[1].position === slot.position,
+        )
+      ) {
+        throw new Error("Malformed Meeting projection: duplicate slot position");
+      }
+      const slotIndexById = new Map(
+        orderedSlots.map(([slotId], index) => [slotId, index]),
+      );
+      const voterProjectionById = new Map<string, VoterProjection>(
+        [...voterById].map(([voteId, voter]) => [
+          voteId,
+          {
+            displayName: voter.displayName,
+            availability: new Array<AvailabilityState | null>(
+              orderedSlots.length,
+            ).fill(null),
+          },
+        ]),
+      );
+
+      for (const row of rows.results) {
+        if (row.vote_id === null || row.slot_id === null) continue;
+        const voter = voterProjectionById.get(row.vote_id);
+        const slotIndex = slotIndexById.get(row.slot_id);
+        if (!voter || slotIndex === undefined) {
+          throw new Error("Malformed Meeting projection matrix");
+        }
+        voter.availability[slotIndex] =
+          row.availability === null
+            ? null
+            : (row.availability as AvailabilityState);
+      }
+
+      if (voterProjectionById.size !== responseCount) {
+        throw new Error("Malformed Meeting projection: response count mismatch");
+      }
+
+      return {
+        representationVersion: first.representation_version,
+        effectiveStatus: first.effective_status,
+        slots: orderedSlots.map(([, slot]) => slot),
+        voters: [...voterProjectionById.values()],
+      };
     },
 
     async projectRankedComments(

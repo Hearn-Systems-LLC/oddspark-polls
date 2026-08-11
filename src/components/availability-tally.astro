@@ -1,0 +1,534 @@
+---
+import TrustBadge from "./trust-badge.astro";
+import {
+  RESULTS_COPY,
+  type MeetingTallyView,
+} from "../modules/results/index";
+import { isUsableTimeZone } from "../modules/polls/index";
+import {
+  formatMeetingSlotLocal,
+  meetingSlotDayKey,
+} from "../lib/datetime";
+import type {
+  AvailabilityState,
+  PollSecurityToggles,
+  PollStatus,
+} from "../shared/domain/index";
+
+interface Props {
+  meeting: MeetingTallyView;
+  status: PollStatus;
+  toggles?: PollSecurityToggles;
+  creatorTimeZone?: string;
+  liveEndpoint?: string;
+  initialValidator?: string;
+  initialRenderAtMs?: number;
+}
+
+const {
+  meeting,
+  status,
+  toggles,
+  creatorTimeZone,
+  liveEndpoint,
+  initialValidator,
+  initialRenderAtMs,
+} = Astro.props;
+
+const sourceZone =
+  meeting.slots.find((slot) => isUsableTimeZone(slot.timeZone))?.timeZone ??
+  "UTC";
+const fixedCreatorZone =
+  creatorTimeZone && isUsableTimeZone(creatorTimeZone)
+    ? creatorTimeZone
+    : null;
+const renderZone = fixedCreatorZone ?? sourceZone;
+const zoneOptions = [
+  sourceZone,
+  "UTC",
+  "America/Detroit",
+  "America/New_York",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Paris",
+  "Asia/Tokyo",
+].filter(
+  (zone, index, all) =>
+    all.indexOf(zone) === index && isUsableTimeZone(zone),
+);
+
+type Slot = MeetingTallyView["slots"][number];
+type CellState = AvailabilityState | null;
+
+const safeSourceZone = (slot: Slot): string =>
+  isUsableTimeZone(slot.timeZone) ? slot.timeZone : "UTC";
+
+const sourceCaption = (slot: Slot): string => {
+  const zone = safeSourceZone(slot);
+  const zoneName =
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      timeZoneName: "short",
+    })
+      .formatToParts(slot.startsAtMs)
+      .find((part) => part.type === "timeZoneName")?.value ?? zone;
+  return `created ${formatMeetingSlotLocal(slot.startsAtMs, slot.endsAtMs, zone)} ${zoneName}`;
+};
+
+const dayShift = (slot: Slot): string | null => {
+  const sourceDay = meetingSlotDayKey(
+    slot.startsAtMs,
+    safeSourceZone(slot),
+  );
+  const renderedDay = meetingSlotDayKey(slot.startsAtMs, renderZone);
+  if (renderedDay === sourceDay) return null;
+  return renderedDay.localeCompare(sourceDay) > 0 ? "+1 day" : "-1 day";
+};
+
+const stateClass = (state: CellState): string | null =>
+  state === null ? null : `is-${state} is-selected`;
+
+const stateLabel = (state: CellState): string => {
+  switch (state) {
+    case "yes":
+      return "Yes";
+    case "if_need_be":
+      return "If need be";
+    case "no":
+      return "No";
+    case null:
+      return "Unanswered";
+  }
+};
+---
+
+<section
+  class="availability-tally"
+  data-meeting-results
+  data-availability-grid
+  data-source-zone={sourceZone}
+  data-render-zone={renderZone}
+  data-fixed-zone={fixedCreatorZone ? "true" : "false"}
+  data-status={status}
+  data-live-endpoint={liveEndpoint}
+  data-initial-validator={initialValidator}
+  data-initial-render-at={initialRenderAtMs}
+  aria-label="Meeting availability results"
+>
+  {toggles && <TrustBadge toggles={toggles} />}
+
+  <div class="timezone-control">
+    <p data-timezone-label>
+      TIMES SHOWN IN {renderZone}{fixedCreatorZone ? " · CREATOR TIMEZONE" : ""}
+    </p>
+    {!fixedCreatorZone && (
+      <select
+        id="meeting-tally-time-zone"
+        data-timezone-select
+        aria-label="Time zone override"
+      >
+        {zoneOptions.map((zone) => (
+          <option value={zone} selected={zone === renderZone}>{zone}</option>
+        ))}
+      </select>
+    )}
+  </div>
+
+  <p
+    class="meeting-live-status"
+    data-meeting-live-status
+    data-live-state={status === "closed" ? "closed" : "live"}
+    aria-live="polite"
+    aria-atomic="true"
+  >
+    {status === "closed" ? "CLOSED" : "LIVE"}
+  </p>
+
+  <div data-meeting-tally-content aria-live="polite">
+    {meeting.empty ? (
+      <p class="meeting-empty">{RESULTS_COPY.empty}</p>
+    ) : (
+      <>
+        <p class="meeting-meta">
+          {meeting.voterCount === 1
+            ? "1 VOTER"
+            : `${meeting.voterCount} VOTERS`}
+        </p>
+
+        <div class="meeting-tally-mobile" data-meeting-tally-mobile>
+          {meeting.slots.map((slot, slotIndex) => {
+            const shift = dayShift(slot);
+            return (
+              <section
+                class:list={[
+                  "meeting-slot-block",
+                  slot.isBest && "is-best",
+                ]}
+                data-slot
+                data-slot-position={slot.position}
+                data-starts-at={slot.startsAtMs}
+                data-ends-at={slot.endsAtMs}
+                data-source-zone={safeSourceZone(slot)}
+              >
+                <header class="slot-header">
+                  <h3 class="slot-label" data-local-time>
+                    {formatMeetingSlotLocal(
+                      slot.startsAtMs,
+                      slot.endsAtMs,
+                      renderZone,
+                    )}
+                  </h3>
+                  <span class="source-caption">{sourceCaption(slot)}</span>
+                  <span class="day-shift" data-day-shift hidden={!shift}>
+                    {shift ?? "+1 day"}
+                  </span>
+                </header>
+                <div class="mobile-voters">
+                  {meeting.voters.map((voter) => {
+                    const state = voter.availability[slotIndex] ?? null;
+                    return (
+                      <div class="mobile-voter-row">
+                        <span class="voter-name">{voter.displayName}</span>
+                        <span
+                          class:list={[
+                            "availability-cell",
+                            stateClass(state),
+                          ]}
+                          role="img"
+                          aria-label={stateLabel(state)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <p class="slot-totals">
+                  <span>YES {slot.yesCount}</span>
+                  <span>IF NEED BE {slot.ifNeedBeCount}</span>
+                </p>
+              </section>
+            );
+          })}
+        </div>
+
+        <div class="meeting-tally-matrix" data-meeting-tally-matrix>
+          <table>
+            <caption class="visually-hidden">
+              Voter availability by proposed meeting slot
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" class="voter-heading">VOTER</th>
+                {meeting.slots.map((slot) => {
+                  const shift = dayShift(slot);
+                  return (
+                    <th
+                      scope="col"
+                      class:list={[
+                        "slot-column-heading",
+                        slot.isBest && "is-best",
+                      ]}
+                      data-slot
+                      data-slot-position={slot.position}
+                      data-starts-at={slot.startsAtMs}
+                      data-ends-at={slot.endsAtMs}
+                      data-source-zone={safeSourceZone(slot)}
+                    >
+                      <span class="slot-label" data-local-time>
+                        {formatMeetingSlotLocal(
+                          slot.startsAtMs,
+                          slot.endsAtMs,
+                          renderZone,
+                        )}
+                      </span>
+                      <span class="source-caption">{sourceCaption(slot)}</span>
+                      <span class="day-shift" data-day-shift hidden={!shift}>
+                        {shift ?? "+1 day"}
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {meeting.voters.map((voter) => (
+                <tr>
+                  <th scope="row" class="voter-name">{voter.displayName}</th>
+                  {meeting.slots.map((_slot, slotIndex) => {
+                    const state = voter.availability[slotIndex] ?? null;
+                    return (
+                      <td class="matrix-cell">
+                        <span
+                          class:list={[
+                            "availability-cell",
+                            stateClass(state),
+                          ]}
+                          role="img"
+                          aria-label={stateLabel(state)}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row" class="totals-heading">TOTALS</th>
+                {meeting.slots.map((slot) => (
+                  <td class="slot-totals">
+                    <span>YES {slot.yesCount}</span>
+                    <span>IF NEED BE {slot.ifNeedBeCount}</span>
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </>
+    )}
+  </div>
+</section>
+
+<style is:global>
+  .availability-tally {
+    display: grid;
+    gap: var(--space-5);
+  }
+
+  .availability-tally .timezone-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .availability-tally .timezone-control p,
+  .availability-tally .meeting-meta {
+    margin: 0;
+  }
+
+  .availability-tally .timezone-control select {
+    min-height: 48px;
+    color: var(--color-text);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--color-rule);
+    border-radius: 0;
+  }
+
+  .availability-tally .meeting-empty,
+  .availability-tally .meeting-meta {
+    font-family: var(--font-machine);
+  }
+
+  .availability-tally .meeting-meta {
+    margin-bottom: var(--space-3);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+  }
+
+  .availability-tally .meeting-live-status {
+    margin: 0;
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-lg-size);
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-transform: uppercase;
+  }
+
+  .availability-tally .meeting-tally-mobile {
+    display: grid;
+    gap: var(--space-5);
+  }
+
+  .availability-tally .meeting-tally-matrix {
+    display: none;
+    overflow-x: auto;
+  }
+
+  .availability-tally .meeting-slot-block {
+    display: grid;
+    gap: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-rule);
+  }
+
+  .availability-tally .is-best {
+    border-top: 2px solid var(--color-solar-ink);
+  }
+
+  .availability-tally .slot-header {
+    display: grid;
+    gap: var(--space-1);
+  }
+
+  .availability-tally .slot-column-heading > span {
+    display: block;
+  }
+
+  .availability-tally .slot-column-heading > span + span {
+    margin-top: var(--space-1);
+  }
+
+  .availability-tally .slot-label {
+    margin: 0;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    font-weight: 400;
+    line-height: var(--type-body-lh);
+  }
+
+  .availability-tally .source-caption {
+    color: var(--color-dim);
+    font-size: var(--type-caption-size);
+    font-weight: 400;
+    line-height: var(--type-caption-lh);
+  }
+
+  .availability-tally .day-shift {
+    color: var(--color-entropy);
+    font-size: var(--type-caption-size);
+    line-height: var(--type-caption-lh);
+  }
+
+  .availability-tally .mobile-voters {
+    display: grid;
+  }
+
+  .availability-tally .mobile-voter-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 48px;
+    border-top: 1px solid var(--color-rule);
+  }
+
+  .availability-tally .voter-name {
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-body-size);
+    font-weight: 400;
+    line-height: var(--type-body-lh);
+    text-align: left;
+  }
+
+  .availability-tally .availability-cell {
+    position: relative;
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    border: 1px solid var(--color-rule);
+    border-radius: 0;
+    margin-left: -1px;
+  }
+
+  .availability-tally .availability-cell::before {
+    color: var(--color-faint);
+    font: 1.5rem/1 var(--font-machine);
+    content: "·";
+  }
+
+  .availability-tally .availability-cell.is-yes.is-selected {
+    background: var(--color-solar-wash);
+  }
+
+  .availability-tally .availability-cell.is-yes.is-selected::before {
+    color: var(--availability-solar-ink);
+    content: "✓";
+  }
+
+  .availability-tally .availability-cell.is-if_need_be.is-selected {
+    background: var(--color-entropy-wash);
+  }
+
+  .availability-tally .availability-cell.is-if_need_be.is-selected::before {
+    color: var(--color-entropy);
+    content: "~";
+  }
+
+  .availability-tally .availability-cell.is-no.is-selected::before {
+    color: var(--color-dim);
+    content: "×";
+  }
+
+  .availability-tally .slot-totals {
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-data-size);
+    font-weight: 700;
+    line-height: var(--type-data-lh);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .availability-tally p.slot-totals {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+  }
+
+  .availability-tally td.slot-totals > span {
+    display: block;
+  }
+
+  .availability-tally td.slot-totals > span + span {
+    margin-top: var(--space-1);
+  }
+
+  .availability-tally .meeting-tally-matrix table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .availability-tally .meeting-tally-matrix th,
+  .availability-tally .meeting-tally-matrix td {
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--color-rule);
+    vertical-align: middle;
+  }
+
+  .availability-tally .voter-heading,
+  .availability-tally .totals-heading {
+    color: var(--color-dim);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    font-weight: 400;
+    line-height: var(--type-label-caps-lh);
+    letter-spacing: var(--type-label-caps-ls);
+    text-align: left;
+  }
+
+  .availability-tally .slot-column-heading {
+    min-width: 12rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .availability-tally .slot-column-heading.is-best {
+    border-top: 2px solid var(--color-solar-ink);
+  }
+
+  .availability-tally .matrix-cell .availability-cell {
+    margin-inline: auto;
+  }
+
+  @media (min-width: 1024px) {
+    .availability-tally .meeting-tally-mobile {
+      display: none;
+    }
+
+    .availability-tally .meeting-tally-matrix {
+      display: block;
+    }
+  }
+</style>

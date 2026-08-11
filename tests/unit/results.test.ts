@@ -10,6 +10,7 @@ import {
   type ResultsTallyProjection,
   type ViewerContext,
 } from "../../src/modules/results/index";
+import type { MeetingProjectionInput } from "../../src/modules/results/meeting-projection";
 import type {
   PollId,
   PollOptionId,
@@ -98,6 +99,40 @@ function rankedTally(
   };
 }
 
+function meetingProjection(
+  overrides: Partial<MeetingProjectionInput> = {},
+): MeetingProjectionInput {
+  return {
+    representationVersion: 9,
+    effectiveStatus: "open",
+    slots: [
+      {
+        startsAtMs: NOW + 3_600_000,
+        endsAtMs: NOW + 7_200_000,
+        timeZone: "America/Detroit",
+        position: 0,
+        yesCount: 2,
+        ifNeedBeCount: 0,
+        noCount: 0,
+      },
+      {
+        startsAtMs: NOW + 86_400_000,
+        endsAtMs: NOW + 90_000_000,
+        timeZone: "America/Detroit",
+        position: 1,
+        yesCount: 1,
+        ifNeedBeCount: 1,
+        noCount: 0,
+      },
+    ],
+    voters: [
+      { displayName: "Alex", availability: ["yes", "if_need_be"] },
+      { displayName: "Sam", availability: ["yes", "yes"] },
+    ],
+    ...overrides,
+  };
+}
+
 function ports(
   access: ResultsAccessEnvelope | null,
   projection: ResultsTallyProjection = tally(),
@@ -105,6 +140,7 @@ function ports(
   projectResults: ReturnType<typeof vi.fn>;
   projectRankedResults: ReturnType<typeof vi.fn>;
   projectRankedComments: ReturnType<typeof vi.fn>;
+  projectMeetingResults: ReturnType<typeof vi.fn>;
 } {
   return {
     findAccessEnvelope: vi.fn(async () => access),
@@ -122,6 +158,7 @@ function ports(
       comments: [],
       ownerComments: null,
     })),
+    projectMeetingResults: vi.fn(async () => meetingProjection()),
   };
 }
 
@@ -134,6 +171,7 @@ function livePorts(
   projectVersionedResults: ReturnType<typeof vi.fn>;
   projectVersionedRankedResults: ReturnType<typeof vi.fn>;
   projectRankedComments: ReturnType<typeof vi.fn>;
+  projectMeetingResults: ReturnType<typeof vi.fn>;
 } {
   return {
     findAccessEnvelope: vi.fn(async () => access),
@@ -160,10 +198,68 @@ function livePorts(
       comments: [],
       ownerComments: null,
     })),
+    projectMeetingResults: vi.fn(async () =>
+      representationVersion === null
+        ? null
+        : meetingProjection({ representationVersion }),
+    ),
   };
 }
 
 describe("queryResults visibility matrix", () => {
+  it("projects a Meeting Tally after authorization without using the MC port", async () => {
+    const meetingPorts = ports(envelope({ pollType: "meeting" }));
+    meetingPorts.projectMeetingResults.mockResolvedValueOnce(
+      meetingProjection({
+        representationVersion: 12,
+        effectiveStatus: "closed",
+      }),
+    );
+
+    const view = await queryResults(
+      meetingPorts,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+    );
+
+    expect(view.kind).toBe("meeting_visible");
+    if (view.kind === "meeting_visible") {
+      expect(view.status).toBe("closed");
+      expect(view.validator).toBe('"12:closed"');
+      expect(view.meeting.voterCount).toBe(2);
+      expect(view.meeting.slots.map(({ isBest }) => isBest)).toEqual([
+        true,
+        false,
+      ]);
+      expect(view.meeting).not.toHaveProperty("representationVersion");
+      expect(view.meeting).not.toHaveProperty("effectiveStatus");
+    }
+    expect(meetingPorts.projectMeetingResults).toHaveBeenCalledWith(
+      POLL_ID,
+      NOW,
+    );
+    expect(meetingPorts.projectResults).not.toHaveBeenCalled();
+    expect(meetingPorts.projectRankedResults).not.toHaveBeenCalled();
+  });
+
+  it("keeps a hidden Meeting Poll hidden before reading any private facts", async () => {
+    const meetingPorts = ports(
+      envelope({
+        pollType: "meeting",
+        resultVisibility: "after_close",
+        deadlineMs: NOW + 1,
+      }),
+    );
+
+    await expect(
+      queryResults(meetingPorts, "team-lunch", ANONYMOUS, NOW),
+    ).resolves.toMatchObject({ kind: "after_close_hidden" });
+    expect(meetingPorts.projectMeetingResults).not.toHaveBeenCalled();
+    expect(meetingPorts.projectRankedComments).not.toHaveBeenCalled();
+    expect(meetingPorts.projectResults).not.toHaveBeenCalled();
+  });
+
   it("projects ranked IRV after authorization without using the MC tally port", async () => {
     const rankedPorts = ports(envelope({ pollType: "ranked_choice" }));
     const view = await queryResults(
@@ -612,6 +708,56 @@ describe("live Results validator", () => {
 });
 
 describe("queryLiveResults authorization and projection", () => {
+  it("serves a discriminated Meeting live view from the projection snapshot", async () => {
+    const meetingPorts = livePorts(envelope({ pollType: "meeting" }), 17);
+    meetingPorts.projectMeetingResults.mockResolvedValueOnce(
+      meetingProjection({
+        representationVersion: 18,
+        effectiveStatus: "closed",
+      }),
+    );
+
+    const view = await queryLiveResults(
+      meetingPorts,
+      "team-lunch",
+      ANONYMOUS,
+      NOW,
+      '"16:open"',
+    );
+
+    expect(view.kind).toBe("meeting_visible");
+    if (view.kind === "meeting_visible") {
+      expect(view.representationVersion).toBe(18);
+      expect(view.status).toBe("closed");
+      expect(view.validator).toBe('"18:closed"');
+      expect(view.meeting.voters[0]?.availability).toEqual([
+        "yes",
+        "if_need_be",
+      ]);
+      expect(view.meeting).not.toHaveProperty("representationVersion");
+      expect(view.meeting).not.toHaveProperty("effectiveStatus");
+    }
+    expect(meetingPorts.projectMeetingResults).toHaveBeenCalledWith(
+      POLL_ID,
+      NOW,
+    );
+    expect(meetingPorts.projectVersionedResults).not.toHaveBeenCalled();
+  });
+
+  it("returns not_modified for Meeting without reading the full grid", async () => {
+    const meetingPorts = livePorts(envelope({ pollType: "meeting" }), 17);
+    await expect(
+      queryLiveResults(
+        meetingPorts,
+        "team-lunch",
+        ANONYMOUS,
+        NOW,
+        '"17:open"',
+      ),
+    ).resolves.toMatchObject({ kind: "not_modified", validator: '"17:open"' });
+    expect(meetingPorts.projectMeetingResults).not.toHaveBeenCalled();
+  });
+
   it("serves ranked live IRV after authorization and version check", async () => {
     const rankedPorts = livePorts(
       envelope({ pollType: "ranked_choice" }),

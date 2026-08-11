@@ -71,6 +71,7 @@ describe("Results Comment authorization and projection", () => {
       projectResults,
       projectRankedResults: vi.fn(async () => null),
       projectRankedComments: vi.fn(async () => ({ comments: [], ownerComments: null })),
+      projectMeetingResults: vi.fn(async () => null),
     };
     const view = await queryResults(ports, "comments", viewer, NOW);
     expect(view.kind).not.toBe("visible");
@@ -88,6 +89,7 @@ describe("Results Comment authorization and projection", () => {
       projectResults,
       projectRankedResults: vi.fn(async () => null),
       projectRankedComments: vi.fn(async () => ({ comments: [], ownerComments: null })),
+      projectMeetingResults: vi.fn(async () => null),
     };
 
     const publicView = await queryResults(ports, "comments", { userId: null }, NOW);
@@ -119,6 +121,7 @@ describe("Results Comment authorization and projection", () => {
       projectVersionedResults,
       projectVersionedRankedResults: async () => null,
       projectRankedComments: async () => ({ comments: [], ownerComments: null }),
+      projectMeetingResults: async () => null,
     };
     const view = await queryLiveResults(
       ports,

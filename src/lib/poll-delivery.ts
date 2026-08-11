@@ -32,6 +32,7 @@ import { COMMENT_CAPS } from "../modules/comments/index";
 import {
   queryResults,
   RESULTS_COPY,
+  type MeetingTallyView,
   type RankedTallyView,
   type ResultsTallyView,
   type ResultsView,
@@ -147,6 +148,14 @@ export type PostVoteResultsView =
       ownerComments: OwnerCommentView[] | null;
       validator: string;
     }
+  | {
+      kind: "meeting_visible";
+      status: PollStatus;
+      meeting: MeetingTallyView;
+      comments: CommentView[];
+      ownerComments: OwnerCommentView[] | null;
+      validator: string;
+    }
   | ({
       kind: "after_close_hidden" | "creator_only_hidden" | "unavailable";
     } & ResultsExplanationView);
@@ -169,7 +178,9 @@ export type PollDeliveryState = {
   showTally: boolean;
   resultsExplanation: Exclude<
     PostVoteResultsView,
-    { kind: "visible" } | { kind: "ranked_visible" }
+    | { kind: "visible" }
+    | { kind: "ranked_visible" }
+    | { kind: "meeting_visible" }
   > | null;
   postVoteComposition: boolean;
   selected: Set<string>;
@@ -294,6 +305,15 @@ const postVoteResultsFrom = (view: ResultsView): PostVoteResultsView => {
         kind: "ranked_visible",
         status: view.status,
         ranked: view.ranked,
+        comments: view.comments,
+        ownerComments: view.ownerComments,
+        validator: view.validator,
+      };
+    case "meeting_visible":
+      return {
+        kind: "meeting_visible",
+        status: view.status,
+        meeting: view.meeting,
         comments: view.comments,
         ownerComments: view.ownerComments,
         validator: view.validator,
@@ -808,7 +828,11 @@ export async function deliverPollVotingSurface(
   let yourBallotLabels: string[] = [];
   let yourBallotOptionIds: PollOptionId[] = [];
   const resultsRenderedAtMs = Date.now();
-  if (readOnly || input.includeEditableTally) {
+  // A recognized Meeting revision remains editable, so readOnly is false;
+  // it is nevertheless a post-vote surface and may show an authorized Tally.
+  const includeMeetingTally =
+    poll.pollType === "meeting" && meetingRevisionRecognized;
+  if (readOnly || input.includeEditableTally || includeMeetingTally) {
     try {
       postVoteResults = postVoteResultsFrom(await queryResults(
         createResultsPersistence(input.env.DB),
@@ -820,7 +844,8 @@ export async function deliverPollVotingSurface(
         input.includeEditableTally &&
         !readOnly &&
         postVoteResults.kind !== "visible" &&
-        postVoteResults.kind !== "ranked_visible"
+        postVoteResults.kind !== "ranked_visible" &&
+        postVoteResults.kind !== "meeting_visible"
       ) {
         unavailable = true;
         markDemoUnavailable();
@@ -857,17 +882,18 @@ export async function deliverPollVotingSurface(
         },
       );
     }
-    if (outcome?.code === "counted" && poll.pollType !== "meeting") {
+    if (outcome?.code === "counted") {
       if (
         postVoteResults.kind === "visible" ||
-        postVoteResults.kind === "ranked_visible"
+        postVoteResults.kind === "ranked_visible" ||
+        postVoteResults.kind === "meeting_visible"
       ) {
         outcome = {
           ...outcome,
           body: VOTE_COPY.countedLive,
           time: null,
         };
-      } else {
+      } else if (poll.pollType !== "meeting") {
         outcome = {
           ...outcome,
           body: postVoteResults.body,
@@ -888,12 +914,17 @@ export async function deliverPollVotingSurface(
     (poll.pollType === "multiple_choice" || poll.pollType === "image");
   const showTally =
     (postVoteResults?.kind === "visible" ||
-      postVoteResults?.kind === "ranked_visible") &&
-    (readOnly || input.includeEditableTally);
+      postVoteResults?.kind === "ranked_visible" ||
+      postVoteResults?.kind === "meeting_visible") &&
+    (readOnly || input.includeEditableTally || includeMeetingTally);
+  const countedEditableMeeting =
+    includeMeetingTally && outcome?.code === "counted";
   const resultsExplanation =
     !compactCounted &&
+    !countedEditableMeeting &&
     postVoteResults?.kind !== "visible" &&
-    postVoteResults?.kind !== "ranked_visible"
+    postVoteResults?.kind !== "ranked_visible" &&
+    postVoteResults?.kind !== "meeting_visible"
       ? postVoteResults
       : null;
   const postVoteComposition = compactCounted && showTally;

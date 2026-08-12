@@ -471,7 +471,13 @@ export async function deliverPollVotingSurface(
         singletonText(formData, "display_name"),
         COMMENT_CAPS.displayName,
       );
-      voterCodeRaw = boundedInvalidEcho(singletonText(formData, "voter_code"), 16);
+      // The retry value is canonical by design. Normalize before bounding so
+      // ordinary whitespace-padded codes remain usable instead of becoming a
+      // synthetic invalid sentinel.
+      voterCodeRaw = boundedInvalidEcho(
+        singletonText(formData, "voter_code").trim().toUpperCase(),
+        16,
+      );
       const parsed = formSchema.safeParse({
         submissionId: text(formData.get("submission_id")),
         selectedOptionIds,

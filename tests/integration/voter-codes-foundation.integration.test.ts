@@ -73,6 +73,16 @@ describe("migration 0019 voter code shape guards", () => {
     ).rejects.toThrow(/voter_code_shape_invalid/);
   });
 
+  it("rejects insert of code with punctuation outside the voter-code alphabet", async () => {
+    const ownerId = await seedOwner();
+    const pollId = await seedPoll(ownerId, { voterCodesEnabled: true });
+    await expect(
+      testEnv.DB.prepare(
+        "INSERT INTO voter_code (id, poll_id, batch_id, position, code, created_at_ms) VALUES (?1, ?2, ?3, 0, 'ABCDEFG$', ?4)",
+      ).bind(crypto.randomUUID(), pollId, crypto.randomUUID(), Date.now()).run(),
+    ).rejects.toThrow(/voter_code_shape_invalid/);
+  });
+
   it("accepts valid 8-character code from the alphabet", async () => {
     const ownerId = await seedOwner();
     const pollId = await seedPoll(ownerId, { voterCodesEnabled: true });

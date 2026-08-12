@@ -4,7 +4,7 @@ baseline_commit: ea8fa1bafe971e849e6627043d0103ada18a116c
 
 # Story 8.2: Vote With a Voter Code
 
-Status: review
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Ultimate context engine analysis completed 2026-08-12 — implementation guide reconciled against the complete Epic 8, PRD, architecture, UX, current main code, Story 8.1 dependency state, current Cloudflare D1 documentation, tests, and recent Git history. -->
@@ -207,6 +207,7 @@ Crush (qwen3.8-max)
 ### File List
 
 - db/migrations/0019_voter_code_integrity.sql (new)
+- db/migrations/0020_repair_voter_code_shape_guards.sql (new)
 - db/migrations.manifest.json (modified)
 - src/adapters/d1/voter-codes.ts (modified)
 - src/adapters/d1/index.ts (modified)
@@ -221,6 +222,7 @@ Crush (qwen3.8-max)
 - src/scripts/vote-form.ts (modified)
 - src/pages/creator/[reference]/codes.astro (modified)
 - tests/unit/voter-code-admission.test.ts (new)
+- tests/unit/voter-code-surface.test.mjs (new)
 - tests/unit/voter-codes.test.ts (existing)
 - tests/unit/voting.test.ts (modified)
 - tests/unit/ranked-choice.test.ts (modified)
@@ -229,7 +231,31 @@ Crush (qwen3.8-max)
 - tests/unit/trust-badge.test.mjs (modified)
 - tests/integration/voter-codes-foundation.integration.test.ts (new)
 - tests/integration/voter-code-voting.integration.test.ts (new)
+- tests/e2e/voter-code-voting.spec.mjs (new)
 - tests/integration/votes-adapter.integration.test.ts (modified)
 - tests/integration/meeting-availability.integration.test.ts (modified)
 - _bmad-output/planning-artifacts/architecture/architecture-oddspark-polls-2026-07-29/ARCHITECTURE-SPINE.md (modified)
 - CHANGELOG.md (modified)
+
+### Review Findings — code review 2026-08-12 (branch `story/8-2-vote-with-a-voter-code` vs `main`, 28 files +1362/-34, full spec mode)
+
+Triage: 0 decision-needed, 8 patch, 2 defer, 2 dismissed as noise. Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor — all passed. Six unambiguous patch findings were remediated on 2026-08-12; remaining action items are retained below.
+
+- [x] [Review][Patch] D1 integrity trigger LIKE is literal — alphabet guard is a no-op [db/migrations/0019_voter_code_integrity.sql:13]
+- [x] [Review][Patch] Voter Code field hidden on 422 — retry cannot show preserved value or inline caption [src/components/poll-voting-surface.astro:220]
+- [x] [Review][Patch] Meeting revision tally never owns trust badge — INVITE CODE REQUIRED disappears on authorized revision [src/components/poll-voting-surface.astro:101]
+- [ ] [Review][Patch] Voter-code inventory overlay aria-describedby dangles — no element carries the referenced ID [src/components/voter-code-panel.astro:24]
+- [x] [Review][Patch] Voter-code inventory COPY ALL CODES control targets a nonexistent list — `data-copy-source="voter-code-list"` does not match the generated `${id}-voter-code-list` ID, so the clipboard handler exits without copying [src/components/voter-code-panel.astro:42]
+- [ ] [Review][Patch] Redemption FK/unique adjudication incomplete — vote_id UNIQUE and trigger not classified, redemption FK misclassifies non-code FK [src/adapters/d1/index.ts:1746]
+- [ ] [Review][Patch] Vote-form progressive enhancement — cursor jump on trim and readOnly coverage gap on restore paths [src/scripts/vote-form.ts:98]
+- [x] [Review][Patch] boundedInvalidEcho cap 16 — 34-char echo and truncates heavily padded valid paste [src/lib/poll-delivery.ts:474]
+- [x] [Review][Patch] Missing Playwright + browser proof — no voter-code-voting e2e spec or 375/1280 light/dark captures [tests/e2e/voter-code-voting.spec.mjs]
+- [x] [Review][Defer] Optional lookupVoterCode dep + indistinguishable code-gated 422s — wiring/telemetry observability gap [src/modules/voting/index.ts:356] — deferred, pre-existing pattern
+- [x] [Review][Defer] Low cosmetic: duplicate trigger maintenance, double role=alert, unbounded client value [db/migrations/0019_voter_code_integrity.sql:7] — deferred, pre-existing polish
+
+### Review Findings — follow-up code review 2026-08-12 (current Story 8.2 worktree, full spec mode)
+
+Triage: 0 decision-needed, 2 patch, 0 defer, 0 dismissed. Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor — all passed.
+
+- [x] [Review][Patch] Code-gated ballot retries lose VOTER CODE after a non-code rejection — an editable `selection_required`, CAPTCHA, rate-limit, or transient outcome suppresses the still-required field, preventing correction and resubmission [src/components/poll-voting-surface.astro:223]
+- [ ] [Review][Patch] Required voter-code browser coverage and proof remain incomplete — fresh/invalid/used 375-dark and 1280-light coverage was added, but Ranked/Image/Meeting/revision, no-JS, offline/in-flight/pageshow, and CAPTCHA/rate-limit cases are still absent [tests/e2e/voter-code-voting.spec.mjs:30]

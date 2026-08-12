@@ -98,7 +98,7 @@ const resultsExplanationTime = resultsExplanation
   ? splitTimedText(resultsExplanation.body, resultsExplanation.time)
   : null;
 const offlineCopy = splitVoteCopy(VOTE_COPY.offline);
-const tallyOwnsBadge = readOnly;
+const tallyOwnsBadge = readOnly || meetingRevisionRecognized;
 ---
 
 <section
@@ -217,7 +217,7 @@ const tallyOwnsBadge = readOnly;
         aria-label={embedded ? "Vote in the Demo Poll" : undefined}
       >
         <input type="hidden" name="submission_id" value={submissionId} />
-        {poll.voterCodesEnabled && !meetingRevisionRecognized && !readOnly && !outcome && (
+        {poll.voterCodesEnabled && !meetingRevisionRecognized && !readOnly && (
           <InputCode value={voterCodeRaw} error={voterCodeFieldError} />
         )}
         {multiSelect && (

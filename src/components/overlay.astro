@@ -11,6 +11,8 @@ interface Props {
   descriptionId: string;
   title: string;
   class?: string;
+  /** When false, scrim clicks do not dismiss the overlay (Story 8.1 panel). */
+  dismissOnScrim?: boolean;
 }
 
 const {
@@ -20,6 +22,7 @@ const {
   descriptionId,
   title,
   class: className = "",
+  dismissOnScrim = true,
 } = Astro.props;
 ---
 
@@ -33,6 +36,7 @@ const {
   data-overlay
   data-overlay-confirmation
   data-overlay-open={open ? "true" : "false"}
+  data-overlay-dismiss-scrim={dismissOnScrim ? "true" : "false"}
   hidden={!open}
   inert={!open ? true : undefined}
 >

@@ -142,3 +142,19 @@ describe("live Results payload rejects media keys on options (Story 6.2)", () =>
     ).toBe(false);
   });
 });
+
+describe("Multiple-Choice live payload remains isolated from Meeting", () => {
+  it("rejects the Meeting discriminant and grid keys", () => {
+    expect(
+      isLiveResultsPayload({
+        pollType: "meeting",
+        status: "open",
+        empty: false,
+        voterCount: 1,
+        slots: [],
+        voters: [],
+        comments: [],
+      }),
+    ).toBe(false);
+  });
+});

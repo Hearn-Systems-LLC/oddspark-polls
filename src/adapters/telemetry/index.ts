@@ -94,6 +94,9 @@ const FORBIDDEN_KEYS = [
   "filename",
   "cell",
   "cells",
+  // Story 8.1: Voter Code batch identifiers never reach telemetry.
+  "batchId",
+  "batch_id",
 ] as const;
 
 export type ForbiddenTelemetryKey = (typeof FORBIDDEN_KEYS)[number];
@@ -211,6 +214,17 @@ export function telemetryOperationForRoute(
     segments[2] === "delete"
   ) {
     return `${method} /creator/comments/delete`;
+  }
+
+  // Story 8.1: Voter Code management uses a canonical public reference.
+  // Normalize before the generic reference rule so the real reference never
+  // enters the operation label.
+  if (
+    segments.length === 3 &&
+    segments[0] === "creator" &&
+    segments[2] === "codes"
+  ) {
+    return `${method} /creator/:reference/codes`;
   }
 
   if (!hasPollReferenceParam) {

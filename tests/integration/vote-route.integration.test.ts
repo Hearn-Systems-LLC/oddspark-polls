@@ -288,6 +288,44 @@ describe("Meeting response delivery boundary", () => {
     return value;
   };
 
+  it("keeps the Meeting revision confirmation when Results stay hidden", async () => {
+    const poll = await seedMeeting();
+    await testEnv.DB.prepare(
+      "UPDATE poll SET result_visibility = 'creator_only' WHERE id = ?1",
+    )
+      .bind(poll.pollId)
+      .run();
+
+    const submitted = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, {
+          method: "POST",
+          headers: voteHeaders(),
+          body: meetingBody(crypto.randomUUID(), poll.slots),
+        }),
+      ),
+      poll.reference,
+    );
+    expect(submitted.status).toBe(303);
+    const cookie = submitted.headers
+      .getSetCookie()
+      .map((value) => value.split(";", 1)[0])
+      .join("; ");
+
+    const returning = await runVoteRoute(
+      makeContext(
+        new Request(`${ORIGIN}/${poll.reference}`, { headers: { cookie } }),
+      ),
+      poll.reference,
+    );
+    const html = await returning.text();
+    expect(returning.status).toBe(200);
+    expect(html).toContain('data-outcome-code="counted"');
+    expect(html).toContain("Change it any time while the Poll is open.");
+    expect(html).not.toContain("These results go to the Creator only.");
+    expect(html).not.toContain("data-meeting-results");
+  });
+
   it("commits, replays, conflicts, and closes Meeting responses through the canonical route", async () => {
     const poll = await seedMeeting();
     const submissionId = crypto.randomUUID();
@@ -309,6 +347,12 @@ describe("Meeting response delivery boundary", () => {
     expect(returningHtml).toContain('value="yes" checked');
     expect(returningHtml).toContain(">SAVE<");
     expect(returningHtml).not.toContain("already_voted");
+    expect(returningHtml).toContain("data-meeting-results");
+    expect(returningHtml).toContain("YES 1");
+    expect(returningHtml).toContain("IF NEED BE 1");
+    expect(returningHtml).toContain(
+      `data-live-endpoint="/${poll.reference}/results/live"`,
+    );
 
     const revisedBody = meetingBody(crypto.randomUUID(), poll.slots, "Alex R");
     revisedBody.set(`availability_${poll.slots[0]}`, "no");

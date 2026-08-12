@@ -9,6 +9,7 @@ export type PollId = Branded<string, "PollId">;
 export type PollOptionId = Branded<string, "PollOptionId">;
 export type CommentId = Branded<string, "CommentId">;
 export type UserId = Branded<string, "UserId">;
+export type VoterCodeId = Branded<string, "VoterCodeId">;
 
 export const POLL_TYPES = [
   "multiple_choice",

@@ -380,4 +380,19 @@ describe("telemetry adapter", () => {
       telemetryResultForStatus(404, { resultsLookupFailed: true }),
     ).toBe("error");
   });
+
+  it("normalizes voter code management route before generic reference rule", () => {
+    for (const method of ["GET", "HEAD", "POST"]) {
+      expect(
+        telemetryOperationForRoute(method, "/creator/abc123/codes", true),
+      ).toBe(`${method} /creator/:reference/codes`);
+    }
+  });
+
+  it("never includes a public reference in codes route operation labels", () => {
+    const reference = "Team-Lunch-2026";
+    expect(
+      telemetryOperationForRoute("GET", `/creator/${reference}/codes`, true),
+    ).not.toContain(reference);
+  });
 });

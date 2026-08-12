@@ -11,6 +11,7 @@ import ShareAction from "./share-action.astro";
 import TrustBadge from "./trust-badge.astro";
 import Turnstile from "./turnstile.astro";
 import AvailabilityGrid from "./availability-grid.astro";
+import AvailabilityTally from "./availability-tally.astro";
 import { formatUtc } from "../lib/datetime";
 import { VOTE_COPY } from "../modules/voting/index";
 import {
@@ -299,6 +300,31 @@ const tallyOwnsBadge = readOnly;
       </section>
     )
   }
+  {
+    showTally && postVoteResults?.kind === "meeting_visible" && (
+      <section
+        class:list={["tally-region", embedded && "embedded-tally"]}
+        aria-label={embedded ? "Current Demo Poll results" : undefined}
+        data-results-region
+      >
+        <AvailabilityTally
+          meeting={postVoteResults.meeting}
+          status={postVoteResults.status}
+          toggles={tallyOwnsBadge ? pollToggles : undefined}
+          liveEndpoint={postVoteResults.status === "open" ? liveEndpoint : undefined}
+          initialRenderAtMs={resultsRenderedAtMs}
+          initialValidator={postVoteResults.validator}
+        />
+        <CommentList
+          comments={postVoteResults.comments}
+          moderationComments={postVoteResults.ownerComments}
+          csrfToken={Astro.locals.requestContext?.csrfToken?.value ?? ""}
+          cancelHref={canonicalUrl}
+          mode="owner"
+        />
+      </section>
+    )
+  }
   <section class="share-block" aria-label="Share this Poll">
     <ShareAction canonicalUrl={canonicalUrl} />
   </section>
@@ -306,14 +332,16 @@ const tallyOwnsBadge = readOnly;
 </section>
 
 <script src="../scripts/vote-form.ts"></script>
-{!readOnly && meeting && <script src="../scripts/availability-grid.ts"></script>}
+{meeting && <script src="../scripts/availability-grid.ts"></script>}
 {!readOnly && poll.captchaEnabled && turnstileSiteKey.trim().length > 0 && <script src="../scripts/turnstile.ts"></script>}
 <script src="../scripts/share-action.ts"></script>
 {showTally && postVoteResults?.kind === "visible" && <script src="../scripts/chart-form-toggle.ts"></script>}
 {showTally && postVoteResults?.kind === "visible" && postVoteResults.status === "open" && <script src="../scripts/results-live.ts"></script>}
 {showTally && postVoteResults?.kind === "ranked_visible" && postVoteResults.status === "open" && <script src="../scripts/ranked-results-live.ts"></script>}
+{showTally && postVoteResults?.kind === "meeting_visible" && postVoteResults.status === "open" && <script src="../scripts/meeting-results-live.ts"></script>}
 {showTally && postVoteResults?.kind === "visible" && (postVoteResults.ownerComments?.length ?? 0) > 0 && <script src="../scripts/overlay.ts"></script>}
 {showTally && postVoteResults?.kind === "ranked_visible" && (postVoteResults.ownerComments?.length ?? 0) > 0 && <script src="../scripts/overlay.ts"></script>}
+{showTally && postVoteResults?.kind === "meeting_visible" && (postVoteResults.ownerComments?.length ?? 0) > 0 && <script src="../scripts/overlay.ts"></script>}
 
 <style>
   .poll-shell { width: min(100%, var(--space-measure)); margin-inline: auto; }
@@ -351,7 +379,8 @@ const tallyOwnsBadge = readOnly;
     .poll-shell[data-post-vote="true"] > .tally-region,
     .poll-shell[data-post-vote="true"] > .tally-region > :global(.results-tally) { display: contents; }
     .poll-shell[data-post-vote="true"] :global(.results-tally-ballot) { grid-column: 1; grid-row: 4; }
-    .poll-shell[data-post-vote="true"] :global(.results-tally-summary) { grid-column: 2; grid-row: 1; }
+    .poll-shell[data-post-vote="true"] :global(.results-tally-summary),
+    .poll-shell[data-post-vote="true"] :global(.availability-tally) { grid-column: 2; grid-row: 1; }
     .poll-shell[data-post-vote="true"] :global(.results-tally-tied),
     .poll-shell[data-post-vote="true"] :global(.results-tally-empty) { grid-column: 2; grid-row: 2; }
     .poll-shell[data-post-vote="true"] :global(.results-tally-live) { grid-column: 2; grid-row: 3; }

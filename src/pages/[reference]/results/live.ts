@@ -75,23 +75,32 @@ const handle: APIRoute = async ({ request, params, locals }) => {
   }
 
   headers.set("content-type", "application/json; charset=utf-8");
-  const payload: LiveResultsPayload =
-    view.kind === "ranked_visible"
-      ? {
-          ...view.ranked,
-          status: view.status,
-          pollType: "ranked_choice",
-          comments: view.comments,
-        }
-      : {
-          // Media plates are a server-rendered concern (Story 6.2): strip
-          // them so the payload keeps its exact-key contract and the
-          // reconciler only ever mutates numbers inside existing bars.
-          ...view.tally,
-          options: view.tally.options.map(({ media: _media, ...option }) => option),
-          status: view.status,
-          comments: view.comments,
-        };
+  let payload: LiveResultsPayload;
+  if (view.kind === "ranked_visible") {
+    payload = {
+      ...view.ranked,
+      status: view.status,
+      pollType: "ranked_choice",
+      comments: view.comments,
+    };
+  } else if (view.kind === "meeting_visible") {
+    payload = {
+      ...view.meeting,
+      status: view.status,
+      pollType: "meeting",
+      comments: view.comments,
+    };
+  } else {
+    payload = {
+      // Media plates are a server-rendered concern (Story 6.2): strip them
+      // so the payload keeps its exact-key contract and the reconciler only
+      // ever mutates numbers inside existing bars.
+      ...view.tally,
+      options: view.tally.options.map(({ media: _media, ...option }) => option),
+      status: view.status,
+      comments: view.comments,
+    };
+  }
   return new Response(JSON.stringify(payload), { status: 200, headers });
 };
 

@@ -387,7 +387,7 @@ sequenceDiagram
 - **Rule:** Identity owns users and sessions; Polls owns Poll lifecycle,
   configuration, options, and deadlines; Discovery owns listing and moderation
   state; Voting owns Votes, selections, availability, duplicate claims, Voter
-  Code redemption, and persisted Comments; Media owns media records and cleanup
+  Code inventory and redemption, and persisted Comments; Media owns media records and cleanup
   tasks. Results owns no facts. Only Discovery's `delist` and `clear_delisted`
   commands may append moderation actions or write the Administrator-owned
   `delisted` hold; owner listing commands remain confined to
@@ -516,6 +516,25 @@ sequenceDiagram
   moderation target retry. No migration is required because the existing
   Poll-owned cascades and stable option identities are sufficient.
 
+### AD-25 — Voter Codes are stored as recoverable normalized plaintext
+
+- **Binds:** FR-15, FR-17, NFR-4, and the Voter Code management surface
+- **Prevents:** An irrecoverable code store making the combined-list/reopen AC
+  unserviceable, or an encryption decision made without key-generation,
+  rotation, recovery, binding, and deployment architecture
+- **Rule:** Voter Code text is stored uppercase-normalized in D1 under owner-only
+  authorization, `private, no-store` HTTP responses, and no-log/no-URL/no-telemetry
+  boundaries (AD-15). The literal combined-list copy and reopen-after-close ACs
+  cannot be served from a digest alone; recoverable plaintext is the minimum
+  viable storage for Story 8.1's management projection. At-rest encryption
+  requires its own architecture decision covering key generation, rotation,
+  recovery, binding to the Worker environment, and deployment — none of which
+  exist today. Do not repurpose `BETTER_AUTH_SECRET` or `VOTE_DIGEST_SECRET`
+  for code encryption. Poll-delete cascades remove all codes and redemptions.
+  D1 Time Travel provides the recovery floor for accidentally deleted codes.
+  Codes never appear in telemetry, error messages, URLs, query parameters,
+  exports, HTML data attributes, or operational logs.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -628,6 +647,8 @@ erDiagram
     POLL ||--o{ VOTE : accepts
     POLL ||--o{ VOTER_CLAIM : guards
     POLL ||--o{ VOTER_CODE : admits
+    VOTER_CODE ||--o| VOTER_CODE_REDEMPTION : redeemed_by
+    VOTE ||--o| VOTER_CODE_REDEMPTION : consumes
     POLL ||--o{ MEDIA_OBJECT : owns
     POLL ||--o{ MODERATION_ACTION : receives
     POLL ||--o{ CLEANUP_OUTBOX : schedules
@@ -686,7 +707,7 @@ flowchart LR
 | D1 read replication | Global result or discovery reads show unacceptable latency; adopt the Sessions API with bookmark propagation if enabled. |
 | Discovery ranking and search | The listed catalog is large enough that newest-first pagination is no longer useful. |
 | Email, passkeys, or additional OAuth providers | Creator research shows Google and GitHub exclude a material part of the target audience. |
-| Voter Codes and VPN Blocking implementation | The first real Poll needs them, per the PRD phase gate. |
+| Voter Code enforcement (Story 8.2) and VPN Blocking (Story 8.3) | Code inventory generation is live; admission gating and VPN detection remain deferred to their respective stories. |
 | XLSX capacity model | New measured Worker evidence justifies revisiting the ratified 1,000-Vote synchronous cap and the reconciled FR-22/UX contract selects another safe architecture. |
 | Separate Workers or service bindings | A capability needs an independent deployment cadence or the modular monolith breaches a measured platform limit. |
 | Analytics vendor | Success metrics require durable product analytics beyond privacy-safe Workers operational telemetry. |

@@ -24,6 +24,12 @@ import type {
   RankedTallyView,
   VersionedRankedTallyProjection,
 } from "./ranked-projection";
+import {
+  projectMeetingTally,
+  type MeetingProjectionInput,
+  type MeetingTallyView,
+  type VersionedMeetingTallyProjection,
+} from "./meeting-projection";
 
 export type {
   RankedEliminationView,
@@ -36,6 +42,16 @@ export {
   projectRankedTallyView,
   tabulateAndProjectRanked,
 } from "./ranked-projection";
+export type {
+  MeetingProjectionInput,
+  MeetingSlotProjectionInput,
+  MeetingSlotTallyView,
+  MeetingTallyView,
+  MeetingVoterProjectionInput,
+  MeetingVoterTallyView,
+  VersionedMeetingTallyProjection,
+} from "./meeting-projection";
+export { projectMeetingTally } from "./meeting-projection";
 
 /**
  * Drop the versioned adapter field so delivery never spreads
@@ -54,6 +70,18 @@ function rankedTallyFromVersioned(
     tiedOptionLabels: projection.tiedOptionLabels,
     finalCounts: projection.finalCounts,
     rounds: projection.rounds,
+  };
+}
+
+/** Keep D1 snapshot metadata on the validator/status, never in the body. */
+function meetingTallyFromVersioned(
+  projection: VersionedMeetingTallyProjection,
+): MeetingTallyView {
+  return {
+    empty: projection.empty,
+    voterCount: projection.voterCount,
+    slots: projection.slots,
+    voters: projection.voters,
   };
 }
 
@@ -128,6 +156,11 @@ export type ResultsPorts = {
     pollId: PollId,
     includeOwnerModeration: boolean,
   ) => Promise<CommentResultsProjection | null>;
+  /** Meeting facts + SQL totals from one authorized D1 snapshot. */
+  projectMeetingResults: (
+    pollId: PollId,
+    nowMs: number,
+  ) => Promise<MeetingProjectionInput | null>;
 };
 
 // Narrow compatibility projection retained for adapter-level Tally tests and
@@ -141,7 +174,10 @@ export type VersionedResultsTallyProjection = ResultsTallyProjection & {
 // projection so authorization always happens first and a matching validator
 // can avoid the heavier projection. The full projection carries its own
 // version so the response body and ETag describe one D1 snapshot (AD-24).
-export type LiveResultsPorts = Pick<ResultsPorts, "findAccessEnvelope" | "projectRankedComments"> & {
+export type LiveResultsPorts = Pick<
+  ResultsPorts,
+  "findAccessEnvelope" | "projectRankedComments" | "projectMeetingResults"
+> & {
   readRepresentationVersion: (pollId: PollId) => Promise<number | null>;
   projectVersionedResults: (
     pollId: PollId,
@@ -214,9 +250,16 @@ export type LiveRankedResultsPayload = RankedTallyView & {
   comments: CommentView[];
 };
 
+export type LiveMeetingResultsPayload = MeetingTallyView & {
+  status: PollStatus;
+  pollType: "meeting";
+  comments: CommentView[];
+};
+
 export type LiveResultsPayload =
   | LiveMultipleChoicePayload
-  | LiveRankedResultsPayload;
+  | LiveRankedResultsPayload
+  | LiveMeetingResultsPayload;
 
 export type ResultsView =
   | {
@@ -259,6 +302,18 @@ export type ResultsView =
       validator: string;
     }
   | {
+      kind: "meeting_visible";
+      pollId: PollId;
+      question: string;
+      canonicalReference: string;
+      status: PollStatus;
+      securityToggles: PollSecurityToggles;
+      meeting: MeetingTallyView;
+      comments: CommentView[];
+      ownerComments: OwnerCommentView[] | null;
+      validator: string;
+    }
+  | {
       kind: "ranked_unavailable";
       pollId: PollId;
       question: string;
@@ -288,6 +343,16 @@ export type LiveResultsView =
       status: PollStatus;
       validator: string;
       ranked: RankedTallyView;
+      comments: CommentView[];
+    }
+  | {
+      kind: "meeting_visible";
+      pollId: PollId;
+      canonicalReference: string;
+      representationVersion: number;
+      status: PollStatus;
+      validator: string;
+      meeting: MeetingTallyView;
       comments: CommentView[];
     }
   | {
@@ -467,6 +532,41 @@ export async function queryResults(
     };
   }
 
+  if (envelope.pollType === "meeting") {
+    // Authorization above precedes every response/cell read (AD-21). The D1
+    // fact projection carries the same-snapshot version and effective state;
+    // the pure projector only ranks and marks the identifier-free view.
+    const meetingFacts = await ports.projectMeetingResults(
+      envelope.pollId,
+      nowMs,
+    );
+    if (meetingFacts === null) {
+      throw new Error("Meeting Results projection unavailable");
+    }
+    const meetingProjection = projectMeetingTally(meetingFacts);
+    const includeOwnerModeration =
+      viewer.userId !== null && viewer.userId === envelope.ownerUserId;
+    const commentProjection = await ports.projectRankedComments(
+      envelope.pollId,
+      includeOwnerModeration,
+    );
+    return {
+      kind: "meeting_visible",
+      pollId: envelope.pollId,
+      question: envelope.question,
+      canonicalReference: envelope.canonicalReference,
+      status: meetingProjection.effectiveStatus,
+      securityToggles: envelope.securityToggles,
+      meeting: meetingTallyFromVersioned(meetingProjection),
+      comments: commentProjection?.comments ?? [],
+      ownerComments: commentProjection?.ownerComments ?? null,
+      validator: composeResultsValidator(
+        meetingProjection.representationVersion,
+        meetingProjection.effectiveStatus,
+      ),
+    };
+  }
+
   const includeOwnerModeration =
     viewer.userId !== null && viewer.userId === envelope.ownerUserId;
   const projection = await ports.projectResults(
@@ -535,6 +635,35 @@ export async function queryLiveResults(
         validator,
       };
     }
+  }
+
+  if (envelope.pollType === "meeting") {
+    const meetingFacts = await ports.projectMeetingResults(
+      envelope.pollId,
+      nowMs,
+    );
+    if (meetingFacts === null) {
+      throw new Error("Live Meeting Results projection unavailable");
+    }
+    const meetingProjection = projectMeetingTally(meetingFacts);
+    const snapshotValidator = composeResultsValidator(
+      meetingProjection.representationVersion,
+      meetingProjection.effectiveStatus,
+    );
+    const commentProjection = await ports.projectRankedComments(
+      envelope.pollId,
+      false,
+    );
+    return {
+      kind: "meeting_visible",
+      pollId: envelope.pollId,
+      canonicalReference: envelope.canonicalReference,
+      representationVersion: meetingProjection.representationVersion,
+      status: meetingProjection.effectiveStatus,
+      validator: snapshotValidator,
+      meeting: meetingTallyFromVersioned(meetingProjection),
+      comments: commentProjection?.comments ?? [],
+    };
   }
 
   if (envelope.pollType === "ranked_choice") {

@@ -707,7 +707,8 @@ flowchart LR
 | D1 read replication | Global result or discovery reads show unacceptable latency; adopt the Sessions API with bookmark propagation if enabled. |
 | Discovery ranking and search | The listed catalog is large enough that newest-first pagination is no longer useful. |
 | Email, passkeys, or additional OAuth providers | Creator research shows Google and GitHub exclude a material part of the target audience. |
-| Voter Code enforcement (Story 8.2) and VPN Blocking (Story 8.3) | Code inventory generation is live; admission gating and VPN detection remain deferred to their respective stories. |
+| Voter Code enforcement (Story 8.2) | Closed. Admission gating and atomic redemption ship under AD-7/AD-19 with AD-25's approved storage boundary. |
+| VPN Blocking (Story 8.3) | VPN detection remains deferred to Story 8.3. |
 | XLSX capacity model | New measured Worker evidence justifies revisiting the ratified 1,000-Vote synchronous cap and the reconciled FR-22/UX contract selects another safe architecture. |
 | Separate Workers or service bindings | A capability needs an independent deployment cadence or the modular monolith breaches a measured platform limit. |
 | Analytics vendor | Success metrics require durable product analytics beyond privacy-safe Workers operational telemetry. |

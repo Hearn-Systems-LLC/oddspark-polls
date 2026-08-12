@@ -8,7 +8,8 @@ import { createVotePersistence } from "../../src/adapters/d1/index";
 import { castVote, VoterCodeAlreadyUsedError } from "../../src/modules/voting/index";
 import { votingStrategyFor } from "../../src/modules/polls/types/registry";
 import { sha256Hex } from "../../src/adapters/digest/index";
-import type { PollId, PollOptionId, VoterClaimDigest } from "../../src/shared/domain/index";
+import type { PollId, PollOptionId } from "../../src/shared/domain/index";
+import type { VoterClaimDigest } from "../../src/modules/voting/index";
 
 type TestEnv = Cloudflare.Env & {
   TEST_MIGRATIONS: D1Migration[];

@@ -978,6 +978,14 @@ const detailPath = `/creator/polls/${pollId}`;
               </div>
             </form>
 
+            {securityValues.voterCodes && (
+              <div class="voter-codes-link">
+                <a href={`/creator/${encodeURIComponent(poll.canonicalReference)}/codes`} class="btn btn-secondary">
+                  MANAGE VOTER CODES
+                </a>
+              </div>
+            )}
+
             {
               listingState === "delisted" ? (
                 <section

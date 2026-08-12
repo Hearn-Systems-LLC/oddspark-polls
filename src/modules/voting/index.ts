@@ -1020,3 +1020,21 @@ export async function castVote(
     },
   };
 }
+
+export {
+  generateVoterCodes,
+  generateCodesFromBytes,
+  isValidBatchCount,
+  VOTER_CODE_ALPHABET,
+  VOTER_CODE_LENGTH,
+  VOTER_CODE_BATCH_MIN,
+  VOTER_CODE_BATCH_MAX,
+  VOTER_CODE_BATCH_DEFAULT,
+  VOTER_CODE_TOTAL_CAP,
+  VOTER_CODE_COPY,
+  type VoterCodeProjection,
+  type VoterCodeInventory,
+  type GenerateVoterCodesInput,
+  type GenerateVoterCodesDeps,
+  type StoredVoterCodeBatch,
+} from "./voter-codes";

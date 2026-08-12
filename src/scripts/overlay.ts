@@ -95,7 +95,7 @@ function enhanceOverlay(root: HTMLElement): OverlayController {
   }
 
   scrim?.addEventListener("click", (event) => {
-    if (event.target === scrim) {
+    if (event.target === scrim && root.dataset.overlayDismissScrim !== "false") {
       close();
     }
   });

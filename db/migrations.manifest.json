@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-10T22:48:46.364Z",
+  "generatedAt": "2026-08-11T23:23:17.013Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -69,6 +69,10 @@
     {
       "file": "0017_meeting_availability.sql",
       "sha256": "98e736ba5715329c921e124845a03f6ade00cbf15bf68ffe93fbf94bcf05d203"
+    },
+    {
+      "file": "0018_voter_codes.sql",
+      "sha256": "2f7239740e4b2b46ceccf0e5b04e597edfca493d4a52d1e400f2dabd77c86a2c"
     }
   ]
 }

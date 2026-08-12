@@ -1,0 +1,214 @@
+---
+import { env } from "cloudflare:workers";
+import BaseLayout from "../../../layouts/base-layout.astro";
+import ButtonSecondary from "../../../components/button-secondary.astro";
+import VoterCodePanel from "../../../components/voter-code-panel.astro";
+import { createPollPersistence } from "../../../adapters/d1/index";
+import { createVoterCodesD1Adapter } from "../../../adapters/d1/voter-codes";
+import { parseVoterCodeForm } from "../../../lib/voter-code-form";
+import { generateVoterCodes, VOTER_CODE_BATCH_DEFAULT } from "../../../modules/voting/voter-codes";
+import type { PollId, UserId } from "../../../shared/domain/index";
+
+Astro.response.headers.set("cache-control", "private, no-store");
+
+if (
+  Astro.request.method !== "GET" &&
+  Astro.request.method !== "HEAD" &&
+  Astro.request.method !== "POST"
+) {
+  return new Response("Method not allowed.", {
+    status: 405,
+    headers: {
+      allow: "GET, HEAD, POST",
+      "cache-control": "private, no-store",
+    },
+  });
+}
+
+const requestContext = Astro.locals.requestContext;
+const principal = requestContext?.principal ?? null;
+if (!principal) {
+  const returnPath = Astro.url.pathname + Astro.url.search;
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: `/sign-in?return=${encodeURIComponent(returnPath)}`,
+      "cache-control": "private, no-store",
+    },
+  });
+}
+
+let reference: string;
+try {
+  reference = decodeURIComponent(Astro.params.reference ?? "");
+} catch {
+  return new Response("Not found.", {
+    status: 404,
+    headers: { "cache-control": "private, no-store" },
+  });
+}
+const ownerId = principal.userId as UserId;
+const csrfToken = requestContext?.csrfToken?.value ?? "";
+const persistence = createPollPersistence(env.DB);
+const voterCodesAdapter = createVoterCodesD1Adapter(env.DB);
+
+// Resolve Poll by canonical reference, then verify ownership.
+const pollPage = await persistence.findPollByReference(reference);
+if (!pollPage) {
+  return new Response("Not found.", {
+    status: 404,
+    headers: { "cache-control": "private, no-store" },
+  });
+}
+
+const pollId = pollPage.pollId as PollId;
+const ownedPoll = await persistence.findPollForOwner(pollId, ownerId);
+if (!ownedPoll) {
+  return new Response("Not found.", {
+    status: 404,
+    headers: { "cache-control": "private, no-store" },
+  });
+}
+
+if (requestContext) {
+  requestContext.pollId = pollId;
+}
+
+let formError: string | null = null;
+let submittedBatchId: string | null = null;
+let submittedCount: number | null = null;
+let panelOpen = Astro.url.searchParams.get("panel") === "codes";
+
+if (Astro.request.method === "POST") {
+  const formData = await Astro.request.formData();
+  const parsed = parseVoterCodeForm(formData);
+
+  if ("code" in parsed) {
+    formError = parsed.message;
+    Astro.response.status = 422;
+  } else {
+    submittedBatchId = parsed.batchId;
+    submittedCount = parsed.count;
+    const deps = voterCodesAdapter.generateDeps(ownerId);
+    const result = await generateVoterCodes(deps, {
+      pollId,
+      ownerId,
+      count: parsed.count,
+      batchId: parsed.batchId,
+    });
+
+    if (!result.ok) {
+      formError = result.error.message;
+      Astro.response.status = 422;
+    } else {
+      panelOpen = true;
+      return new Response(null, {
+        status: 303,
+        headers: {
+          location: `/creator/${encodeURIComponent(pollPage.canonicalReference)}/codes?panel=codes`,
+          "cache-control": "private, no-store",
+        },
+      });
+    }
+  }
+}
+
+const inventory = await voterCodesAdapter.getInventory(pollId, ownerId);
+const hasInventory = inventory !== null && inventory.total > 0;
+const batchId = submittedBatchId ?? crypto.randomUUID();
+const initialCount = submittedCount ?? VOTER_CODE_BATCH_DEFAULT;
+const voterCodesEnabled = pollPage.voterCodesEnabled;
+const isClosed = pollPage.closedAtMs !== null || (pollPage.deadlineMs !== null && pollPage.deadlineMs <= Date.now());
+const canGenerate = voterCodesEnabled && !isClosed;
+---
+
+<BaseLayout title={`Voter Codes — ${pollPage.question}`}>
+  <div class="page-container">
+    <nav class="breadcrumb">
+      <a href={`/creator/polls/${pollId}`} class="text-link">← Back to Poll</a>
+    </nav>
+
+    <h1 class="heading-lg">{pollPage.question}</h1>
+    <p class="label-caps-lg text-dim">VOTER CODES</p>
+
+    {canGenerate && (
+      <form method="POST" class="stack-md" id="voter-code-form">
+        <input type="hidden" name="csrf_token" value={csrfToken} />
+        <input type="hidden" name="intent" value="generate" />
+        <input type="hidden" name="batch_id" value={batchId} />
+
+        <div class="field-group">
+          <label for="count" class="label-caps">NUMBER OF CODES</label>
+          <input
+            type="number"
+            id="count"
+            name="count"
+            min="1"
+            max="100"
+            value={initialCount}
+            class="input-field input-field--sm"
+            required
+          />
+        </div>
+
+        {formError && (
+          <p class="text-error label-caps" role="alert">{formError}</p>
+        )}
+
+        <button type="submit" class="btn btn-primary" id="generate-btn">
+          GENERATE CODES
+        </button>
+      </form>
+    )}
+
+    {!canGenerate && voterCodesEnabled && (
+      <p class="text-dim label-caps">{formError ?? "This Poll is closed. Existing codes are still available."}</p>
+    )}
+
+    {!voterCodesEnabled && (
+      <p class="text-dim label-caps">{formError ?? "Turn on Voter Codes in the Poll settings to generate codes."}</p>
+    )}
+
+    {hasInventory && (
+      <div class="stack-sm">
+        <a
+          href="?panel=codes"
+          class="btn btn-secondary"
+          id="view-codes-invoker"
+          data-overlay-open-for="voter-code-panel"
+        >
+          VIEW CODES
+        </a>
+      </div>
+    )}
+  </div>
+
+  {hasInventory && inventory && (
+    <VoterCodePanel
+      id="voter-code-panel"
+      total={inventory.total}
+      redeemed={inventory.redeemed}
+      codes={inventory.codes}
+      open={panelOpen}
+      invokerId="view-codes-invoker"
+    />
+  )}
+</BaseLayout>
+
+<script>
+  import "../../../scripts/voter-codes";
+</script>
+
+<style>
+  .breadcrumb {
+    margin-bottom: var(--space-md);
+  }
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+  .input-field--sm {
+    max-width: 8rem;
+  }
+</style>

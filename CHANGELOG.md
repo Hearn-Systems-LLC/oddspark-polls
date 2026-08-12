@@ -15,6 +15,10 @@ production on every merge, but no version has been cut or tagged.
 
 ### Added
 
+- Voter Code generation and management for invite-only Polls. Creators with
+  Voter Codes enabled can generate batches of one-time codes, view the combined
+  inventory with redemption status, and copy all codes to clipboard. Voter-side
+  code enforcement arrives in Story 8.2.
 - Live Meeting Poll availability tallies. Authorized Results and returning
   voter surfaces show every display name against every proposed slot, distinct
   Yes / If need be totals, and a shared gold rule for the best tied slot(s).

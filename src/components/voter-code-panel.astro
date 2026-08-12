@@ -1,0 +1,133 @@
+---
+import Overlay from "./overlay.astro";
+import type { VoterCodeProjection } from "../modules/voting/voter-codes";
+
+interface Props {
+  id: string;
+  total: number;
+  redeemed: number;
+  codes: VoterCodeProjection[];
+  open?: boolean;
+  invokerId?: string;
+}
+
+const {
+  id,
+  total,
+  redeemed,
+  codes,
+  open = false,
+  invokerId,
+} = Astro.props;
+
+const titleId = `${id}-title`;
+const descriptionId = `${id}-description`;
+const codeText = codes.map((c) => c.code).join("\n");
+---
+
+<Overlay
+  id={id}
+  titleId={titleId}
+  descriptionId={descriptionId}
+  title="VOTER CODES"
+  open={open}
+  dismissOnScrim={false}
+  class="voter-code-overlay"
+>
+  <div slot="description" class="voter-code-panel-content">
+    <p class="label-caps-lg redeemed-count" id={descriptionId}>
+      {redeemed} OF {total} REDEEMED
+    </p>
+
+    <div class="code-list" role="list">
+      {codes.map((entry) => (
+        <div
+          class:list={["code-entry", { "is-redeemed": entry.redeemed }]}
+          role="listitem"
+        >
+          <span class="code-text data-lg">{entry.code}</span>
+        </div>
+      ))}
+    </div>
+  </div>
+
+  <div slot="actions" class="voter-code-actions">
+    <div class="copy-feedback label-caps" aria-live="polite" id={`${id}-copy-feedback`}></div>
+    <button
+      type="button"
+      class="btn btn-primary"
+      id={`${id}-copy-btn`}
+      data-copy-text={codeText}
+      data-feedback-target={`${id}-copy-feedback`}
+      data-count={codes.length}
+    >
+      COPY ALL CODES
+    </button>
+    <a
+      href="?"
+      class="btn btn-secondary"
+      data-overlay-cancel
+      {...(invokerId ? { "data-invoker-id": invokerId } : {})}
+    >
+      CLOSE
+    </a>
+  </div>
+</Overlay>
+
+<style>
+  .voter-code-overlay :global(.overlay-panel) {
+    width: min(100%, 32rem);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .voter-code-panel-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin-bottom: var(--space-4);
+  }
+
+  .redeemed-count {
+    margin: 0 0 var(--space-4);
+    color: var(--color-text);
+  }
+
+  .code-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .code-entry {
+    padding: var(--space-1) 0;
+  }
+
+  .code-text {
+    font-family: var(--font-machine);
+    letter-spacing: 0.05em;
+  }
+
+  .is-redeemed .code-text {
+    text-decoration: line-through;
+    color: var(--color-dim);
+  }
+
+  .copy-feedback {
+    min-height: var(--type-body-lh);
+    font-family: var(--font-machine);
+    font-size: var(--type-label-caps-size);
+    text-transform: uppercase;
+    color: var(--color-text);
+    align-self: center;
+  }
+
+  .voter-code-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+    justify-content: flex-end;
+  }
+</style>

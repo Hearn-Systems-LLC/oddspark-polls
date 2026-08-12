@@ -1,0 +1,85 @@
+---
+interface Props {
+  id?: string;
+  name?: string;
+  label?: string;
+  value?: string;
+  error?: string;
+}
+
+const {
+  id = "voter-code",
+  name = "voter_code",
+  label = "VOTER CODE",
+  value = "",
+  error = "",
+} = Astro.props;
+
+const captionId = `${id}-caption`;
+const hasError = error.length > 0;
+---
+
+<div class="field field-code">
+  <label class="label-caps field-label" for={id}>{label}</label>
+  <input
+    class:list={["field-input field-input-code", hasError && "is-error"]}
+    id={id}
+    name={name}
+    type="text"
+    value={value}
+    autocomplete="off"
+    autocapitalize="characters"
+    spellcheck="false"
+    aria-invalid={hasError ? "true" : undefined}
+    aria-describedby={hasError ? captionId : undefined}
+  />
+  {hasError && (
+    <p class="field-caption text-error label-caps" id={captionId} role="alert">{error}</p>
+  )}
+</div>
+
+<style>
+  .field-code {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .field-label {
+    display: block;
+  }
+
+  .field-input-code {
+    width: 100%;
+    min-height: 44px;
+    padding: var(--space-2) 0;
+    border: none;
+    border-bottom: var(--input-border-bottom);
+    border-radius: var(--rounded-default);
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-machine);
+    font-size: var(--type-data-lg-size);
+    line-height: var(--type-data-lg-lh);
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+  }
+
+  .field-input-code:focus {
+    outline: none;
+    border-bottom: var(--input-border-bottom-focus);
+  }
+
+  .field-input-code:focus-visible {
+    outline: var(--focus-outline);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  .field-input-code.is-error {
+    border-bottom: var(--input-border-bottom-error);
+  }
+
+  .field-caption {
+    margin: 0;
+  }
+</style>

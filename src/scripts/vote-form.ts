@@ -93,6 +93,23 @@ if (form) {
   const meetingDisplayNameInput = form.querySelector<HTMLInputElement>(
     "#meeting-display-name",
   );
+  const voterCodeInput = form.querySelector<HTMLInputElement>("#voter-code");
+  if (voterCodeInput) {
+    voterCodeInput.addEventListener("input", () => {
+      const start = voterCodeInput.selectionStart;
+      const end = voterCodeInput.selectionEnd;
+      const trimmed = voterCodeInput.value.trim().toUpperCase();
+      if (trimmed !== voterCodeInput.value) {
+        voterCodeInput.value = trimmed;
+        if (start !== null && end !== null) {
+          voterCodeInput.setSelectionRange(
+            Math.min(start, trimmed.length),
+            Math.min(end, trimmed.length),
+          );
+        }
+      }
+    });
+  }
   availabilityInputs.forEach((input) => input.addEventListener("keydown", (event) => {
     if (form.dataset.voteInflight === "true") event.preventDefault();
   }));
@@ -162,6 +179,7 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = false;
     if (commentDisplayName) commentDisplayName.readOnly = false;
+    if (voterCodeInput) voterCodeInput.readOnly = false;
     if (hint) {
       hint.hidden = locked || hasSelection;
     }
@@ -240,6 +258,7 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = false;
     if (commentDisplayName) commentDisplayName.readOnly = false;
+    if (voterCodeInput) voterCodeInput.readOnly = false;
     if (meetingDisplayNameInput) meetingDisplayNameInput.readOnly = locked;
     availabilityInputs.forEach((input) => {
       input.disabled = locked;
@@ -262,6 +281,7 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = true;
     if (commentDisplayName) commentDisplayName.readOnly = true;
+    if (voterCodeInput) voterCodeInput.readOnly = true;
     if (meetingDisplayNameInput) meetingDisplayNameInput.readOnly = true;
     // Keep successful controls enabled so native form serialization includes
     // the checked Meeting row. The in-flight data state blocks pointer and

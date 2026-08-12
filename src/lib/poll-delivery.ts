@@ -54,6 +54,7 @@ import {
   type VoteRateLimitDigest,
   type VoterClaimDigest,
 } from "../modules/voting/index";
+import { VOTER_CODE_ADMISSION_COPY } from "../modules/voting/voter-codes";
 import {
   effectivePollStatus,
   makeSecurityToggles,
@@ -196,6 +197,8 @@ export type PollDeliveryState = {
   meetingDisplayName: string;
   meetingFieldErrors: Record<string, string>;
   meetingRevisionRecognized: boolean;
+  voterCodeRaw: string;
+  voterCodeFieldError: string;
 };
 
 export type PollDeliveryResult = {
@@ -272,6 +275,12 @@ export const outcomeFromVoteError = (
       return { code: error.code, ...splitVoteCopy(VOTE_COPY.pollDefinitionChanged), time: null, titlePrefix: "Poll changed", tone: "rejection" };
     case "captcha_failed":
       return { code: error.code, ...splitVoteCopy(VOTE_COPY.captchaFailed), time: null, titlePrefix: "Human check failed", tone: "rejection" };
+    case "voter_code_missing":
+      return { code: error.code, ...splitVoteCopy(VOTER_CODE_ADMISSION_COPY.missing), time: null, titlePrefix: "Voter Code required", tone: "rejection" };
+    case "voter_code_invalid":
+      return { code: error.code, ...splitVoteCopy(VOTER_CODE_ADMISSION_COPY.invalid), time: null, titlePrefix: "Voter Code invalid", tone: "rejection" };
+    case "voter_code_used":
+      return { code: error.code, ...splitVoteCopy(VOTER_CODE_ADMISSION_COPY.used), time: null, titlePrefix: "Voter Code used", tone: "rejection" };
     default:
       return { code: error.code, ...splitVoteCopy(VOTE_COPY.retry), time: null, titlePrefix: "Vote not counted", tone: "rejection" };
   }
@@ -401,6 +410,8 @@ export async function deliverPollVotingSurface(
   let meetingDisplayName = "";
   let meetingFieldErrors: Record<string, string> = {};
   let meetingRevisionRecognized = false;
+  let voterCodeRaw = "";
+  let voterCodeFieldError = "";
   const deliveryPollId = poll.pollId;
   const deliveryPollType = poll.pollType;
 
@@ -460,6 +471,7 @@ export async function deliverPollVotingSurface(
         singletonText(formData, "display_name"),
         COMMENT_CAPS.displayName,
       );
+      voterCodeRaw = boundedInvalidEcho(singletonText(formData, "voter_code"), 16);
       const parsed = formSchema.safeParse({
         submissionId: text(formData.get("submission_id")),
         selectedOptionIds,
@@ -637,7 +649,7 @@ export async function deliverPollVotingSurface(
             browserToken: voterToken,
             ipDigest: ipClaimDigest,
             humanChallenge,
-            voterCode: "",
+            voterCode: voterCodeRaw,
           };
           const voteInput: CastVoteInput =
             poll.pollType === "meeting"
@@ -710,6 +722,7 @@ export async function deliverPollVotingSurface(
             outcome = outcomeFromVoteError(result.error);
             commentFieldErrors = result.error.fieldErrors ?? {};
             meetingFieldErrors = result.error.fieldErrors ?? {};
+            voterCodeFieldError = (result.error.fieldErrors as Record<string, string> | undefined)?.voterCode ?? "";
             if (result.error.code === "comments_disabled") {
               // The D1 trigger is authoritative. Hide stale/forged Comment
               // values before the refresh so a failed re-read cannot echo
@@ -722,7 +735,10 @@ export async function deliverPollVotingSurface(
             if (
               result.error.code === "poll_definition_changed" ||
               result.error.code === "captcha_failed" ||
-              result.error.code === "comments_disabled"
+              result.error.code === "comments_disabled" ||
+              result.error.code === "voter_code_missing" ||
+              result.error.code === "voter_code_invalid" ||
+              result.error.code === "voter_code_used"
             ) {
               const refreshed = await pollPersistence.findPollByReference(input.reference);
               if (refreshed === null || (input.isCompatible && !input.isCompatible(refreshed))) {
@@ -736,6 +752,12 @@ export async function deliverPollVotingSurface(
               rankedPreferences = rankedPreferences.filter((preference) =>
                 reachable.has(preference.optionId as PollOptionId),
               );
+            }
+            // After a Toggle race refresh, suppress echoed code if the
+            // authoritative snapshot is now off.
+            if (!poll.voterCodesEnabled) {
+              voterCodeRaw = "";
+              voterCodeFieldError = "";
             }
           }
           if (outcome) {
@@ -987,6 +1009,8 @@ export async function deliverPollVotingSurface(
       meetingDisplayName,
       meetingFieldErrors,
       meetingRevisionRecognized,
+      voterCodeRaw,
+      voterCodeFieldError,
     },
     status,
     headers,

@@ -12,6 +12,7 @@ import TrustBadge from "./trust-badge.astro";
 import Turnstile from "./turnstile.astro";
 import AvailabilityGrid from "./availability-grid.astro";
 import AvailabilityTally from "./availability-tally.astro";
+import InputCode from "./input-code.astro";
 import { formatUtc } from "../lib/datetime";
 import { VOTE_COPY } from "../modules/voting/index";
 import {
@@ -67,6 +68,8 @@ const {
   meetingDisplayName,
   meetingFieldErrors,
   meetingRevisionRecognized,
+  voterCodeRaw,
+  voterCodeFieldError,
 } = delivery;
 const selectedCount = selected.size;
 const rankedChoice = poll.pollType === "ranked_choice";
@@ -214,6 +217,9 @@ const tallyOwnsBadge = readOnly;
         aria-label={embedded ? "Vote in the Demo Poll" : undefined}
       >
         <input type="hidden" name="submission_id" value={submissionId} />
+        {poll.voterCodesEnabled && !meetingRevisionRecognized && !readOnly && !outcome && (
+          <InputCode value={voterCodeRaw} error={voterCodeFieldError} />
+        )}
         {multiSelect && (
           <p class="vote-bounds-hint" id="vote-bounds-hint" data-bounds-hint aria-live="polite">{boundsHint}</p>
         )}

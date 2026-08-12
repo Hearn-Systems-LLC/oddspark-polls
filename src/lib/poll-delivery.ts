@@ -670,6 +670,7 @@ export async function deliverPollVotingSurface(
               createDigest: (digestInput) => createVoteDigest(input.env.VOTE_DIGEST_SECRET, digestInput),
               hashPayload: sha256Hex,
               persistVote: votePersistence.insertVote,
+              lookupVoterCode: votePersistence.lookupVoterCode,
               generateId: () => crypto.randomUUID(),
               nowMs: () => Date.now(),
             },

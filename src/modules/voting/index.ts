@@ -141,6 +141,13 @@ export class CommentsDisabledError extends Error {
   }
 }
 
+export class VoterCodeAlreadyUsedError extends Error {
+  constructor() {
+    super("voter_code_already_used");
+    this.name = "VoterCodeAlreadyUsedError";
+  }
+}
+
 export type VotingPollSnapshot = {
   id: PollId;
   pollType: PollType;
@@ -1044,6 +1051,12 @@ export async function castVote(
         reasonCodes: { comment: "comments_disabled" },
       });
     }
+    if (cause instanceof VoterCodeAlreadyUsedError) {
+      return failure("voter_code_used", VOTER_CODE_ADMISSION_COPY.used, {
+        fieldErrors: { voterCode: VOTER_CODE_ADMISSION_COPY.used },
+        reasonCodes: { voterCode: "voter_code_used" },
+      });
+    }
     if (cause instanceof PollGoneError) {
       // Option FK failures historically mapped to PollGone. Re-read the Poll
       // and selected option reachability so an edited-but-living Poll gets
@@ -1107,4 +1120,5 @@ export {
   type GenerateVoterCodesInput,
   type GenerateVoterCodesDeps,
   type StoredVoterCodeBatch,
+  type VoterCodeRedemptionContribution,
 } from "./voter-codes";

@@ -637,6 +637,7 @@ export async function deliverPollVotingSurface(
             browserToken: voterToken,
             ipDigest: ipClaimDigest,
             humanChallenge,
+            voterCode: "",
           };
           const voteInput: CastVoteInput =
             poll.pollType === "meeting"

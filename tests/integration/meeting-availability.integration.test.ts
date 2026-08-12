@@ -110,6 +110,7 @@ describe("meeting availability schema (0017)", () => {
       browserToken: "meeting-browser-token",
       ipDigest: null,
       humanChallenge: "not_attempted",
+      voterCode: "",
     });
     if (!result.ok) throw new Error(JSON.stringify(result.error));
     expect(result.value).toMatchObject({ existing: false });

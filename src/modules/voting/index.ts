@@ -16,6 +16,7 @@ import {
   type PollId,
   type PollOptionId,
   type PollType,
+  type VoterCodeId,
 } from "../../shared/domain/index";
 import { MULTIPLE_CHOICE_VOTE_COPY } from "../polls/types/multiple-choice";
 import type { RankedPreferenceInput } from "../polls/types/ranked-choice";
@@ -33,6 +34,13 @@ import {
   type VoterClaimCheckKind,
   type VoterClaimDigest,
 } from "./ip-address";
+
+import {
+  normalizeVoterCodeInput,
+  resolveVoterCodeAdmission,
+  VOTER_CODE_ADMISSION_COPY,
+  type VoterCodeRedemptionContribution,
+} from "./voter-codes";
 
 export {
   asVoteRateLimitDigest,
@@ -146,6 +154,7 @@ export type VotingPollSnapshot = {
   ipChecksEnabled: boolean;
   /** Authoritative CAPTCHA policy from the fresh Poll snapshot (Story 2.3). */
   captchaEnabled: boolean;
+  voterCodesEnabled: boolean;
   commentsEnabled: boolean;
   multiSelectEnabled: boolean;
   minSelections: number | null;
@@ -281,7 +290,8 @@ export type VotePersistenceContribution =
   | VoteCommentContribution
   | MeetingAvailabilityContribution
   | MeetingResponseContribution
-  | VoteExtensionContribution;
+  | VoteExtensionContribution
+  | VoterCodeRedemptionContribution;
 
 export type VotePersistenceBatch = {
   vote: {
@@ -336,6 +346,7 @@ export type CastVoteDeps = {
   }) => Promise<VoterClaimDigest>;
   hashPayload: (payload: string) => Promise<string>;
   persistVote: (batch: VotePersistenceBatch) => Promise<void>;
+  lookupVoterCode?: (pollId: PollId, canonicalCode: string) => Promise<{ codeId: VoterCodeId; redeemed: boolean } | null>;
   generateId: () => string;
   nowMs: () => number;
   contributors?: readonly VoteFactContributor[];
@@ -346,6 +357,7 @@ type CastVoteInputBase = {
   submissionId: string;
   comment?: CommentDraft;
   browserToken: string | null;
+  voterCode: string;
   /**
    * Prepared IP claim digest from the inbound delivery boundary, or null when
    * identity is unavailable. CastVote's authoritative Poll snapshot decides
@@ -827,6 +839,55 @@ export async function castVote(
     }
   }
 
+  // Voter Code admission: enforced only when the authoritative snapshot
+  // enables it. With Toggle off, a forged code value has no policy effect
+  // and causes no lookup. The code is not part of the payload hash or
+  // stored Vote row — it is an admission challenge like consumed Turnstile proof.
+  let voterCodeRedemption: VoterCodeRedemptionContribution | null = null;
+  if (poll.voterCodesEnabled) {
+    const admissionOutcome = normalizeVoterCodeInput(input.voterCode);
+    if (admissionOutcome.kind === "missing") {
+      return failure("voter_code_missing", VOTER_CODE_ADMISSION_COPY.missing, {
+        fieldErrors: { voterCode: VOTER_CODE_ADMISSION_COPY.missing },
+        reasonCodes: { voterCode: "voter_code_missing" },
+      });
+    }
+    if (admissionOutcome.kind === "invalid") {
+      return failure("voter_code_invalid", VOTER_CODE_ADMISSION_COPY.invalid, {
+        fieldErrors: { voterCode: VOTER_CODE_ADMISSION_COPY.invalid },
+        reasonCodes: { voterCode: "voter_code_invalid" },
+      });
+    }
+    if (!deps.lookupVoterCode) {
+      return failure("vote_failed", VOTE_COPY.retry);
+    }
+    let lookupResult: { codeId: VoterCodeId; redeemed: boolean } | null;
+    try {
+      lookupResult = await deps.lookupVoterCode(poll.id, admissionOutcome.value);
+    } catch {
+      return failure("vote_failed", VOTE_COPY.retry);
+    }
+    const admission = resolveVoterCodeAdmission(
+      admissionOutcome,
+      lookupResult ? { found: true, codeId: lookupResult.codeId, redeemed: lookupResult.redeemed } : { found: false },
+    );
+    if ("code" in admission) {
+      return failure(admission.code, admission.message, {
+        fieldErrors: { voterCode: admission.message },
+        reasonCodes: { voterCode: admission.code },
+      });
+    }
+    // Build the redemption contribution now; it will be placed after
+    // Poll-Type facts and before Session/IP claims in the batch so a
+    // concurrent used-code collision has deterministic precedence.
+    voterCodeRedemption = {
+      kind: "voter_code_redemption",
+      codeId: admission.codeId,
+      voteId: "", // placeholder — filled after voteId generation
+      redeemedAtMs: 0, // placeholder — filled after nowMs
+    };
+  }
+
   let voteId: string;
   try {
     voteId = deps.generateId();
@@ -872,6 +933,15 @@ export async function castVote(
       }),
     );
   }
+  // Voter Code redemption: placed after Poll-Type/Comment facts and before
+  // Session/IP claims so a concurrent used-code collision has deterministic
+  // precedence inside the D1 batch.
+  if (voterCodeRedemption !== null) {
+    voterCodeRedemption.voteId = voteId;
+    voterCodeRedemption.redeemedAtMs = nowMs;
+    contributions.push(voterCodeRedemption as unknown as VotePersistenceContribution);
+  }
+
   // Stable claim order: Session first, IP second (dual-collision precedence).
   if (sessionDigest !== null) {
     contributions.push({

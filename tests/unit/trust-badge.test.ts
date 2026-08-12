@@ -32,8 +32,8 @@ describe("trust badge copy catalog (Story 2.4, EXPERIENCE.md § Trust Surfaces)"
     });
   });
 
-  it("declares exactly the three enforced toggles (FR-17/FR-19 deferred to Epic 8)", () => {
-    expect(ENFORCED_TOGGLES).toEqual(["sessionChecks", "ipChecks", "captcha"]);
+  it("declares exactly the four enforced toggles (FR-19 VPN deferred to Epic 8.3)", () => {
+    expect(ENFORCED_TOGGLES).toEqual(["sessionChecks", "ipChecks", "voterCodes", "captcha"]);
   });
 });
 
@@ -44,7 +44,7 @@ describe("trustBadgeItems", () => {
 
   it("returns an empty array when only unenforced Toggles are on", () => {
     expect(
-      trustBadgeItems({ ...ALL_OFF, voterCodes: true, vpnBlocking: true }),
+      trustBadgeItems({ ...ALL_OFF, vpnBlocking: true }),
     ).toEqual([]);
   });
 
@@ -61,6 +61,7 @@ describe("trustBadgeItems", () => {
     expect(trustBadgeItems(ALL_ON)).toEqual([
       "ONE VOTE PER BROWSER",
       "ONE VOTE PER NETWORK",
+      "INVITE CODE REQUIRED",
       "HUMAN CHECK ON SUBMIT",
     ]);
   });

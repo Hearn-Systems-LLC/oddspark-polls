@@ -114,7 +114,7 @@ describe("trust badge component contract (Story 2.4, UX-DR7)", () => {
 
   it("sits immediately before the vote-action block on the writable ballot branch", () => {
     expect(voteSurfaceSource).toMatch(
-      /<TrustBadge toggles=\{pollToggles\} \/>\s*<div class="vote-action">/,
+      /\{!meetingRevisionRecognized && <TrustBadge toggles=\{pollToggles\} \/>}\s*<div class="vote-action">/,
     );
   });
 });

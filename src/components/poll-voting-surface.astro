@@ -247,7 +247,7 @@ const tallyOwnsBadge = readOnly;
             hideDisplayName={meeting}
           />
         )}
-        <TrustBadge toggles={pollToggles} />
+        {!meetingRevisionRecognized && <TrustBadge toggles={pollToggles} />}
         <div class="vote-action">
           {!multiSelect && !rankedChoice && !meeting && <p class="vote-hint" data-vote-hint hidden>SELECT AN OPTION TO UNLOCK VOTE</p>}
           {rankedChoice && rankedCount === 0 && <p class="vote-hint" data-vote-hint>RANK AN OPTION TO UNLOCK VOTE</p>}

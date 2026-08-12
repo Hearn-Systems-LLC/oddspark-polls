@@ -99,7 +99,16 @@ if (Astro.request.method === "POST") {
 
     if (!result.ok) {
       formError = result.error.message;
-      Astro.response.status = 422;
+      const errorCode = result.error.code;
+      if (errorCode === "voter_code_batch_conflict") {
+        Astro.response.status = 409;
+      } else if (errorCode === "voter_code_generation_exhausted") {
+        Astro.response.status = 503;
+      } else if (errorCode === "voter_code_generation_failed") {
+        Astro.response.status = 500;
+      } else {
+        Astro.response.status = 422;
+      }
     } else {
       panelOpen = true;
       return new Response(null, {

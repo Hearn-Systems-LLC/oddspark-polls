@@ -22,11 +22,11 @@ export function createVoterCodesD1Adapter(db: D1Database): VoterCodesD1Adapter {
       return {
         async findPollOwner(pollId: PollId) {
           const row = await db.prepare(
-            "SELECT owner_id, voter_codes_enabled, closed_at_ms, deadline_ms FROM poll WHERE id = ?1",
-          ).bind(pollId).first<{ owner_id: string; voter_codes_enabled: number; closed_at_ms: number | null; deadline_ms: number | null }>();
+            "SELECT owner_user_id, voter_codes_enabled, closed_at_ms, deadline_ms FROM poll WHERE id = ?1",
+          ).bind(pollId).first<{ owner_user_id: string; voter_codes_enabled: number; closed_at_ms: number | null; deadline_ms: number | null }>();
           if (!row) return null;
           return {
-            ownerId: row.owner_id,
+            ownerId: row.owner_user_id,
             voterCodesEnabled: row.voter_codes_enabled === 1,
             closedAtMs: row.closed_at_ms,
             deadlineMs: row.deadline_ms,
@@ -100,9 +100,9 @@ export function createVoterCodesD1Adapter(db: D1Database): VoterCodesD1Adapter {
 
     async getInventory(pollId: PollId, ownerId: string) {
       const pollRow = await db.prepare(
-        "SELECT owner_id FROM poll WHERE id = ?1",
-      ).bind(pollId).first<{ owner_id: string }>();
-      if (!pollRow || pollRow.owner_id !== ownerId) return null;
+        "SELECT owner_user_id FROM poll WHERE id = ?1",
+      ).bind(pollId).first<{ owner_user_id: string }>();
+      if (!pollRow || pollRow.owner_user_id !== ownerId) return null;
 
       const codes = await db.prepare(
         `SELECT vc.id, vc.code, CASE WHEN vcr.code_id IS NOT NULL THEN 1 ELSE 0 END AS redeemed

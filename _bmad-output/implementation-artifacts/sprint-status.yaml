@@ -109,7 +109,7 @@ development_status:
 
   epic-8: in-progress
   8-1-generate-manage-voter-codes: done
-  8-2-vote-with-a-voter-code: ready-for-dev
+  8-2-vote-with-a-voter-code: review
   8-3-vpn-blocking: backlog
   epic-8-retrospective: optional
 

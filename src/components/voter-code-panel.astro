@@ -22,7 +22,7 @@ const {
 
 const titleId = `${id}-title`;
 const descriptionId = `${id}-description`;
-const codeText = codes.map((c) => c.code).join("\n");
+const panelDescriptionId = `${id}-panel-description`;
 ---
 
 <Overlay
@@ -35,11 +35,11 @@ const codeText = codes.map((c) => c.code).join("\n");
   class="voter-code-overlay"
 >
   <div slot="description" class="voter-code-panel-content">
-    <p class="label-caps-lg redeemed-count" id={descriptionId}>
+    <p class="label-caps-lg redeemed-count" id={panelDescriptionId}>
       {redeemed} OF {total} REDEEMED
     </p>
 
-    <div class="code-list" role="list">
+    <div class="code-list" role="list" id={`${id}-voter-code-list`}>
       {codes.map((entry) => (
         <div
           class:list={["code-entry", { "is-redeemed": entry.redeemed }]}
@@ -57,7 +57,7 @@ const codeText = codes.map((c) => c.code).join("\n");
       type="button"
       class="btn btn-primary"
       id={`${id}-copy-btn`}
-      data-copy-text={codeText}
+      data-copy-source={`${id}-voter-code-list`}
       data-feedback-target={`${id}-copy-feedback`}
       data-count={codes.length}
     >

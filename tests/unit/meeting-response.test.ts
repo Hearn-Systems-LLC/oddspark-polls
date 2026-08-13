@@ -10,7 +10,7 @@ const slots = [{ id: "slot-a", position: 0 }, { id: "slot-b", position: 1 }];
 describe("Meeting response policy", () => {
   const poll = {
     id: "poll" as never, pollType: "meeting" as const, options: [], slots,
-    sessionChecksEnabled: true, ipChecksEnabled: false, captchaEnabled: true,
+    sessionChecksEnabled: true, ipChecksEnabled: false, captchaEnabled: true, voterCodesEnabled: false,
     commentsEnabled: false, multiSelectEnabled: false, minSelections: null,
     maxSelections: null, deadlineMs: null, closedAtMs: null,
   };

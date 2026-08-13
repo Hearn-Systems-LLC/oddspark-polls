@@ -196,6 +196,7 @@ const integratedCommand = {
   browserToken: "browser-token",
   ipDigest: null as VoterClaimDigest | null,
   humanChallenge: "not_attempted" as const,
+  voterCode: "",
 };
 
 async function closePoll(): Promise<void> {
@@ -352,6 +353,7 @@ describe("createVotePersistence", () => {
       sessionChecksEnabled: true,
       ipChecksEnabled: false,
       captchaEnabled: false,
+      voterCodesEnabled: false,
       commentsEnabled: false,
       multiSelectEnabled: false,
       minSelections: null,

@@ -56,6 +56,7 @@ function poll(
     sessionChecksEnabled: true,
     ipChecksEnabled: false,
     captchaEnabled: false,
+    voterCodesEnabled: false,
     commentsEnabled: false,
     multiSelectEnabled: false,
     minSelections: null,
@@ -121,6 +122,7 @@ const input = {
   browserToken: "browser-token",
   ipDigest: null as VoterClaimDigest | null,
   humanChallenge: "not_attempted" as const,
+  voterCode: "",
 };
 
 describe("normalizeVotePayload", () => {

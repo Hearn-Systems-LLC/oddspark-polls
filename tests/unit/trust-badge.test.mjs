@@ -114,7 +114,7 @@ describe("trust badge component contract (Story 2.4, UX-DR7)", () => {
 
   it("sits immediately before the vote-action block on the writable ballot branch", () => {
     expect(voteSurfaceSource).toMatch(
-      /<TrustBadge toggles=\{pollToggles\} \/>\s*<div class="vote-action">/,
+      /\{!meetingRevisionRecognized && <TrustBadge toggles=\{pollToggles\} \/>}\s*<div class="vote-action">/,
     );
   });
 });
@@ -140,6 +140,12 @@ describe("trust badge Tally composition contract (Story 2.4, AC #4)", () => {
       "toggles={tallyOwnsBadge ? pollToggles : undefined}",
     );
     expect(resultsPageSource).toContain("toggles={view.securityToggles}");
+  });
+
+  it("assigns the invite-code badge to an authorized Meeting revision Tally", () => {
+    expect(voteSurfaceSource).toContain(
+      "const tallyOwnsBadge = readOnly || meetingRevisionRecognized;",
+    );
   });
 
   it("places the post-vote badge with the bars in the desktop grid", () => {

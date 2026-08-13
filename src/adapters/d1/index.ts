@@ -58,6 +58,7 @@ import {
   PollDefinitionChangedError,
   PollGoneError,
   SubmissionReplayError,
+  VoterCodeAlreadyUsedError,
   type StoredVoteOutcome,
   type RankedPreferenceContribution,
   type MeetingAvailabilityContribution,
@@ -70,6 +71,7 @@ import {
   type VoterClaimCheckKind,
   type VoterClaimContribution,
   type VoterClaimDigest,
+  type VoterCodeRedemptionContribution,
   type VotingPollSnapshot,
 } from "../../modules/voting/index";
 import type { RepresentationVersionIncrement } from "../../shared/application/index";
@@ -83,6 +85,7 @@ import type {
   PollType,
   ResultVisibility,
   UserId,
+  VoterCodeId,
 } from "../../shared/domain/index";
 import {
   DISCOVERY_STATES,
@@ -1345,7 +1348,7 @@ export function createVotePersistence(db: D1Database) {
         rawBatch.vote.payloadHash.length === 0 ||
         !isVotePersistenceTimestamp(rawBatch.vote.createdAtMs) ||
         !Array.isArray(rawBatch.contributions) ||
-        rawBatch.contributions.length > POLL_CAPS.maxOptions + 4 ||
+        rawBatch.contributions.length > POLL_CAPS.maxOptions + 5 ||
         !isExactRecord(rawBatch.representationVersion, [
           "kind",
           "pollId",
@@ -1374,6 +1377,7 @@ export function createVotePersistence(db: D1Database) {
       const claimKinds = new Set<VoterClaimCheckKind>();
       let commentCount = 0;
       let meetingResponseCount = 0;
+      let voterCodeRedemptionCount = 0;
       const meetingSlotIds = new Set<string>();
       const contributions: Array<
         | VoteSelectionContribution
@@ -1382,6 +1386,7 @@ export function createVotePersistence(db: D1Database) {
         | VoteCommentContribution
         | MeetingAvailabilityContribution
         | MeetingResponseContribution
+        | VoterCodeRedemptionContribution
       > = [];
 
       for (let index = 0; index < rawBatch.contributions.length; index += 1) {
@@ -1529,6 +1534,24 @@ export function createVotePersistence(db: D1Database) {
           continue;
         }
         if (
+          isExactRecord(contribution, ["kind", "codeId", "voteId", "redeemedAtMs"]) &&
+          contribution.kind === "voter_code_redemption"
+        ) {
+          if (
+            contribution.voteId !== voteId ||
+            typeof contribution.codeId !== "string" ||
+            contribution.codeId.length === 0 ||
+            !isVotePersistenceTimestamp(contribution.redeemedAtMs) ||
+            contribution.redeemedAtMs !== createdAtMs ||
+            voterCodeRedemptionCount !== 0
+          ) {
+            throw new Error("invalid voter code redemption contribution");
+          }
+          voterCodeRedemptionCount += 1;
+          contributions.push(contribution as unknown as VoterCodeRedemptionContribution);
+          continue;
+        }
+        if (
           isExactRecord(contribution, ["kind", "payload"]) &&
           typeof contribution.kind === "string" &&
           contribution.kind.startsWith("extension:")
@@ -1627,6 +1650,13 @@ export function createVotePersistence(db: D1Database) {
           statements.push(db.prepare("INSERT INTO meeting_availability (vote_id, meeting_slot_id, availability) VALUES (?1, ?2, ?3)").bind(contribution.voteId, contribution.meetingSlotId, contribution.availability));
           continue;
         }
+        if (contribution.kind === "voter_code_redemption") {
+          statements.push(
+            db.prepare("INSERT INTO voter_code_redemptions (code_id, vote_id, redeemed_at_ms) VALUES (?1, ?2, ?3)")
+              .bind(contribution.codeId, contribution.voteId, contribution.redeemedAtMs),
+          );
+          continue;
+        }
         statements.push(
           db
             .prepare(
@@ -1715,6 +1745,12 @@ export function createVotePersistence(db: D1Database) {
         if (error instanceof Error && /meeting_(availability_slot|response_vote)_invalid/.test(error.message)) throw new PollDefinitionChangedError();
         if (
           error instanceof Error &&
+          /UNIQUE constraint failed: voter_code_redemptions\.code_id/.test(error.message)
+        ) {
+          throw new VoterCodeAlreadyUsedError();
+        }
+        if (
+          error instanceof Error &&
           /FOREIGN KEY constraint failed/i.test(error.message)
         ) {
           // Distinguish deleted Poll vs edited options (Story 1.12). Re-read
@@ -1725,6 +1761,23 @@ export function createVotePersistence(db: D1Database) {
             .first<{ found: number }>();
           if (!pollStillExists) {
             throw new PollGoneError();
+          }
+          // Adjudicate the voter-code candidate before the generic option-FK
+          // classification: only claim a code-related failure when the batch
+          // carried a redemption AND that resolved code row no longer exists.
+          // A living Poll whose resolved code disappeared is a generic safe
+          // failure; otherwise fall through to option reachability.
+          const redemption = contributions.find(
+            (c): c is VoterCodeRedemptionContribution => c.kind === "voter_code_redemption",
+          );
+          if (redemption) {
+            const codeStillExists = await db
+              .prepare("SELECT 1 AS found FROM voter_code WHERE id = ?1")
+              .bind(redemption.codeId)
+              .first<{ found: number }>();
+            if (!codeStillExists) {
+              throw new Error("voter code redemption foreign key failure");
+            }
           }
           const selectedOptionIds = contributions.flatMap((contribution) =>
             contribution.kind === "vote_selection" ||
@@ -1747,7 +1800,11 @@ export function createVotePersistence(db: D1Database) {
               throw new PollDefinitionChangedError();
             }
           }
-          // Unrelated malformed-state FK — keep generic for the command layer.
+          // Unrelated malformed-state FK. A code-gated batch must never
+          // become a false Poll-deleted result — stay a generic safe failure.
+          if (redemption) {
+            throw new Error("voter code redemption foreign key failure");
+          }
           throw new PollGoneError();
         }
         throw error;
@@ -1775,7 +1832,7 @@ export function createVotePersistence(db: D1Database) {
     async findPoll(pollId: PollId): Promise<VotingPollSnapshot | null> {
       const row = await db
         .prepare(
-          "SELECT id, poll_type, session_checks_enabled, ip_checks_enabled, captcha_enabled, comments_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
+          "SELECT id, poll_type, session_checks_enabled, ip_checks_enabled, captcha_enabled, voter_codes_enabled, comments_enabled, multi_select_enabled, min_selections, max_selections, deadline_ms, closed_at_ms FROM poll WHERE id = ?1",
         )
         .bind(pollId)
         .first<{
@@ -1784,6 +1841,7 @@ export function createVotePersistence(db: D1Database) {
           session_checks_enabled: number;
           ip_checks_enabled: number;
           captcha_enabled: number;
+          voter_codes_enabled: number;
           comments_enabled: number;
           multi_select_enabled: number;
           min_selections: number | null;
@@ -1801,6 +1859,7 @@ export function createVotePersistence(db: D1Database) {
         sessionChecksEnabled: row.session_checks_enabled === 1,
         ipChecksEnabled: row.ip_checks_enabled === 1,
         captchaEnabled: row.captcha_enabled === 1,
+        voterCodesEnabled: row.voter_codes_enabled === 1,
         commentsEnabled: row.comments_enabled === 1,
         multiSelectEnabled: row.multi_select_enabled === 1,
         minSelections: row.min_selections,
@@ -1855,6 +1914,26 @@ export function createVotePersistence(db: D1Database) {
         .bind(pollId, checkKind, validated)
         .first<{ found: number }>();
       return row?.found === 1;
+    },
+
+    async lookupVoterCode(
+      pollId: PollId,
+      canonicalCode: string,
+    ): Promise<{ codeId: VoterCodeId; redeemed: boolean } | null> {
+      const row = await db
+        .prepare(
+          `SELECT vc.id AS code_id, CASE WHEN vcr.code_id IS NOT NULL THEN 1 ELSE 0 END AS redeemed
+           FROM voter_code vc
+           LEFT JOIN voter_code_redemptions vcr ON vcr.code_id = vc.id
+           WHERE vc.poll_id = ?1 AND vc.code = ?2`,
+        )
+        .bind(pollId, canonicalCode)
+        .first<{ code_id: string; redeemed: number }>();
+      if (!row) return null;
+      return {
+        codeId: row.code_id as VoterCodeId,
+        redeemed: row.redeemed === 1,
+      };
     },
 
     // Read-only states mark the voter's own cast selection: resolve the

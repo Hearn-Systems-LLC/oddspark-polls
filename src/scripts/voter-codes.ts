@@ -38,12 +38,17 @@ function enhanceGenerationForm(): void {
 }
 
 function enhanceCopyButtons(): void {
-  document.querySelectorAll<HTMLButtonElement>("[data-copy-text]").forEach((btn) => {
+  document.querySelectorAll<HTMLButtonElement>("[data-copy-source]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const text = btn.getAttribute("data-copy-text") ?? "";
+      const sourceId = btn.getAttribute("data-copy-source") ?? "";
       const feedbackTarget = btn.getAttribute("data-feedback-target");
       const count = btn.getAttribute("data-count") ?? "0";
       const feedbackEl = feedbackTarget ? document.getElementById(feedbackTarget) : null;
+      const sourceEl = document.getElementById(sourceId);
+      if (!sourceEl) return;
+
+      const codeNodes = sourceEl.querySelectorAll<HTMLElement>(".code-text");
+      const text = Array.from(codeNodes).map((node) => node.textContent?.trim() ?? "").filter(Boolean).join("\n");
 
       try {
         await navigator.clipboard.writeText(text);

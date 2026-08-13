@@ -22,6 +22,68 @@ export const VOTER_CODE_COPY = {
   generationFailed: "Codes weren't generated. Try again.",
 } as const;
 
+export const VOTER_CODE_ADMISSION_COPY = {
+  missing: "This Poll needs a Voter Code. The Creator hands them out; we can't issue one.",
+  invalid: "That code doesn't work on this Poll. Check for a typo \u2014 codes are short and unforgiving.",
+  used: "That code has already been used. Each one works exactly once. Either someone got there first, or you did.",
+} as const;
+
+export type VoterCodeAdmissionOutcome =
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "canonical"; value: string };
+
+export type VoterCodeLookupResult =
+  | { found: false }
+  | { found: true; codeId: VoterCodeId; redeemed: boolean };
+
+export type VoterCodeAdmissionError =
+  | { code: "voter_code_missing"; message: string }
+  | { code: "voter_code_invalid"; message: string }
+  | { code: "voter_code_used"; message: string };
+
+// Derived from the canonical constants so the alphabet lives in one place.
+const VALID_CODE_REGEX = new RegExp(
+  `^[${VOTER_CODE_ALPHABET}]{${VOTER_CODE_LENGTH}}$`,
+);
+
+export function normalizeVoterCodeInput(raw: string): VoterCodeAdmissionOutcome {
+  const trimmed = raw.trim().toUpperCase();
+  if (trimmed.length === 0) {
+    return { kind: "missing" };
+  }
+  if (!VALID_CODE_REGEX.test(trimmed)) {
+    return { kind: "invalid" };
+  }
+  return { kind: "canonical", value: trimmed };
+}
+
+export function resolveVoterCodeAdmission(
+  outcome: VoterCodeAdmissionOutcome,
+  lookup: VoterCodeLookupResult,
+): VoterCodeAdmissionError | { codeId: VoterCodeId } {
+  if (outcome.kind === "missing") {
+    return { code: "voter_code_missing", message: VOTER_CODE_ADMISSION_COPY.missing };
+  }
+  if (outcome.kind === "invalid") {
+    return { code: "voter_code_invalid", message: VOTER_CODE_ADMISSION_COPY.invalid };
+  }
+  if (!lookup.found) {
+    return { code: "voter_code_invalid", message: VOTER_CODE_ADMISSION_COPY.invalid };
+  }
+  if (lookup.redeemed) {
+    return { code: "voter_code_used", message: VOTER_CODE_ADMISSION_COPY.used };
+  }
+  return { codeId: lookup.codeId };
+}
+
+export type VoterCodeRedemptionContribution = {
+  kind: "voter_code_redemption";
+  codeId: VoterCodeId;
+  voteId: string;
+  redeemedAtMs: number;
+};
+
 export type VoterCodeProjection = {
   id: VoterCodeId;
   code: string;
@@ -158,6 +220,18 @@ export async function generateVoterCodes(
         return failure("voter_code_limit_reached", VOTER_CODE_COPY.limitReached);
       }
       if (message.includes("UNIQUE constraint failed") || message.includes("voter_code_poll_code_idx")) {
+        // A concurrent exact-batch race lost at the batch-position unique index.
+        // Re-adjudicate: if the winning batch matches our (pollId, batchId),
+        // return its inventory. Otherwise treat as a random-code collision and retry.
+        const winningBatch = await deps.findExistingBatch(input.pollId, input.batchId);
+        if (winningBatch) {
+          if (winningBatch.count !== input.count) {
+            return failure("voter_code_batch_conflict", VOTER_CODE_COPY.batchConflict);
+          }
+          const inventory = await buildInventory(deps, input.pollId);
+          if (!inventory.ok) return inventory;
+          return { ok: true, value: inventory.value };
+        }
         continue;
       }
       return failure("voter_code_generation_failed", VOTER_CODE_COPY.generationFailed);

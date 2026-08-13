@@ -19,14 +19,15 @@ export const TRUST_BADGE_COPY: Record<SecurityToggle, string> = {
   vpnBlocking: "NO VPN OR DATACENTER CONNECTIONS",
 };
 
-// Toggles that actually protect the count today. FR-17 (Voter Codes) and
-// FR-19 (VPN Blocking) persist as columns but enforce nothing — Story 2.1
-// decision D1; Epic 8 stories 8.2/8.3 add `voterCodes`/`vpnBlocking` here when
-// enforcement lands. The badge never claims more than is true (§ Trust
-// Surfaces), so it renders the enforced subset only.
+// Toggles that actually protect the count today. FR-19 (VPN Blocking)
+// persists as a column but enforces nothing — Story 2.1 decision D1;
+// Epic 8 story 8.3 adds `vpnBlocking` here when enforcement lands.
+// The badge never claims more than is true (§ Trust Surfaces), so it
+// renders the enforced subset only.
 export const ENFORCED_TOGGLES: readonly SecurityToggle[] = [
   "sessionChecks",
   "ipChecks",
+  "voterCodes",
   "captcha",
 ];
 

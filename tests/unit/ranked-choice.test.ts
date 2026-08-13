@@ -65,6 +65,7 @@ function rankedPoll(): VotingPollSnapshot {
     sessionChecksEnabled: false,
     ipChecksEnabled: false,
     captchaEnabled: false,
+    voterCodesEnabled: false,
     commentsEnabled: false,
     multiSelectEnabled: false,
     minSelections: null,
@@ -84,6 +85,7 @@ function rankedInput(preferences: { optionId: string; rank: number }[]) {
     browserToken: null,
     ipDigest: null as VoterClaimDigest | null,
     humanChallenge: "not_attempted" as const,
+    voterCode: "",
   };
 }
 

@@ -93,6 +93,28 @@ if (form) {
   const meetingDisplayNameInput = form.querySelector<HTMLInputElement>(
     "#meeting-display-name",
   );
+  const voterCodeInput = form.querySelector<HTMLInputElement>(
+    "input[name='voter_code']",
+  );
+  if (voterCodeInput) {
+    voterCodeInput.addEventListener("input", () => {
+      const start = voterCodeInput.selectionStart;
+      const end = voterCodeInput.selectionEnd;
+      const raw = voterCodeInput.value;
+      const trimmed = raw.trim().toUpperCase();
+      if (trimmed !== raw) {
+        // Shift the caret left by however many leading characters trim removed.
+        const leadingRemoved = raw.length - raw.replace(/^\s+/, "").length;
+        voterCodeInput.value = trimmed;
+        if (start !== null && end !== null) {
+          voterCodeInput.setSelectionRange(
+            Math.min(Math.max(start - leadingRemoved, 0), trimmed.length),
+            Math.min(Math.max(end - leadingRemoved, 0), trimmed.length),
+          );
+        }
+      }
+    });
+  }
   availabilityInputs.forEach((input) => input.addEventListener("keydown", (event) => {
     if (form.dataset.voteInflight === "true") event.preventDefault();
   }));
@@ -162,6 +184,7 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = false;
     if (commentDisplayName) commentDisplayName.readOnly = false;
+    if (voterCodeInput) voterCodeInput.readOnly = false;
     if (hint) {
       hint.hidden = locked || hasSelection;
     }
@@ -240,6 +263,7 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = false;
     if (commentDisplayName) commentDisplayName.readOnly = false;
+    if (voterCodeInput) voterCodeInput.readOnly = false;
     if (meetingDisplayNameInput) meetingDisplayNameInput.readOnly = locked;
     availabilityInputs.forEach((input) => {
       input.disabled = locked;
@@ -262,6 +286,7 @@ if (form) {
     }
     if (commentBody) commentBody.readOnly = true;
     if (commentDisplayName) commentDisplayName.readOnly = true;
+    if (voterCodeInput) voterCodeInput.readOnly = true;
     if (meetingDisplayNameInput) meetingDisplayNameInput.readOnly = true;
     // Keep successful controls enabled so native form serialization includes
     // the checked Meeting row. The in-flight data state blocks pointer and

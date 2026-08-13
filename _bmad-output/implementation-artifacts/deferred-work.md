@@ -606,3 +606,8 @@ resolution: Story 3.7 (Landing Footer) consolidated Create, Discover, and the re
 
 - Optional `lookupVoterCode` dep + indistinguishable code-gated 422s — `lookupVoterCode` is optional and fail-closes to generic `vote_failed` 500 if wiring forgotten; all three code errors map to 422 with no distinct telemetry `result`/`reasonCode` for `missing` vs `invalid` vs `used` — observability gap for brute-force vs race loss. Location: `src/modules/voting/index.ts:356`, `src/lib/poll-delivery.ts:722`. Deferred as pre-existing pattern from Session/IP ports; not AC-blocking.
 - Low cosmetic: duplicate trigger maintenance (`BEFORE INSERT` + `BEFORE UPDATE OF code` duplicating predicate, missing `poll_id` move guard), double `role="alert"` + focused outcome announcing error twice, and unbounded client `value` relying solely on server `boundedInvalidEcho` (`autocomplete="off"` mitigates). Location: `db/migrations/0019_voter_code_integrity.sql:7`, `src/components/input-code.astro:14`, `src/components/poll-voting-surface.astro:220`. Deferred as polish.
+
+## Deferred from: code review of 8-2-vote-with-a-voter-code (2026-08-13)
+
+- 0019/0020 voter-code shape triggers are `BEFORE UPDATE OF code` only — an `UPDATE voter_code SET poll_id = ...` relocation is unguarded and would make a code redeemable on another poll, but no application path updates `poll_id`; defense-in-depth only. Location: `db/migrations/0020_repair_voter_code_shape_guards.sql:19`.
+- CAPTCHA/rate-limit browser composition unexercised in the voter-code E2E spec — admission precedence (limiter and Turnstile before code errors) is proven at unit/integration level; browser composition requires Turnstile test keys. Location: `tests/e2e/voter-code-voting.spec.mjs`.

@@ -35,16 +35,24 @@ describe("normalizeVoterCodeInput", () => {
   it("returns invalid for forbidden characters (0, 1, I, O)", () => {
     expect(normalizeVoterCodeInput("0BCDEFGH")).toEqual({ kind: "invalid" });
     expect(normalizeVoterCodeInput("A1CDEFGH")).toEqual({ kind: "invalid" });
-    expect(normalizeVoterCodeInput("ABCIDEFGH")).toEqual({ kind: "invalid" });
+    expect(normalizeVoterCodeInput("ABCIDEFG")).toEqual({ kind: "invalid" });
     expect(normalizeVoterCodeInput("ABCDEFGO")).toEqual({ kind: "invalid" });
   });
 
-  it("returns invalid for lowercase letters outside alphabet", () => {
-    // After uppercase, these become valid or invalid based on the alphabet
+  it("uppercases lowercase input, then applies the alphabet", () => {
     expect(normalizeVoterCodeInput("abcdefgh")).toEqual({
       kind: "canonical",
       value: "ABCDEFGH",
     });
+    expect(normalizeVoterCodeInput("abcidefg")).toEqual({ kind: "invalid" });
+  });
+
+  it("pins the canonical alphabet and length constants", () => {
+    expect(VOTER_CODE_LENGTH).toBe(8);
+    expect(VOTER_CODE_ALPHABET).toHaveLength(32);
+    for (const ambiguous of "01IO") {
+      expect(VOTER_CODE_ALPHABET).not.toContain(ambiguous);
+    }
   });
 
   it("never includes submitted text in error outcomes", () => {

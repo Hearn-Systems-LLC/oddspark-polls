@@ -1753,23 +1753,6 @@ export function createVotePersistence(db: D1Database) {
           error instanceof Error &&
           /FOREIGN KEY constraint failed/i.test(error.message)
         ) {
-          // Adjudicate voter code FK before generic option-FK classification.
-          // A living Poll whose resolved code disappeared must become invalid
-          // or a generic safe failure, never a false Poll-deleted result.
-          const hasRedemption = contributions.some(
-            (c): c is VoterCodeRedemptionContribution => c.kind === "voter_code_redemption",
-          );
-          if (hasRedemption) {
-            const pollStillExistsForCode = await db
-              .prepare("SELECT 1 AS found FROM poll WHERE id = ?1")
-              .bind(pollId)
-              .first<{ found: number }>();
-            if (!pollStillExistsForCode) {
-              throw new PollGoneError();
-            }
-            // Code disappeared or cross-Poll — generic safe failure.
-            throw new Error("voter code redemption foreign key failure");
-          }
           // Distinguish deleted Poll vs edited options (Story 1.12). Re-read
           // the Poll and selected option reachability before classifying.
           const pollStillExists = await db
@@ -1778,6 +1761,23 @@ export function createVotePersistence(db: D1Database) {
             .first<{ found: number }>();
           if (!pollStillExists) {
             throw new PollGoneError();
+          }
+          // Adjudicate the voter-code candidate before the generic option-FK
+          // classification: only claim a code-related failure when the batch
+          // carried a redemption AND that resolved code row no longer exists.
+          // A living Poll whose resolved code disappeared is a generic safe
+          // failure; otherwise fall through to option reachability.
+          const redemption = contributions.find(
+            (c): c is VoterCodeRedemptionContribution => c.kind === "voter_code_redemption",
+          );
+          if (redemption) {
+            const codeStillExists = await db
+              .prepare("SELECT 1 AS found FROM voter_code WHERE id = ?1")
+              .bind(redemption.codeId)
+              .first<{ found: number }>();
+            if (!codeStillExists) {
+              throw new Error("voter code redemption foreign key failure");
+            }
           }
           const selectedOptionIds = contributions.flatMap((contribution) =>
             contribution.kind === "vote_selection" ||
@@ -1800,7 +1800,11 @@ export function createVotePersistence(db: D1Database) {
               throw new PollDefinitionChangedError();
             }
           }
-          // Unrelated malformed-state FK — keep generic for the command layer.
+          // Unrelated malformed-state FK. A code-gated batch must never
+          // become a false Poll-deleted result — stay a generic safe failure.
+          if (redemption) {
+            throw new Error("voter code redemption foreign key failure");
+          }
           throw new PollGoneError();
         }
         throw error;

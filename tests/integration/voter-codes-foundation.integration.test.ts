@@ -227,15 +227,6 @@ describe("generation concurrency and replay", () => {
   });
 });
 
-describe("bearer-secret privacy", () => {
-  it("panel does not serialize codes in data-* attributes", async () => {
-    // Verified structurally: voter-code-panel.astro uses data-copy-source
-    // pointing to the visible list element ID, not data-copy-text with raw codes.
-    // The clipboard enhancer reads .code-text textContent at activation time.
-    expect(true).toBe(true);
-  });
-});
-
 describe("redeemed projection", () => {
   it("shows redeemed count correctly after redemption insert", async () => {
     const ownerId = await seedOwner();

@@ -18,6 +18,21 @@ describe("voter-code correction surface", () => {
   });
 
   it("canonicalizes a submitted code before bounding its retry echo", () => {
-    expect(delivery).toContain('singletonText(formData, "voter_code").trim().toUpperCase()');
+    expect(delivery).toMatch(
+      /singletonText\(formData, "voter_code"\)\s*\.trim\(\)\s*\.toUpperCase\(\)/,
+    );
+  });
+
+  it("panel never serializes raw codes into data-* attributes", () => {
+    // Bearer-secret privacy: the clipboard enhancer derives its payload from
+    // visible code text nodes; no data-copy-text or code interpolation may
+    // appear inside a data-* attribute.
+    expect(panel).not.toContain("data-copy-text");
+    const dataAttributeValues = [...panel.matchAll(/data-[a-z-]+=\{([^}]*)\}/g)].map(
+      (match) => match[1],
+    );
+    for (const value of dataAttributeValues) {
+      expect(value).not.toMatch(/\bcode\b(?!-)/);
+    }
   });
 });

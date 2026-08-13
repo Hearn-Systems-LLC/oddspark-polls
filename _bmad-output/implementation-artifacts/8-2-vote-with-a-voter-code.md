@@ -4,7 +4,7 @@ baseline_commit: ea8fa1bafe971e849e6627043d0103ada18a116c
 
 # Story 8.2: Vote With a Voter Code
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 <!-- Ultimate context engine analysis completed 2026-08-12 — implementation guide reconciled against the complete Epic 8, PRD, architecture, UX, current main code, Story 8.1 dependency state, current Cloudflare D1 documentation, tests, and recent Git history. -->
@@ -244,10 +244,10 @@ Triage: 0 decision-needed, 8 patch, 2 defer, 2 dismissed as noise. Layers: Blind
 - [x] [Review][Patch] D1 integrity trigger LIKE is literal — alphabet guard is a no-op [db/migrations/0019_voter_code_integrity.sql:13]
 - [x] [Review][Patch] Voter Code field hidden on 422 — retry cannot show preserved value or inline caption [src/components/poll-voting-surface.astro:220]
 - [x] [Review][Patch] Meeting revision tally never owns trust badge — INVITE CODE REQUIRED disappears on authorized revision [src/components/poll-voting-surface.astro:101]
-- [ ] [Review][Patch] Voter-code inventory overlay aria-describedby dangles — no element carries the referenced ID [src/components/voter-code-panel.astro:24]
+- [x] [Review][Patch] Voter-code inventory overlay aria-describedby dangles — no element carries the referenced ID [src/components/voter-code-panel.astro:24] — resolved: overlay.astro body carries `descriptionId`; panel paragraph uses a distinct `${id}-panel-description` (verified 2026-08-13)
 - [x] [Review][Patch] Voter-code inventory COPY ALL CODES control targets a nonexistent list — `data-copy-source="voter-code-list"` does not match the generated `${id}-voter-code-list` ID, so the clipboard handler exits without copying [src/components/voter-code-panel.astro:42]
-- [ ] [Review][Patch] Redemption FK/unique adjudication incomplete — vote_id UNIQUE and trigger not classified, redemption FK misclassifies non-code FK [src/adapters/d1/index.ts:1746]
-- [ ] [Review][Patch] Vote-form progressive enhancement — cursor jump on trim and readOnly coverage gap on restore paths [src/scripts/vote-form.ts:98]
+- [x] [Review][Patch] Redemption FK/unique adjudication incomplete — vote_id UNIQUE and trigger not classified, redemption FK misclassifies non-code FK [src/adapters/d1/index.ts:1746] — resolved 2026-08-13: FK handler now confirms the code row before claiming a code failure and falls through to option-reachability; vote_id UNIQUE/cross-poll trigger routes assessed as spec-permitted generic safe failures
+- [x] [Review][Patch] Vote-form progressive enhancement — cursor jump on trim and readOnly coverage gap on restore paths [src/scripts/vote-form.ts:98] — resolved 2026-08-13: readOnly set/cleared on every restore path; caret offset now adjusts for stripped leading whitespace
 - [x] [Review][Patch] boundedInvalidEcho cap 16 — 34-char echo and truncates heavily padded valid paste [src/lib/poll-delivery.ts:474]
 - [x] [Review][Patch] Missing Playwright + browser proof — no voter-code-voting e2e spec or 375/1280 light/dark captures [tests/e2e/voter-code-voting.spec.mjs]
 - [x] [Review][Defer] Optional lookupVoterCode dep + indistinguishable code-gated 422s — wiring/telemetry observability gap [src/modules/voting/index.ts:356] — deferred, pre-existing pattern
@@ -258,4 +258,28 @@ Triage: 0 decision-needed, 8 patch, 2 defer, 2 dismissed as noise. Layers: Blind
 Triage: 0 decision-needed, 2 patch, 0 defer, 0 dismissed. Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor — all passed.
 
 - [x] [Review][Patch] Code-gated ballot retries lose VOTER CODE after a non-code rejection — an editable `selection_required`, CAPTCHA, rate-limit, or transient outcome suppresses the still-required field, preventing correction and resubmission [src/components/poll-voting-surface.astro:223]
-- [ ] [Review][Patch] Required voter-code browser coverage and proof remain incomplete — fresh/invalid/used 375-dark and 1280-light coverage was added, but Ranked/Image/Meeting/revision, no-JS, offline/in-flight/pageshow, and CAPTCHA/rate-limit cases are still absent [tests/e2e/voter-code-voting.spec.mjs:30]
+- [x] [Review][Patch] Required voter-code browser coverage and proof remain incomplete — fresh/invalid/used 375-dark and 1280-light coverage was added, but Ranked/Image/Meeting/revision, no-JS, offline/in-flight/pageshow, and CAPTCHA/rate-limit cases are still absent [tests/e2e/voter-code-voting.spec.mjs:30] — resolved 2026-08-13: owner generate→redeem, missing/invalid/used catalog copy, offline/in-flight/pageshow, Ranked/Image/Meeting visibility, no-JS ranked draft + final submission, Meeting revision no-second-redemption, and owner `1 OF N REDEEMED` all pass in-browser; CAPTCHA/rate-limit browser composition deferred (precedence proven at unit/integration level; browser composition needs Turnstile test keys)
+
+### Review Findings — code review 2026-08-13 (branch `story/8-2-vote-with-a-voter-code` vs `main` + uncommitted E2E spec, full spec mode)
+
+Triage: 1 decision-needed, 12 patch, 1 defer, 5 dismissed. Layers: Blind Hunter, Edge Case Hunter, Acceptance Auditor — all completed.
+
+- [x] [Review][Decision] Toggle-off race can render a code-required 422 with no code field — resolved by Justin 2026-08-13: downgrade to the generic retry outcome when the authoritative refresh reports the Toggle off; implemented in the refresh branch [src/lib/poll-delivery.ts:761]
+- [x] [Review][Patch] Redemption FK adjudication swallows option/poll classification for every code-gated vote — fixed 2026-08-13: handler re-reads Poll first, confirms the resolved code row before claiming a code failure, falls through to option-reachability, and a code-gated batch can no longer produce a false Poll-deleted result [src/adapters/d1/index.ts:1752]
+- [x] [Review][Patch] E2E spec working-tree edit deletes required coverage and its 422 assertion proves nothing — fixed 2026-08-13: spec rebuilt with owner generate→redeem, exact missing/invalid/used catalog-copy assertions with preserved ballot/value, offline/in-flight/pageshow restores, no-JS ranked draft + final submission with redemption-count proof, Meeting revision no-second-redemption, and owner `1 OF N REDEEMED`; hang root-caused (option-marker span intercepting `radio.check()` + held-probe abort race) and all 3 tests pass in 25s [tests/e2e/voter-code-voting.spec.mjs:55]
+- [x] [Review][Patch] Proof screenshots render a raw bearer code in the field — fixed 2026-08-13: `captureProof` blanks the rendered code field before every capture [tests/e2e/voter-code-voting.spec.mjs:26]
+- [x] [Review][Patch] Tautological bearer-secret test — fixed 2026-08-13: replaced with a real source assertion in tests/unit/voter-code-surface.test.mjs (no `data-copy-text`, no code interpolation in any `data-*` attribute) [tests/integration/voter-codes-foundation.integration.test.ts]
+- [x] [Review][Patch] Alphabet unit tests don't test what their names claim — fixed 2026-08-13: 8-char excluded-character cases, honest lowercase-canonicalization test, and a constants-pinning test consuming the previously unused imports [tests/unit/voter-code-admission.test.ts]
+- [x] [Review][Patch] `VALID_CODE_REGEX` hand-written instead of derived — fixed 2026-08-13: regex now built from `VOTER_CODE_ALPHABET`/`VOTER_CODE_LENGTH` [src/modules/voting/voter-codes.ts:45]
+- [x] [Review][Patch] Redemption contribution built with placeholders and double-casts — fixed 2026-08-13: only the admitted `codeId` is carried; the contribution is constructed once after `voteId`/`nowMs` exist with no casts [src/modules/voting/index.ts]
+- [x] [Review][Patch] Caret drifts right when the enhancer strips leading whitespace — fixed 2026-08-13: selection offsets shift by the count of stripped leading characters [src/scripts/vote-form.ts:98]
+- [x] [Review][Patch] `input-code.astro` hardcodes default id — fixed 2026-08-13: surface threads `demo-voter-code` for the embedded ballot and the enhancer binds via `input[name='voter_code']` scoped to its form [src/components/poll-voting-surface.astro:221]
+- [x] [Review][Patch] `DROP TRIGGER` in 0020 lacks `IF EXISTS` — fixed 2026-08-13; manifest regenerated, migrations guard green [db/migrations/0020_repair_voter_code_shape_guards.sql:4]
+- [x] [Review][Patch] Oversized `voter_code` echoed a synthetic sentinel as the voter's own input — fixed 2026-08-13: policy sees the real normalized input (64-char cap, classification-neutral) and an oversized value echoes as an empty field [src/lib/poll-delivery.ts:477]
+- [x] [Review][Patch] Record hygiene — fixed 2026-08-13: sprint-status timestamps reconciled, stale resolved findings checked off, story status transitioned via review workflow [_bmad-output/implementation-artifacts/sprint-status.yaml]
+- [x] [Review][Defer] CAPTCHA/rate-limit browser composition remains unexercised in the voter-code E2E spec — deferred: admission precedence (rate limit and CAPTCHA before code errors) is proven at unit/integration level; browser composition requires Turnstile test keys [tests/e2e/voter-code-voting.spec.mjs]
+
+Verification 2026-08-13: `pnpm exec tsc --noEmit` clean; `pnpm vitest run` 136 files / 1,829 tests passed; `pnpm test:e2e tests/e2e/voter-code-voting.spec.mjs` 3/3 passed; `pnpm migrations:guard` ok.
+- [x] [Review][Defer] 0019/0020 shape triggers are `BEFORE UPDATE OF code` only — a `poll_id` relocation is unguarded, but no application path updates `poll_id`; defense-in-depth only [db/migrations/0020_repair_voter_code_shape_guards.sql:19] — deferred, no reachable code path
+
+Dismissed (5): Meeting-revision trust-badge suppression (AC-4 sanctions unconditional suppression); `vote_id` UNIQUE / cross-poll trigger unclassified (cross-poll → generic safe failure is Task-3-permitted, one-per-vote guard unreachable from a valid batch, and `voter_code_poll_closed` is incidentally but correctly caught by the `/poll_closed/` matcher); `INVITE CODE REQUIRED` over pre-Toggle votes (AC-4 accepts earlier votes remaining valid); stale 0019 header comment (committed migration is immutable; 0020 documents the repair); optional `lookupVoterCode` port (already recorded as deferred in the 2026-08-12 review).

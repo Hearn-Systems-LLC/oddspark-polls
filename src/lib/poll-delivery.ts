@@ -411,6 +411,7 @@ export async function deliverPollVotingSurface(
   let meetingFieldErrors: Record<string, string> = {};
   let meetingRevisionRecognized = false;
   let voterCodeRaw = "";
+  let voterCodeForPolicy = "";
   let voterCodeFieldError = "";
   const deliveryPollId = poll.pollId;
   const deliveryPollType = poll.pollType;
@@ -471,13 +472,16 @@ export async function deliverPollVotingSurface(
         singletonText(formData, "display_name"),
         COMMENT_CAPS.displayName,
       );
-      // The retry value is canonical by design. Normalize before bounding so
-      // ordinary whitespace-padded codes remain usable instead of becoming a
-      // synthetic invalid sentinel.
-      voterCodeRaw = boundedInvalidEcho(
-        singletonText(formData, "voter_code").trim().toUpperCase(),
-        16,
-      );
+      // The retry value is canonical by design. Policy sees the real
+      // normalized input (capped well above the valid length, so the cap can
+      // never change classification); the echo never reflects an
+      // attacker-sized value or a synthetic sentinel as the voter's own
+      // typed input — an oversized code echoes as an empty field.
+      const normalizedVoterCode = singletonText(formData, "voter_code")
+        .trim()
+        .toUpperCase();
+      voterCodeForPolicy = normalizedVoterCode.slice(0, 64);
+      voterCodeRaw = normalizedVoterCode.length <= 34 ? normalizedVoterCode : "";
       const parsed = formSchema.safeParse({
         submissionId: text(formData.get("submission_id")),
         selectedOptionIds,
@@ -655,7 +659,7 @@ export async function deliverPollVotingSurface(
             browserToken: voterToken,
             ipDigest: ipClaimDigest,
             humanChallenge,
-            voterCode: voterCodeRaw,
+            voterCode: voterCodeForPolicy,
           };
           const voteInput: CastVoteInput =
             poll.pollType === "meeting"
@@ -760,10 +764,22 @@ export async function deliverPollVotingSurface(
               );
             }
             // After a Toggle race refresh, suppress echoed code if the
-            // authoritative snapshot is now off.
+            // authoritative snapshot is now off. A code-specific outcome must
+            // also downgrade: never demand a field the page renders no input
+            // for.
             if (!poll.voterCodesEnabled) {
               voterCodeRaw = "";
               voterCodeFieldError = "";
+              if (
+                result.error.code === "voter_code_missing" ||
+                result.error.code === "voter_code_invalid" ||
+                result.error.code === "voter_code_used"
+              ) {
+                outcome = outcomeFromVoteError({
+                  code: "vote_failed",
+                  message: VOTE_COPY.retry,
+                });
+              }
             }
           }
           if (outcome) {

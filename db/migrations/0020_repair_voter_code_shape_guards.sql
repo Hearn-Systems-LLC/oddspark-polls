@@ -1,8 +1,8 @@
 -- Repair Story 8.2's voter-code alphabet checks using SQLite GLOB syntax.
 -- Migration 0019 is immutable; replace only its two trigger definitions.
 
-DROP TRIGGER voter_code_shape_insert_guard;
-DROP TRIGGER voter_code_shape_update_guard;
+DROP TRIGGER IF EXISTS voter_code_shape_insert_guard;
+DROP TRIGGER IF EXISTS voter_code_shape_update_guard;
 
 CREATE TRIGGER voter_code_shape_insert_guard
 BEFORE INSERT ON voter_code

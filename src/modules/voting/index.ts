@@ -850,7 +850,7 @@ export async function castVote(
   // enables it. With Toggle off, a forged code value has no policy effect
   // and causes no lookup. The code is not part of the payload hash or
   // stored Vote row — it is an admission challenge like consumed Turnstile proof.
-  let voterCodeRedemption: VoterCodeRedemptionContribution | null = null;
+  let admittedVoterCodeId: VoterCodeId | null = null;
   if (poll.voterCodesEnabled) {
     const admissionOutcome = normalizeVoterCodeInput(input.voterCode);
     if (admissionOutcome.kind === "missing") {
@@ -884,15 +884,7 @@ export async function castVote(
         reasonCodes: { voterCode: admission.code },
       });
     }
-    // Build the redemption contribution now; it will be placed after
-    // Poll-Type facts and before Session/IP claims in the batch so a
-    // concurrent used-code collision has deterministic precedence.
-    voterCodeRedemption = {
-      kind: "voter_code_redemption",
-      codeId: admission.codeId,
-      voteId: "", // placeholder — filled after voteId generation
-      redeemedAtMs: 0, // placeholder — filled after nowMs
-    };
+    admittedVoterCodeId = admission.codeId;
   }
 
   let voteId: string;
@@ -943,10 +935,13 @@ export async function castVote(
   // Voter Code redemption: placed after Poll-Type/Comment facts and before
   // Session/IP claims so a concurrent used-code collision has deterministic
   // precedence inside the D1 batch.
-  if (voterCodeRedemption !== null) {
-    voterCodeRedemption.voteId = voteId;
-    voterCodeRedemption.redeemedAtMs = nowMs;
-    contributions.push(voterCodeRedemption as unknown as VotePersistenceContribution);
+  if (admittedVoterCodeId !== null) {
+    contributions.push({
+      kind: "voter_code_redemption",
+      codeId: admittedVoterCodeId,
+      voteId,
+      redeemedAtMs: nowMs,
+    });
   }
 
   // Stable claim order: Session first, IP second (dual-collision precedence).

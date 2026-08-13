@@ -218,7 +218,7 @@ const tallyOwnsBadge = readOnly || meetingRevisionRecognized;
       >
         <input type="hidden" name="submission_id" value={submissionId} />
         {poll.voterCodesEnabled && !meetingRevisionRecognized && !readOnly && (
-          <InputCode value={voterCodeRaw} error={voterCodeFieldError} />
+          <InputCode id={embedded ? "demo-voter-code" : "voter-code"} value={voterCodeRaw} error={voterCodeFieldError} />
         )}
         {multiSelect && (
           <p class="vote-bounds-hint" id="vote-bounds-hint" data-bounds-hint aria-live="polite">{boundsHint}</p>

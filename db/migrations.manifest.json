@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-12T15:37:55.255Z",
+  "generatedAt": "2026-08-13T20:43:48.653Z",
   "migrations": [
     {
       "file": "0001_baseline.sql",
@@ -80,7 +80,7 @@
     },
     {
       "file": "0020_repair_voter_code_shape_guards.sql",
-      "sha256": "faa4c3fc67adc6c21d99761a3812aaeefa65974fcc02742d9c1d3d0e071f2685"
+      "sha256": "1fa48f5e374cb9b8b31e97744d70beffd7def03fd2fae3a59e37ddc2e7d44cf7"
     }
   ]
 }

@@ -93,18 +93,23 @@ if (form) {
   const meetingDisplayNameInput = form.querySelector<HTMLInputElement>(
     "#meeting-display-name",
   );
-  const voterCodeInput = form.querySelector<HTMLInputElement>("#voter-code");
+  const voterCodeInput = form.querySelector<HTMLInputElement>(
+    "input[name='voter_code']",
+  );
   if (voterCodeInput) {
     voterCodeInput.addEventListener("input", () => {
       const start = voterCodeInput.selectionStart;
       const end = voterCodeInput.selectionEnd;
-      const trimmed = voterCodeInput.value.trim().toUpperCase();
-      if (trimmed !== voterCodeInput.value) {
+      const raw = voterCodeInput.value;
+      const trimmed = raw.trim().toUpperCase();
+      if (trimmed !== raw) {
+        // Shift the caret left by however many leading characters trim removed.
+        const leadingRemoved = raw.length - raw.replace(/^\s+/, "").length;
         voterCodeInput.value = trimmed;
         if (start !== null && end !== null) {
           voterCodeInput.setSelectionRange(
-            Math.min(start, trimmed.length),
-            Math.min(end, trimmed.length),
+            Math.min(Math.max(start - leadingRemoved, 0), trimmed.length),
+            Math.min(Math.max(end - leadingRemoved, 0), trimmed.length),
           );
         }
       }

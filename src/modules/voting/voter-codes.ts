@@ -42,7 +42,10 @@ export type VoterCodeAdmissionError =
   | { code: "voter_code_invalid"; message: string }
   | { code: "voter_code_used"; message: string };
 
-const VALID_CODE_REGEX = /^[2-9A-HJ-NP-Z]{8}$/;
+// Derived from the canonical constants so the alphabet lives in one place.
+const VALID_CODE_REGEX = new RegExp(
+  `^[${VOTER_CODE_ALPHABET}]{${VOTER_CODE_LENGTH}}$`,
+);
 
 export function normalizeVoterCodeInput(raw: string): VoterCodeAdmissionOutcome {
   const trimmed = raw.trim().toUpperCase();

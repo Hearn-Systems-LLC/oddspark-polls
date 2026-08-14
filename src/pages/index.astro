@@ -82,21 +82,6 @@ const title = unavailable
     ? `${state.outcome.titlePrefix} — ${state.poll.question}`
     : "Oddspark Polls — trustworthy casual polls";
 
-const websiteJsonLd = JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "WebSite",
-  name: "oddspark polls",
-  url: canonicalUrl,
-  description:
-    "Create, discover, and vote in trustworthy casual polls with transparent security and no subscription wall.",
-  image: new URL("/og-image.png", Astro.url.origin).href,
-  publisher: {
-    "@type": "Organization",
-    name: "Hearn Systems",
-    url: "https://hearn.systems",
-    logo: new URL("/favicon.svg", Astro.url.origin).href,
-  },
-});
 ---
 
 <BaseLayout
@@ -104,7 +89,23 @@ const websiteJsonLd = JSON.stringify({
   description="Create, discover, and vote in trustworthy casual polls with transparent security and no subscription wall."
   canonicalUrl={canonicalUrl}
 >
-  <script type="application/ld+json" is:inline set:html={websiteJsonLd} />
+  <!-- Static structured data; content is constant, so no set:html (no-raw-html contract). -->
+  <script type="application/ld+json" is:inline>
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "oddspark polls",
+      "url": "https://polls.oddspark.dev/",
+      "description": "Create, discover, and vote in trustworthy casual polls with transparent security and no subscription wall.",
+      "image": "https://polls.oddspark.dev/og-image.png",
+      "publisher": {
+        "@type": "Organization",
+        "name": "Hearn Systems",
+        "url": "https://hearn.systems",
+        "logo": "https://polls.oddspark.dev/favicon.svg"
+      }
+    }
+  </script>
   <div class="site-shell">
     <SiteHeader />
     <main

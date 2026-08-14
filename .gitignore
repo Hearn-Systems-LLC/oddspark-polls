@@ -57,3 +57,5 @@ playwright/.cache/
 .turnstile-widgets.local.json
 
 test-results/story-3-5-demo-poll-proof/fresh-1280-light.png
+# implementation artifacts live in central control; local symlink only
+_bmad-output/implementation-artifacts

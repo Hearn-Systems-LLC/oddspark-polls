@@ -89,7 +89,7 @@ const title = unavailable
   description="Create, discover, and vote in trustworthy casual polls with transparent security and no subscription wall."
   canonicalUrl={canonicalUrl}
 >
-  <!-- Static structured data; content is constant, so no set:html (no-raw-html contract). -->
+  <!-- Static structured data written as a literal script (no-raw-html contract). -->
   <script type="application/ld+json" is:inline>
     {
       "@context": "https://schema.org",
@@ -100,9 +100,10 @@ const title = unavailable
       "image": "https://polls.oddspark.dev/og-image.png",
       "publisher": {
         "@type": "Organization",
-        "name": "Hearn Systems",
+        "@id": "https://hearn.systems/#business",
+        "name": "Hearn Systems, LLC",
         "url": "https://hearn.systems",
-        "logo": "https://polls.oddspark.dev/favicon.svg"
+        "logo": "https://hearn.systems/images/hearn-systems-logo.png"
       }
     }
   </script>
